@@ -2,6 +2,7 @@ using Memori.Input;
 using UnityEngine;
 using Memori.Utilities;
 using Unity.Entities;
+using Memori.SaveData;
 
 namespace TJ
 {
@@ -27,6 +28,7 @@ namespace TJ
             InputHandler.Instance.OnSpeedDown += DecreaseSpeed;
             _reportABugScreen = FindFirstObjectByType<ReportABugScreen>();
             SettingsManager.Instance.OnSettingsPanelToggled += OnSettingsPanelToggled;
+            SaveDataHandler.PauseUsedThisBattle = false; // fresh per battle; consumed at battle end
         }
 
         private void OnSettingsPanelToggled(bool isOpen) => _isSettingsOpen = isOpen;
@@ -43,6 +45,7 @@ namespace TJ
             } else {
                 Debug.Log("Battle paused.");
                 SetTimeScale(pauseButton);
+                SaveDataHandler.PauseUsedThisBattle = true; // recorded into RunStats at battle end (battle scene has no CampaignSaveManager)
             }
         }
         public void IncreaseSpeed()

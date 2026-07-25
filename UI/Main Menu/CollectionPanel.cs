@@ -200,7 +200,7 @@ namespace TJ.MainMenu
 
             if (gearIdsAsInts.Count == allGear.Length)
             {
-                SteamStatic.UnlockAchievement(SteamData.ACHIEVEMENT_COLLECTION_GEAR);
+                SteamAchievements.Unlock(AchievementId.CollectionGear);
             }
         }
 
@@ -221,7 +221,7 @@ namespace TJ.MainMenu
 
             if (potionsIdsAsInts.Count == consumables.Length)
             {
-                SteamStatic.UnlockAchievement(SteamData.ACHIEVEMENT_COLLECTION_CONSUMABLES);
+                SteamAchievements.Unlock(AchievementId.CollectionConsumables);
             }
         }
 
@@ -242,7 +242,7 @@ namespace TJ.MainMenu
                     
                     if (ironLegionCollectedCount >= ironLegion.Length)
                     {
-                        SteamStatic.UnlockAchievement(SteamData.ACHIEVEMENT_IRON_LEGION_COLLECTION);
+                        SteamAchievements.Unlock(AchievementId.IronLegionCollection);
                     }
                 }
             }
@@ -311,9 +311,9 @@ namespace TJ.MainMenu
             }
 
             if (potionsIdsAsInts.Count == consumables.Length)
-                SteamStatic.UnlockAchievement(SteamData.ACHIEVEMENT_COLLECTION_CONSUMABLES);
+                SteamAchievements.Unlock(AchievementId.CollectionConsumables);
             if (gearIdsAsInts.Count == allGear.Length)
-                SteamStatic.UnlockAchievement(SteamData.ACHIEVEMENT_COLLECTION_GEAR);
+                SteamAchievements.Unlock(AchievementId.CollectionGear);
         }
 
         private void SetupRotationButtons()

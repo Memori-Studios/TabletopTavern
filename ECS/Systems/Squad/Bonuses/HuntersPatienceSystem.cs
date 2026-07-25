@@ -8,11 +8,6 @@ using Unity.Mathematics;
 [UpdateInGroup(typeof(SimulationSystemGroup))]
 partial struct HuntersPatienceSystem : ISystem
 {
-    private const int RANGED_BONUS_PER_TICK = 3;
-    private const int MELEE_BONUS_PER_TICK = 2;
-    private const int RANGED_BONUS_CAP = 20;
-    private const int MELEE_BONUS_CAP = 12;
-
     private float _updateTimer;
 
     public void OnCreate(ref SystemState state)
@@ -22,9 +17,11 @@ partial struct HuntersPatienceSystem : ISystem
 
     public void OnUpdate(ref SystemState state)
     {
+        var config = RaceBonusRuleData.HuntersPatience;
+
         _updateTimer += SystemAPI.Time.DeltaTime;
-        if (_updateTimer < 1f) return;
-        _updateTimer -= 1f;
+        if (_updateTimer < config.UpdateInterval) return;
+        _updateTimer -= config.UpdateInterval;
 
         var entityManager = state.EntityManager;
 
@@ -41,11 +38,11 @@ partial struct HuntersPatienceSystem : ISystem
             bool isCharging = entityManager.HasComponent<ChargeSquad>(entity);
             bool isStationary = !isMoving && !isCharging;
 
-            int cap = patience.ValueRO.IsRanged ? RANGED_BONUS_CAP : MELEE_BONUS_CAP;
+            int cap = patience.ValueRO.IsRanged ? config.RangedBonusCap : config.MeleeBonusCap;
 
             if (isStationary && patience.ValueRO.CurrentBonus < cap)
             {
-                int bonusAmount = patience.ValueRO.IsRanged ? RANGED_BONUS_PER_TICK : MELEE_BONUS_PER_TICK;
+                int bonusAmount = patience.ValueRO.IsRanged ? config.RangedBonusPerTick : config.MeleeBonusPerTick;
                 int newBonus = math.min(patience.ValueRO.CurrentBonus + bonusAmount, cap);
                 int toApply = newBonus - patience.ValueRO.CurrentBonus;
 

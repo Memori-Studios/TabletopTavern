@@ -50,7 +50,7 @@ public class Sheep : MonoBehaviour
     private void React()
     {
         explosion.SetActive(true);
-        SteamStatic.UnlockAchievement(SteamData.ACHIEVEMENT_SHEEP_SLAYER);
+        SteamAchievements.Unlock(AchievementId.SheepSlayer);
         IAudioRequester.Instance.PlaySFX("explosion");
         Destroy(gameObject);
     }

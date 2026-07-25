@@ -14,6 +14,7 @@ using Memori.Steamworks;
 using Memori.Audio;
 using UnityEngine.AddressableAssets;
 using Memori.Notifications;
+using TabletopTavern.Analytics;
 
 namespace TJ.MainMenu
 {
@@ -335,6 +336,11 @@ namespace TJ.MainMenu
         }
         public void AbandonRun()
         {
+            if (SaveDataHandler.CampaignSaveExists())
+            {
+                var abandonedSave = SaveDataHandler.Load();
+                GameEventTracker.RunEnded(abandonedSave.heroID, (int)abandonedSave.difficultyLevel, RunResult.Abandon, abandonedSave.RunStats.chaptersCompleted);
+            }
             SaveDataHandler.DeleteCampaignSave();
             CheckForCampaignSaveData();
             abandonRunConfirmationCanvasGroup.CGDisable();

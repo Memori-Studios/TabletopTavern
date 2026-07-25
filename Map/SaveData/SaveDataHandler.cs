@@ -113,6 +113,14 @@ namespace Memori.SaveData
         public int unitsRecruited;
         public int gearAquired;
         public int enemiesSlain;
+        public int shopPurchases;
+        public int goldWagered;       // total gold bet at games this run (Gamba)
+        public int maxArmyModels;     // peak total models across the army this run (QualityOverQuantity)
+        public int ransomsOffered;    // battles this run that offered the ransom-captives reward (Merciful)
+        public int ransomsChosen;     // battles this run where ransom captives was actually claimed (Merciful)
+        public bool heldDuplicateUnit;// true once the army ever held two units of the same name (OneOfAKind)
+        public bool consumableUsed;   // true once a consumable was used this run (BareEssentials)
+        public bool pauseUsed;        // true once the pause button was used this run (UhPause)
     }
     public struct RenownAward
     {
@@ -204,6 +212,11 @@ namespace Memori.SaveData
     public static class SaveDataHandler
     {
         static readonly bool useLocal = false;
+
+        // Set from the battle scene (GameSpeedManager) when the player pauses; consumed at battle end
+        // in SaveSquadsPostBattle so it rides the same file-based bridge as archerUsedInBattle into
+        // RunStats. The in-memory CampaignSaveManager is not available in the battle scene. ("Uh, pause...")
+        public static bool PauseUsedThisBattle;
 
         // In-memory authoritative copy of playerSaveData.json. SaveDataHandler is the sole gateway
         // to that file, so every read returns this cached instance and every write refreshes it.
@@ -475,7 +488,18 @@ namespace Memori.SaveData
 
             if (cavOnly && _playerWon)
             {
-                SteamStatic.UnlockAchievement(SteamData.ACHIEVEMENT_ONLY_CAV_BATTLE);
+                SteamAchievements.Unlock(AchievementId.OnlyCavBattle);
+            }
+
+            //achievement check - flawless victory (won losing zero units)
+            if (_playerWon)
+            {
+                int totalUnitsLost = 0;
+                if (_squadIdLossCounter != null)
+                {
+                    foreach (SquadLossesStored loss in _squadIdLossCounter) totalUnitsLost += loss.Losses;
+                }
+                if (totalUnitsLost == 0) SteamAchievements.Unlock(AchievementId.FlawlessVictory);
             }
 
             //achievement tracking - archer used in battle
@@ -488,6 +512,13 @@ namespace Memori.SaveData
                     saveData.archerUsedInBattle = true;
                     break;
                 }
+            }
+
+            // "Uh, pause..." - carry the battle-scene pause flag into the run save, then clear it.
+            if (PauseUsedThisBattle)
+            {
+                saveData.RunStats.pauseUsed = true;
+                PauseUsedThisBattle = false;
             }
 
             SaveCampaign(saveData);
@@ -924,7 +955,7 @@ namespace Memori.SaveData
             saveData.renown += renownAward.total;
 
             if (saveData.renown >= 100)
-                SteamStatic.UnlockAchievement(SteamData.ACHIEVEMENT_A_SNACK_FOR_LATER);
+                SteamAchievements.Unlock(AchievementId.ASnackForLater);
 
             if (_playerWon)
             {
@@ -976,6 +1007,20 @@ namespace Memori.SaveData
                 }
                 if (!heroLastDiffFound)
                     saveData.HeroLastDifficulties.Add(new HeroLastDifficulty { HeroID = currentHeroID, LastDifficulty = (TT_Difficulty)newDifficulty });
+
+                //achievement check - roster complete (beat the game with every hero, any difficulty).
+                //Hero counts mirror the hardcoded totals used by the max-difficulty-all-heroes check; bump if the roster grows.
+#if DEMO
+                int totalHeroes = 4;
+#else
+                int totalHeroes = 16;
+#endif
+                int heroesBeaten = 0;
+                for (int i = 0; i < saveData.HeroDifficultiesCompleted.Count; i++)
+                {
+                    if (saveData.HeroDifficultiesCompleted[i].DifficultiesCompleted.Count > 0) heroesBeaten++;
+                }
+                if (heroesBeaten >= totalHeroes) SteamAchievements.Unlock(AchievementId.RosterComplete);
             }
 
             // --- Legacy deposited-gold sweep, disabled - kept in case this system is restored ---

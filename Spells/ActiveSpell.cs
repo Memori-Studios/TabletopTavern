@@ -127,29 +127,105 @@ public class ActiveSpell : MonoBehaviour
             // runs below, but that only governs this GameObject's visuals, not the squad's lifetime.
             BattleManager.Instance.ArmySpawnManager.SummonSquad(spellData.SummonedUnitName, transform.position);
         }
+        else if (spellData.MarksTarget)
+        {
+            // Hunter's Mark - no SpellEntity and no damage of its own; just tag the targeted enemy
+            // squad so HuntersMarkSystem amplifies all hostile damage to it for SpellDuration seconds.
+            // SpellModifierValue is the percent bonus (50 -> x1.5), matching the tooltip's {1} slot.
+            if (targetSquadEntity != Entity.Null && entityManager.Exists(targetSquadEntity))
+            {
+                ecb.AddComponent(targetSquadEntity, new HuntersMarkTag
+                {
+                    RemainingDuration = spellData.SpellDuration,
+                    DamageMultiplier = 1f + spellData.SpellModifierValue / 100f
+                });
+            }
+        }
+        else if (spellData.BracesTarget)
+        {
+            // Shieldwall - brace the targeted friendly squad; ShieldwallSystem applies the knockback
+            // immunity + speed penalty and reverses them after SpellDuration. Guard against re-bracing an
+            // already-braced squad so the one-time speed halving can't stack.
+            if (targetSquadEntity != Entity.Null && entityManager.Exists(targetSquadEntity)
+                && !entityManager.HasComponent<ShieldwallTag>(targetSquadEntity))
+            {
+                ecb.AddComponent(targetSquadEntity, new ShieldwallTag
+                {
+                    RemainingDuration = spellData.SpellDuration,
+                    Applied = false
+                });
+            }
+        }
+        else if (spellData.PlacesTrap)
+        {
+            // Snare Trap - drop a hidden armed trap at the cast point; SnareTrapSystem springs it into a
+            // burst + knockback when an enemy wanders into range, or lets it expire after SpellDuration.
+            Entity trapEntity = entityManager.CreateEntity();
+            ecb.AddComponent(trapEntity, new SnareTrapEntity
+            {
+                Position = transform.position,
+                TriggerRadius = spellData.SpellRadius * 0.4f,
+                BlastRadius = spellData.SpellRadius,
+                Damage = spellData.SpellModifierValue,
+                SpellForce = spellData.SpellForce,
+                OwnerTeam = Team.Player,
+                RemainingArmedTime = spellData.SpellDuration
+            });
+        }
+        else if (spellData.TeleportsSquad)
+        {
+            // Starstep - blink the player's selected squad to the cast point (only the first selected
+            // player squad). No squad selected means nothing happens.
+            UnitSelectionManager selection = BattleManager.Instance.UnitSelectionManager;
+            foreach (int squadId in selection.SelectedSquadIds)
+            {
+                if (squadId <= 0) continue; // player squads have positive ids
+                BattleManager.Instance.ArmySpawnManager.TeleportSquadToPoint(squadId, transform.position);
+                break;
+            }
+        }
         else if (spellData.GrantsBattlefieldBonus)
         {
             // Pure buff spell - no damage pipeline at all, just a battlefield-bonus aura
             // functioning exactly like the world's static bonus prefabs (Shrine/Statue/etc.),
             // except it self-expires after SpellDuration instead of lasting forever.
-            Entity bonusApplicatorEntity = entityManager.CreateEntity();
-            ecb.AddComponent(bonusApplicatorEntity, new BattlefieldBonusApplicator
+            void CreateBonusApplicator(UnitStat stat, BattlefieldBonusEnum type, float value)
             {
-                BattlefieldBonus = new BattlefieldBonus
+                Entity bonusApplicatorEntity = entityManager.CreateEntity();
+                ecb.AddComponent(bonusApplicatorEntity, new BattlefieldBonusApplicator
                 {
-                    UnitStat = spellData.BonusUnitStat,
-                    BattlefieldBonusEnum = spellData.BonusType,
-                    Team = spellData.TargetTeam,
-                    Value = spellData.SpellModifierValue,
-                    Guid = Guid.NewGuid(),
-                    OriginationPoint = transform.position,
-                    Range = spellData.SpellRadius,
-                    Applied = false,
-                    TargetedUnit = 0
-                },
-                TimerMax = 0.5f,
-                Lifetime = spellData.SpellDuration
-            });
+                    BattlefieldBonus = new BattlefieldBonus
+                    {
+                        UnitStat = stat,
+                        BattlefieldBonusEnum = type,
+                        Team = spellData.TargetTeam,
+                        Value = value,
+                        Guid = Guid.NewGuid(),
+                        OriginationPoint = transform.position,
+                        Range = spellData.SpellRadius,
+                        Applied = false,
+                        TargetedUnit = 0
+                    },
+                    TimerMax = 0.5f,
+                    Lifetime = spellData.SpellDuration
+                });
+            }
+
+            if (spellData.BonusStats != null && spellData.BonusStats.Count > 0)
+            {
+                // Multi-stat spell: one independent applicator per (stat, value) pair. Each gets a fresh
+                // Guid, so BattlefieldBonusApplicationSystem's Guid dedupe lets them coexist on the same
+                // squad, and each routes through the generic per-unit stat switch in BattlefieldBonusSystem
+                // via the SpellStatBonus enum. Removal is per-stat, so they clear independently too.
+                foreach (SpellBonusStat bonusStat in spellData.BonusStats)
+                    CreateBonusApplicator(bonusStat.UnitStat, BattlefieldBonusEnum.SpellStatBonus, bonusStat.Value);
+            }
+            else
+            {
+                // Single-bonus spell (morale rate, wind, weapon strength, etc.) - the original path,
+                // where BonusType selects the apply branch and SpellModifierValue is the magnitude.
+                CreateBonusApplicator(spellData.BonusUnitStat, spellData.BonusType, spellData.SpellModifierValue);
+            }
         }
         else
         {
@@ -161,7 +237,7 @@ public class ActiveSpell : MonoBehaviour
             // team-alignment checks don't exempt either side (see ApplyDamageSystem.cs).
             DamageBufferElement damageBufferElement = new ()
             {
-                DamageType = DamageType.Magical,
+                DamageType = spellData.HealsInsteadOfDamage ? DamageType.Healing : DamageType.Magical,
                 AttackStrength = spellData.SpellModifierValue,
                 TeamOfSource = spellData.TargetTeam == Team.Neutral ? Team.Neutral : Team.Player,
                 DamageSourceSquadId = 0
@@ -175,7 +251,9 @@ public class ActiveSpell : MonoBehaviour
                 IsOneOff = spellData.IsOneOff,
                 SpellForce = spellData.SpellForce,
                 RemainingDuration = spellData.SpellDuration,
-                TargetSquadEntity = targetSquadEntity // Entity.Null unless this is a Squad-targeted cast
+                TargetSquadEntity = targetSquadEntity, // Entity.Null unless this is a Squad-targeted cast
+                TickInterval = spellData.TickInterval,
+                TickTimer = 0f // first tick fires immediately, then every TickInterval seconds
             });
         }
 

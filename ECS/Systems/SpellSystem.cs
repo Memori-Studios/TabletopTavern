@@ -47,6 +47,21 @@ partial struct SpellSystem : ISystem
                 spellPosition = SystemAPI.GetComponent<SquadMovementComponent>(targetSquadEntity).SquadCenter;
             }
 
+            // Persistent spells (HoT/DoT) apply once per TickInterval instead of every frame. One-off
+            // spells and TickInterval == 0 keep applying immediately/every frame (backward compatible).
+            bool doApply = spellEntity.ValueRO.IsOneOff;
+            if (!spellEntity.ValueRO.IsOneOff)
+            {
+                spellEntity.ValueRW.TickTimer -= deltaTime;
+                if (spellEntity.ValueRO.TickTimer <= 0f)
+                {
+                    doApply = true;
+                    spellEntity.ValueRW.TickTimer = spellEntity.ValueRO.TickInterval;
+                }
+            }
+
+            if (doApply)
+            {
             distanceHitList.Clear();
             if (collisionWorld.OverlapSphere(spellPosition, spellRadius, ref distanceHitList, collisionFilter))
             {
@@ -97,6 +112,7 @@ partial struct SpellSystem : ISystem
                     agentBody.ValueRW.SetDestination(SystemAPI.GetComponent<LocalTransform>(hitEntity).Position);
                 }
             }
+            } // end if (doApply)
 
             if (spellEntity.ValueRO.IsOneOff)
             {

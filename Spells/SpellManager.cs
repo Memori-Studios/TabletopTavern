@@ -1,3 +1,4 @@
+using System;
 using System.Collections;
 using System.Collections.Generic;
 using System.Threading.Tasks;
@@ -17,6 +18,14 @@ public class SpellManager : MonoBehaviour
     [SerializeField] private SpellCastButton[] spellCastButtons;
     [SerializeField] private SpellQuickCastMenu spellQuickCastMenu;
 
+    [Header("Pre-Battle Browsing (custom battle only)")]
+    // Pool the player can swap from before the battle starts. Curated in the inspector.
+    [SerializeField] private SpellData[] availableSpells;
+    [SerializeField] private SpellBrowseMenu spellBrowseMenu;
+    // Seconds the browse menu lingers after the pointer leaves both the spell buttons and the menu,
+    // so crossing the gap between them does not flicker it closed.
+    [SerializeField] private float browseCloseDelay = 0.12f;
+
     private class SpellSlotState
     {
         public SpellData SpellData;
@@ -27,6 +36,12 @@ public class SpellManager : MonoBehaviour
     private SpellSlotState[] slotStates;
     private int selectedSpellIndex = -1;
     private Entity targetedSquadSelfEntity = Entity.Null;
+
+    // Pre-battle browse state.
+    private bool browsingEnabled;
+    private int hoveredButtonSlot = -1;
+    private bool pointerOverBrowseMenu;
+    private Coroutine browseCloseRoutine;
 
     private bool validSpellCastPoint;
     private Vector3 spellCursorOrigin;
@@ -41,6 +56,7 @@ public class SpellManager : MonoBehaviour
     {
 #if UNITY_EDITOR || SPELLS
         BattleManager.Instance.OnCursorModeChanged += CursorModeChanged;
+        BattleManager.Instance.OnGamePhaseChanged += GamePhaseChanged;
         InputHandler.Instance.OnSelectSpell1 += SelectSpellHotkey1;
         InputHandler.Instance.OnSelectSpell2 += SelectSpellHotkey2;
         InputHandler.Instance.OnSelectSpell3 += SelectSpellHotkey3;
@@ -69,15 +85,27 @@ public class SpellManager : MonoBehaviour
             defaultSpells = _spells;
         }
 
+        // Swapping is a pre-battle, custom-battle convenience only. It stays off for campaign battles.
+        browsingEnabled = BattleManager.Instance.BattleSaveManager.IsCustomBattle;
+
         slotStates = new SpellSlotState[spellCastButtons.Length];
         for (int i = 0; i < spellCastButtons.Length; i++) {
             slotStates[i] = new SpellSlotState { SpellData = defaultSpells[i] };
             int slotIndex = i;
-            spellCastButtons[i].LoadSpellUI(defaultSpells[i], () => SelectSpell(slotIndex), slotIndex + 1);
+            WireSlotButton(slotIndex, defaultSpells[i]);
         }
         selectedSpellIndex = -1;
 
         spellQuickCastMenu.Load(defaultSpells);
+
+        if(browsingEnabled && spellBrowseMenu != null)
+            spellBrowseMenu.Initialize(availableSpells, SwapSpell, OnBrowseMenuHoverEnter, OnBrowseMenuHoverExit);
+    }
+    private void WireSlotButton(int slotIndex, SpellData spellData)
+    {
+        Action browseEnter = browsingEnabled ? () => OnButtonBrowseHoverEnter(slotIndex) : null;
+        Action browseExit = browsingEnabled ? () => OnButtonBrowseHoverExit(slotIndex) : null;
+        spellCastButtons[slotIndex].LoadSpellUI(spellData, () => SelectSpell(slotIndex), slotIndex + 1, browseEnter, browseExit);
     }
     /// <summary>
     /// Unit names any equipped spell can summon, so their GPU anim prefabs can be preloaded with the
@@ -96,6 +124,117 @@ public class SpellManager : MonoBehaviour
         }
         return summonUnitNames;
     }
+    #region Pre-Battle Browsing
+    private SpellData[] GetEquippedSpells()
+    {
+        SpellData[] equipped = new SpellData[slotStates.Length];
+        for (int i = 0; i < slotStates.Length; i++)
+            equipped[i] = slotStates[i].SpellData;
+        return equipped;
+    }
+
+    // Hover routing. Both the spell buttons and the browse menu report enter/exit here; the menu stays
+    // open while either is hovered and closes shortly after both are left (browseCloseDelay).
+    private void OnButtonBrowseHoverEnter(int slotIndex)
+    {
+        if(!browsingEnabled) return;
+        hoveredButtonSlot = slotIndex;
+        CancelPendingClose();
+        OpenBrowse(slotIndex);
+    }
+    private void OnButtonBrowseHoverExit(int slotIndex)
+    {
+        if(hoveredButtonSlot == slotIndex) hoveredButtonSlot = -1;
+        ScheduleBrowseClose();
+    }
+    private void OnBrowseMenuHoverEnter()
+    {
+        pointerOverBrowseMenu = true;
+        CancelPendingClose();
+    }
+    private void OnBrowseMenuHoverExit()
+    {
+        pointerOverBrowseMenu = false;
+        ScheduleBrowseClose();
+    }
+
+    private void OpenBrowse(int slotIndex)
+    {
+        if(!browsingEnabled || spellBrowseMenu == null) return;
+        spellBrowseMenu.Open(slotIndex, GetEquippedSpells());
+    }
+
+    private void ScheduleBrowseClose()
+    {
+        CancelPendingClose();
+        if(!isActiveAndEnabled) return;
+        browseCloseRoutine = StartCoroutine(BrowseCloseAfterDelay());
+    }
+    private void CancelPendingClose()
+    {
+        if(browseCloseRoutine != null)
+        {
+            StopCoroutine(browseCloseRoutine);
+            browseCloseRoutine = null;
+        }
+    }
+    private IEnumerator BrowseCloseAfterDelay()
+    {
+        yield return new WaitForSecondsRealtime(browseCloseDelay);
+        browseCloseRoutine = null;
+        if(hoveredButtonSlot < 0 && !pointerOverBrowseMenu && spellBrowseMenu != null)
+            spellBrowseMenu.Close();
+    }
+
+    /// <summary>
+    /// Replaces the spell in <paramref name="slotIndex"/> with <paramref name="newSpell"/>. Pre-battle
+    /// only. Clears any selection/cooldown on that slot, refreshes the button + quick-cast menu, and
+    /// keeps defaultSpells in sync so summon preloading and a re-open of the browse list stay correct.
+    /// </summary>
+    public void SwapSpell(int slotIndex, SpellData newSpell)
+    {
+        if(!browsingEnabled) return;
+        if(slotStates == null || slotIndex < 0 || slotIndex >= slotStates.Length) return;
+        if(newSpell == null) return;
+
+        if(selectedSpellIndex == slotIndex)
+        {
+            spellCastButtons[slotIndex].SetSelected(false);
+            selectedSpellIndex = -1;
+            if(BattleManager.Instance.CursorMode == CursorMode.CastSpell)
+                BattleManager.Instance.SetCursorMode(CursorMode.Free);
+        }
+
+        slotStates[slotIndex].SpellData = newSpell;
+        slotStates[slotIndex].CooldownRemaining = 0f;
+        slotStates[slotIndex].CooldownDuration = 0f;
+        defaultSpells[slotIndex] = newSpell;
+
+        // The bulk army preload has already run by deployment, so a summon spell swapped in now would
+        // otherwise stall on an async load when first cast. Preload its unit here (idempotent).
+        if(newSpell.SummonsSquad)
+            BattleManager.Instance.UnitGPUAnimLoader.PreloadAdditionalUnit(newSpell.SummonedUnitName);
+
+        WireSlotButton(slotIndex, newSpell);
+        spellQuickCastMenu.Load(GetEquippedSpells());
+
+        // Rebuild the list so the swapped-out spell reappears and the swapped-in one drops off.
+        OpenBrowse(slotIndex);
+    }
+
+    private void GamePhaseChanged(GamePhase gamePhase)
+    {
+        if(gamePhase != GamePhase.Battle) return;
+
+        // Battle has begun - lock the loadout and close the picker.
+        browsingEnabled = false;
+        hoveredButtonSlot = -1;
+        pointerOverBrowseMenu = false;
+        CancelPendingClose();
+        if(spellBrowseMenu != null) spellBrowseMenu.Close();
+    }
+    #endregion
+
     private void SelectSpellHotkey1() => SelectSpellByHotkeyIndex(1);
     private void SelectSpellHotkey2() => SelectSpellByHotkeyIndex(2);
     private void SelectSpellHotkey3() => SelectSpellByHotkeyIndex(3);
@@ -257,6 +396,7 @@ public class SpellManager : MonoBehaviour
         if(BattleManager.HasInstance)
         {
             BattleManager.Instance.OnCursorModeChanged -= CursorModeChanged;
+            BattleManager.Instance.OnGamePhaseChanged -= GamePhaseChanged;
         }
         if(InputHandler.HasInstance)
         {

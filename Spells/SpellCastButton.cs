@@ -30,13 +30,21 @@ public class SpellCastButton : MonoBehaviour, IPointerEnterHandler, IPointerExit
     private bool cachedSelected;
     private bool cachedOnCooldown;
 
+    // Pre-battle spell browsing (custom battle only). Null when browsing is disabled, in which case
+    // hovering this button never opens the browse menu.
+    private Action onBrowseHoverEnter, onBrowseHoverExit;
+
     private void Awake()
     {
         cachedCooldownColor = cooldownImage.color;
     }
 
-    public void LoadSpellUI(SpellData spellData, Action onSelectRequested, int hotkeyNumber)
+    public void LoadSpellUI(SpellData spellData, Action onSelectRequested, int hotkeyNumber,
+        Action _onBrowseHoverEnter = null, Action _onBrowseHoverExit = null)
     {
+        onBrowseHoverEnter = _onBrowseHoverEnter;
+        onBrowseHoverExit = _onBrowseHoverExit;
+
         spellIcon.sprite = spellData.SpellSprite;
 
         selectSpellButton.onClick.RemoveAllListeners();
@@ -102,11 +110,15 @@ public class SpellCastButton : MonoBehaviour, IPointerEnterHandler, IPointerExit
     {
         if(!cachedOnCooldown && !cachedSelected)
             outlineImage.color = mouseOverOutlineColor;
+
+        onBrowseHoverEnter?.Invoke();
     }
     public void OnPointerExit(PointerEventData eventData)
     {
         if(!cachedOnCooldown && !cachedSelected)
             outlineImage.color = outlineDefaultColor;
+
+        onBrowseHoverExit?.Invoke();
     }
 }
 }

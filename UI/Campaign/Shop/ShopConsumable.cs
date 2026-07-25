@@ -113,7 +113,8 @@ public class ShopConsumable : MonoBehaviour
             shopPanel.RenableShopPanel();
             return;
         }
-        SteamStatic.AddStat(SteamData.SHOP_PURCHASES_STAT, 1);
+        SteamAchievements.AddStat(SteamStatId.ShopPurchases, 1);
+        CampaignManager.Instance.CampaignSaveManager.RegisterShopPurchase();
         string localizedString = LocalizationManager.Instance.GetText($"{consumableType}Name");
         CampaignManager.Instance.GoldManager.ModifyGold(-consumablePrice, localizedString);
         shopPanel.ConsumablePurchased();

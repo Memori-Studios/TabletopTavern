@@ -466,7 +466,7 @@ namespace Memori.SaveData
                         squadIdKillCounter[squadId] = 0;
                     }
                     squadGUIDKillCounter.Add(new SquadKillsStored { SquadGUID = playerArmyLoaded[i].UniqueID, Kills = killCount });
-                    SteamStatic.AddStat(SteamData.UNIT_KILLS_STAT, killCount);
+                    SteamAchievements.AddStat(SteamStatId.UnitKills, killCount);
 
                     if(withdrawnSquads.Any(s => s.UniqueID == playerArmyLoaded[i].UniqueID)) {
                         // Debug.Log($"Skipping withdrawn squad {playerArmyLoaded[i].UniqueID} from save");
@@ -689,6 +689,71 @@ namespace Memori.SaveData
             using NativeArray<Entity>       entities      = query.ToEntityArray(Allocator.Temp);
             using NativeArray<Unit>         units         = query.ToComponentDataArray<Unit>(Allocator.Temp);
             using NativeArray<UnitPosition> unitPositions = query.ToComponentDataArray<UnitPosition>(Allocator.Temp);
+
+            for (int i = 0; i < entities.Length; i++)
+            {
+                if (units[i].squadId != squadId) continue;
+                int idx = unitPositions[i].unitIndex;
+                if (idx >= positions.Count) continue;
+
+                float3 newPos = GetPointOnTerrain(positions[idx]);
+
+                LocalTransform lt = em.GetComponentData<LocalTransform>(entities[i]);
+                lt.Position = newPos;
+                lt.Rotation = rotation;
+                em.SetComponentData(entities[i], lt);
+
+                SetDestination sd = em.GetComponentData<SetDestination>(entities[i]);
+                sd.destinationPosition = newPos;
+                sd.squadPosition       = newPos;
+                em.SetComponentData(entities[i], sd);
+
+                em.SetComponentData(entities[i], new RotateUnit { targetRotation = rotation });
+                em.SetComponentEnabled<RotateUnit>(entities[i], true);
+            }
+
+            query.Dispose();
+        }
+
+        // Iltharion's Starstep: blink a live squad to an arbitrary point mid-battle. Reuses the exact
+        // battle-spawn teleport recipe (regenerate the formation at the destination, then set each unit's
+        // LocalTransform + SetDestination + RotateUnit) so nav agents resettle the same way they do at
+        // spawn. Facing is preserved from the squad's current orientation.
+        public void TeleportSquadToPoint(int squadId, Vector3 center)
+        {
+            if (!squadIdToUnitCount.TryGetValue(squadId, out int unitCount)) return;
+
+            SquadEntity squadEntity = BattleManager.Instance.SquadManager.GetSquad(squadId);
+            if (squadEntity.SelfEntity == Entity.Null) return;
+            UnitName unitName = squadEntity.UnitName;
+
+            int2 widthAndDepth = CalculateWidthAndDepth(unitCount, unitName);
+            float spread = TabletopTavernData.Instance.GetUnitSpreadFromUnitName(unitName);
+            List<float3> positions = BattleManager.Instance.PositionDrawer.Formation
+                .GeneratePositionsForSquad(widthAndDepth, unitCount, spread);
+
+            EntityManager em = World.DefaultGameObjectInjectionWorld.EntityManager;
+            EntityQuery query = em.CreateEntityQuery(
+                ComponentType.ReadWrite<LocalTransform>(),
+                ComponentType.ReadWrite<SetDestination>(),
+                ComponentType.ReadOnly<Unit>(),
+                ComponentType.ReadOnly<UnitPosition>());
+
+            using NativeArray<Entity>       entities      = query.ToEntityArray(Allocator.Temp);
+            using NativeArray<Unit>         units         = query.ToComponentDataArray<Unit>(Allocator.Temp);
+            using NativeArray<UnitPosition> unitPositions = query.ToComponentDataArray<UnitPosition>(Allocator.Temp);
+
+            // Preserve the squad's current facing (read from any one of its units).
+            Quaternion rotation = Quaternion.identity;
+            for (int i = 0; i < entities.Length; i++)
+                if (units[i].squadId == squadId) { rotation = em.GetComponentData<LocalTransform>(entities[i]).Rotation; break; }
+
+            for (int i = 0; i < positions.Count; i++)
+            {
+                positions[i] = math.mul(rotation, positions[i]);
+                positions[i] = TabletopTavernData.Instance.GetNoiseFromUnitName(unitName, positions[i]);
+                positions[i] += (float3)center;
+            }
 
             for (int i = 0; i < entities.Length; i++)
             {

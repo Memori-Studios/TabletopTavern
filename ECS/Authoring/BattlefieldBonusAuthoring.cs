@@ -28,7 +28,10 @@ Slayer,
 LesserWindSpell,
 // Append only - these ordinals are serialized by BattlefieldBonusAuthoring and packed into a ulong
 // bitmask by BattlefieldBonusAppliedDetectionSystem (1ul << (int)bonusEnum, so a 64 value ceiling).
-LesserMoraleSpell
+LesserMoraleSpell,
+// Generic per-stat spell bonus. Routes to the default per-unit UnitStat switch in
+// BattlefieldBonusSystem; a multi-stat SpellData emits one applicator with this enum per stat pair.
+SpellStatBonus
 }
 public struct BattlefieldBonusApplicator : IComponentData
 {

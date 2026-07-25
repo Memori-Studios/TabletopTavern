@@ -246,7 +246,7 @@ namespace TJ.Map
 
             if (consumable.ConsumableEnum == ConsumableEnum.Alchemist)
             {
-                SteamStatic.UnlockAchievement(SteamData.ACHIEVEMENT_SELL_ALCHEMY);
+                SteamAchievements.Unlock(AchievementId.SellAlchemy);
             }
 
             CampaignManager.Instance.CampaignSaveManager.SellConsumable(consumable, sellValue);

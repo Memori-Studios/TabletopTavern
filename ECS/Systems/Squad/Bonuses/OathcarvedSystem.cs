@@ -18,6 +18,7 @@ partial struct OathcarvedSystem : ISystem
     public void OnUpdate(ref SystemState state)
     {
         var entityManager = state.EntityManager;
+        int weaponStrengthPerDeath = RaceBonusRuleData.Oathcarved.WeaponStrengthPerDeath;
 
         // Build SquadId → Entity lookup for DeepstoneHold squads
         var dwarfSquads = new NativeHashMap<int, Entity>(16, Allocator.Temp);
@@ -52,7 +53,7 @@ partial struct OathcarvedSystem : ISystem
                 if (entityManager.HasComponent<MeleeAttack>(unitEntity))
                 {
                     MeleeAttack attack = entityManager.GetComponentData<MeleeAttack>(unitEntity);
-                    attack.WeaponStrength += 2;
+                    attack.WeaponStrength += weaponStrengthPerDeath;
                     entityManager.SetComponentData(unitEntity, attack);
                 }
             }
@@ -63,7 +64,7 @@ partial struct OathcarvedSystem : ISystem
             entityManager.SetComponentData(squadEntity, oathcarved);
 
             var bonusBuffer = entityManager.GetBuffer<BattlefieldBonusBufferElement>(squadEntity);
-            SyncBonusBuffer(bonusBuffer, oathcarved.DeathCount * 2);
+            SyncBonusBuffer(bonusBuffer, oathcarved.DeathCount * weaponStrengthPerDeath);
         }
 
         dwarfSquads.Dispose();

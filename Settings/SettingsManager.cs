@@ -13,6 +13,7 @@ using Memori.Localization;
 using System;
 using Memori.Core;
 using Memori.UI;
+using TabletopTavern.Analytics;
 
 namespace TJ
 {
@@ -184,6 +185,15 @@ namespace TJ
         public void QuickRestart()
         {
             CampaignSaveManager campaignSaveManager = FindFirstObjectByType<CampaignSaveManager>();
+
+            // Quick-restart throws away the current run, so log it as an abandon before the
+            // restart deletes the save (QuickRestartCampaign deletes it first thing).
+            if (SaveDataHandler.CampaignSaveExists())
+            {
+                var restartedRun = SaveDataHandler.Load();
+                GameEventTracker.RunEnded(restartedRun.heroID, (int)restartedRun.difficultyLevel, RunResult.Abandon, restartedRun.RunStats.chaptersCompleted);
+            }
+
             campaignSaveManager.QuickRestartCampaign();
             quickRestartConfirmationCanvasGroup.CGDisable();
             CloseSettingsPanel();

@@ -250,6 +250,11 @@ public struct SpellEntity : IComponentData {
     public float SpellForce;
     public float RemainingDuration;
     public Entity TargetSquadEntity; // Entity.Null unless lock-on, in which case SpellSystem re-resolves live position each tick
+    // Persistent-spell throttle (Healing Grove HoT, Venomous Bite DoT). TickInterval == 0 keeps the
+    // original every-frame application; > 0 applies the effect once per that many seconds. TickTimer
+    // counts down between applications and is ignored entirely when IsOneOff is true.
+    public float TickInterval;
+    public float TickTimer;
 }
 // public struct UnitHitBySpell : IComponentData { public float3 SpellPosition; public float SpellForce; public float3 InitHitLocation;}
 public struct BattleOver : IComponentData {public bool PlayerWon; }

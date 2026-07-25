@@ -376,7 +376,8 @@ namespace TJ.Shop
                 cardPack4.RefreshPrice();
             }
 
-            SteamStatic.AddStat(SteamData.SHOP_PURCHASES_STAT, 1);
+            SteamAchievements.AddStat(SteamStatId.ShopPurchases, 1);
+            campaignSaveManager.RegisterShopPurchase();
             EnableOutlines(false);
             if (_cardPackData.packID == 0)
             {

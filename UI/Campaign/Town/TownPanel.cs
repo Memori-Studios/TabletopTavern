@@ -273,10 +273,16 @@ namespace TJ.Town
             }
             sackTownCanvasGroup.FadeInAsync(0.25f);
 
-            SteamStatic.UnlockAchievement(SteamData.ACHIEVEMENT_SACK_CITY);
+            SteamAchievements.Unlock(AchievementId.SackCity);
+            SteamAchievements.AddStat(SteamStatId.CitiesSacked, 1);
             campaignSaveManager.SaveData.townsSacked++;
             if(campaignSaveManager.SaveData.townsSacked >= 3) {
-                SteamStatic.UnlockAchievement(SteamData.ACHIEVEMENT_THREE_TOWNS_SACKED_RUN);
+                SteamAchievements.Unlock(AchievementId.ThreeTownsSackedRun);
+            }
+            if (campaignSaveManager.SaveData.townsSacked >= 9 &&
+                HeroData.GetRaceFromHero(campaignSaveManager.SaveData.heroID) == Race.RavenHost)
+            {
+                SteamAchievements.Unlock(AchievementId.NineRealms);
             }
 
             //Thirst for Blood: Sacking a city heals all units to full health

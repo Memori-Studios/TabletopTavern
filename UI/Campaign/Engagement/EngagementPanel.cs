@@ -714,6 +714,7 @@ namespace TJ.Engagement
             }
 
             //ransom captives
+            campaignSaveManager.RegisterRansomOffered();
             ransomAmount = TabletopTavernConstants.GetRansomCaptivesReward();
 
             if(campaignSaveManager.SaveData.BattlesFought < 3)
@@ -1058,6 +1059,7 @@ namespace TJ.Engagement
         public void RansomCaptivesButtonClicked()
         {
             HidePostBattleOptionalRewards();
+            campaignSaveManager.RegisterRansomChosen();
             string ransomLocalized = LocalizationManager.Instance.GetText("Ransom Captives");
             CampaignManager.Instance.GoldManager.ModifyGold(ransomAmount, ransomLocalized);
             ForceContinueIfAllRewardsClaimed();

@@ -49,7 +49,7 @@ partial struct IronResolveSystem : ISystem
                 morale.ValueRW.CurrentMorale = clampedMorale;
                 morale.ValueRW.MoraleState = 1;
                 resolve.ValueRW.IsClamped = true;
-                resolve.ValueRW.ClampTimer = 10f;
+                resolve.ValueRW.ClampTimer = RaceBonusRuleData.IronResolve.ClampDurationSeconds;
             }
         }
 

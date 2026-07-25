@@ -16,9 +16,11 @@ partial struct KenseiEyeSystem : ISystem
 
     public void OnUpdate(ref SystemState state)
     {
+        var config = RaceBonusRuleData.KenseiEye;
+
         _updateTimer += SystemAPI.Time.DeltaTime;
-        if (_updateTimer < 1f) return;
-        _updateTimer -= 1f;
+        if (_updateTimer < config.UpdateInterval) return;
+        _updateTimer -= config.UpdateInterval;
 
         var entityManager = state.EntityManager;
 
@@ -29,15 +31,15 @@ partial struct KenseiEyeSystem : ISystem
             RefRW<KenseiEyeComponent>>()
             .WithAll<SakuraDynastyRaceTag, InCombat>())
         {
-            honor.ValueRW.CombatTime += 1f;
-            int newStage = (int)(honor.ValueRO.CombatTime / 10f);
-            if (newStage > 3) newStage = 3;
+            honor.ValueRW.CombatTime += config.UpdateInterval;
+            int newStage = (int)(honor.ValueRO.CombatTime / config.SecondsPerStage);
+            if (newStage > config.MaxStages) newStage = config.MaxStages;
 
             int stagesToApply = newStage - honor.ValueRO.CurrentStage;
 
             if (stagesToApply <= 0) continue;
 
-            int bonusToApply = stagesToApply * 5;
+            int bonusToApply = stagesToApply * config.MeleeAttackPerStage;
             for (int i = 0; i < entityBuffer.Length; i++)
             {
                 Entity unitEntity = entityBuffer[i].Entity;
@@ -48,7 +50,7 @@ partial struct KenseiEyeSystem : ISystem
             }
 
             honor.ValueRW.CurrentStage = newStage;
-            SyncBonusBuffer(bonusBuffer, newStage * 5);
+            SyncBonusBuffer(bonusBuffer, newStage * config.MeleeAttackPerStage);
         }
 
         // Reset path — squad left combat with an active bonus
@@ -61,7 +63,7 @@ partial struct KenseiEyeSystem : ISystem
         {
             if (honor.ValueRO.CurrentStage == 0) continue;
 
-            int bonusToRemove = honor.ValueRO.CurrentStage * 5;
+            int bonusToRemove = honor.ValueRO.CurrentStage * config.MeleeAttackPerStage;
             for (int i = 0; i < entityBuffer.Length; i++)
             {
                 Entity unitEntity = entityBuffer[i].Entity;

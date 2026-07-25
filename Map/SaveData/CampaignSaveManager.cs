@@ -93,6 +93,8 @@ namespace TJ
             OnChapterCompleted?.Invoke(saveData.activeMapLayer);
             OnGearChanged?.Invoke();
             OnArmyStructureChanged += SavePlayerArmy;
+            OnArmyStructureChanged += EvaluateArmyRunStats;
+            EvaluateArmyRunStats(); // sample the starting/loaded army once (covers runs where the army never changes)
 
             consumableCapacity = 2;
             if(SaveDataHandler.IsMetaprogressionNodeUnlocked(_consumableCapacityMetaprogressionModel)) {
@@ -202,6 +204,7 @@ namespace TJ
         {
             Debug.Log($"Destroying campaign save manager...");
             OnArmyStructureChanged -= SavePlayerArmy;
+            OnArmyStructureChanged -= EvaluateArmyRunStats;
             if (SceneHandler.HasInstance)
                 SceneHandler.Instance.OnRequestSceneCleanUp -= OnRequestSceneCleanUp;
         }
@@ -586,7 +589,7 @@ namespace TJ
             });
 
             if(_squadsStats.RarityTier == UnitRarity.Legendary) {
-                SteamStatic.UnlockAchievement(SteamData.ACHIEVEMENT_TIER_5);
+                SteamAchievements.Unlock(AchievementId.Tier5);
             }
 
             if(_squadsStats.unitSize == UnitSize.Artillery) {
@@ -914,12 +917,24 @@ namespace TJ
             Debug.Log($"[Unit] Prestiged {_squadToPrestige.UnitName} to prestige {_squadToPrestige.UnitPrestige}");
 
             if (_squadToPrestige.UnitPrestige == 1) {
-                SteamStatic.UnlockAchievement(SteamData.ACHIEVEMENT_PRESTIGE_2);
+                SteamAchievements.Unlock(AchievementId.Prestige2);
             }
             if (_squadToPrestige.UnitPrestige == 2) {
-                SteamStatic.UnlockAchievement(SteamData.ACHIEVEMENT_PRESTIGE_3);
+                SteamAchievements.Unlock(AchievementId.Prestige3);
             }
             saveData.RunStats.unitsPrestiged++;
+
+            //achievement check - living legend (3+ units at max prestige simultaneously).
+            //Max UnitPrestige is 2. The just-prestiged struct isn't written back to playerArmy yet,
+            //so count the array excluding this unit, then add it via _squadToPrestige.
+            int maxPrestigeUnits = _squadToPrestige.UnitPrestige >= 2 ? 1 : 0;
+            for (int i = 0; i < saveData.playerArmy.Length; i++)
+            {
+                if (saveData.playerArmy[i].UniqueID == _squadToPrestige.UniqueID) continue;
+                if (saveData.playerArmy[i].UnitPrestige >= 2) maxPrestigeUnits++;
+            }
+            if (maxPrestigeUnits >= 3) SteamAchievements.Unlock(AchievementId.LivingLegend);
+
             return _squadToPrestige;
         }
         public List<UnitAttribute> GetEligiblePrestigeTraitsForUnit(UnitName _unitName) =>
@@ -1020,7 +1035,7 @@ namespace TJ
                 }
             );
 
-            SteamStatic.UnlockAchievement(SteamData.ACHIEVEMENT_PRESTIGE_3);
+            SteamAchievements.Unlock(AchievementId.Prestige3);
 
             saveData.playerArmy = squadToLoads;
             OnArmyStructureChanged?.Invoke();
@@ -1178,7 +1193,7 @@ namespace TJ
             if (!DisableSaving) SaveDataHandler.SaveCampaign(saveData);
 
             if (saveData.goldAmount > 20)
-                SteamStatic.UnlockAchievement(SteamData.ACHIEVEMENT_TWENTY_GOLD);
+                SteamAchievements.Unlock(AchievementId.TwentyGold);
         }
 
         #region Gear
@@ -1200,7 +1215,7 @@ namespace TJ
 # endif
             if (saveData.Gear.Count == gearRequiredForAchievement)
             {
-                SteamStatic.UnlockAchievement(SteamData.ACHIEVEMENT_FULL_GEAR);
+                SteamAchievements.Unlock(AchievementId.FullGear);
             }
 
             OnGearChanged?.Invoke();
@@ -1462,6 +1477,17 @@ namespace TJ
 
             saveData.SquadLossesStore = _squadIdLossCounter;
 
+            //achievement check - flawless victory (won losing zero units)
+            if (_playerWon)
+            {
+                int totalUnitsLost = 0;
+                if (_squadIdLossCounter != null)
+                {
+                    foreach (SquadLossesStored loss in _squadIdLossCounter) totalUnitsLost += loss.Losses;
+                }
+                if (totalUnitsLost == 0) SteamAchievements.Unlock(AchievementId.FlawlessVictory);
+            }
+
             foreach (var playerSquad in _playerSquads)
             {
                 if (TabletopTavernData.Instance.GetSquadStats(playerSquad.UnitName).unitType == UnitType.Ranged)
@@ -1508,13 +1534,65 @@ namespace TJ
             SquadKillsStored squadKillsStored = saveData.HistoricalKillStore.Find(x => x.SquadGUID == _uniqueID);
             if (squadKillsStored.Kills > 250)
             {
-                SteamStatic.UnlockAchievement(SteamData.ACHIEVEMENT_HIGH_KILL);
+                SteamAchievements.Unlock(AchievementId.HighKill);
             }
             return squadKillsStored.Kills;
         }
         public int GetSeededRandom()
         {
             return saveData.seed * (saveData.activeMapLayer + 2) * (saveData.bookNumber + 1) + saveData.GetSelectedNodeIndex() + saveData.Rolls;
+        }
+        // Increments the per-run shop purchase counter (used by the MerchantsBane achievement).
+        public void RegisterShopPurchase()
+        {
+            saveData.RunStats.shopPurchases++;
+        }
+        // Tracks gold wagered at games this run; unlocks Gamba once the run total reaches 100.
+        public void RegisterGoldWagered(int amount)
+        {
+            if (saveData == null || amount <= 0) return;
+            saveData.RunStats.goldWagered += amount;
+            if (saveData.RunStats.goldWagered >= 100) SteamAchievements.Unlock(AchievementId.Gamba);
+        }
+        // Flags that a consumable was used this run (disqualifies BareEssentials).
+        public void MarkConsumableUsed()
+        {
+            if (saveData == null) return;
+            saveData.RunStats.consumableUsed = true;
+        }
+        // A battle offered the ransom-captives reward (denominator for Merciful).
+        public void RegisterRansomOffered()
+        {
+            if (saveData == null) return;
+            saveData.RunStats.ransomsOffered++;
+        }
+        // The ransom-captives reward was claimed (numerator for Merciful).
+        public void RegisterRansomChosen()
+        {
+            if (saveData == null) return;
+            saveData.RunStats.ransomsChosen++;
+        }
+        // Recomputes army-derived run stats: peak total models (QualityOverQuantity) and the
+        // ever-held-a-duplicate flag (OneOfAKind). Subscribed to OnArmyStructureChanged + sampled on load.
+        public void EvaluateArmyRunStats()
+        {
+            if (saveData == null || saveData.playerArmy == null) return;
+
+            int totalModels = 0;
+            HashSet<UnitName> seenNames = new();
+            for (int i = 0; i < saveData.playerArmy.Length; i++)
+            {
+                SquadToLoad squad = saveData.playerArmy[i];
+                if (squad.UnitIndex == -1) continue;
+
+                totalModels += squad.maxUnitCount;
+
+                if (!seenNames.Add(squad.UnitName))
+                    saveData.RunStats.heldDuplicateUnit = true;
+            }
+
+            if (totalModels > saveData.RunStats.maxArmyModels)
+                saveData.RunStats.maxArmyModels = totalModels;
         }
         public void CheckPostRunAchievements()
         {
@@ -1525,12 +1603,39 @@ namespace TJ
 #endif
 
 
-            SteamStatic.UnlockAchievement(SteamData.ACHIEVEMENT_WIN_DEMO);
+            SteamAchievements.Unlock(AchievementId.WinDemo);
+
+            if (saveData.RunStats.shopPurchases == 0)
+            {
+                Debug.Log($"Unlocking Merchant's Bane Achievement");
+                SteamAchievements.Unlock(AchievementId.MerchantsBane);
+            }
+
+            // Merciful: ransom claimed at every battle that offered it (and at least one did).
+            if (saveData.RunStats.ransomsOffered > 0 && saveData.RunStats.ransomsChosen >= saveData.RunStats.ransomsOffered)
+                SteamAchievements.Unlock(AchievementId.Merciful);
+
+            // One of a Kind: never held a duplicate unit across the whole run.
+            if (!saveData.RunStats.heldDuplicateUnit)
+                SteamAchievements.Unlock(AchievementId.OneOfAKind);
+
+            // Quality Over Quantity: army never exceeded 100 models.
+            if (saveData.RunStats.maxArmyModels <= 100)
+                SteamAchievements.Unlock(AchievementId.QualityOverQuantity);
+
+            // Bare Essentials: no consumable used all run.
+            if (!saveData.RunStats.consumableUsed)
+                SteamAchievements.Unlock(AchievementId.BareEssentials);
+
+            // "Uh, pause...": never used the pause button all run. Godking only - on lower
+            // difficulties you can trivially auto-resolve every battle and never get the chance to pause.
+            if (saveData.difficultyLevel == TT_Difficulty.Godking && !saveData.RunStats.pauseUsed)
+                SteamAchievements.Unlock(AchievementId.UhPause);
 
             if (saveData.difficultyLevel == TT_Difficulty.Godking)
             {
                 Debug.Log($"Unlocking Max Difficulty Achievement");
-                SteamStatic.UnlockAchievement(SteamData.ACHIEVEMENT_MAX_DIFFICULTY);
+                SteamAchievements.Unlock(AchievementId.MaxDifficulty);
             }
 
             PlayerSaveData playerSaveData = SaveDataHandler.LoadPlayerSaveData();
@@ -1538,13 +1643,13 @@ namespace TJ
             if(saveData.RunStats.gearAquired == 0 && playerSaveData.lastStartingGearId == GearID.None)
             {
                 Debug.Log($"Unlocking No Gear Achievement");
-                SteamStatic.UnlockAchievement(SteamData.ACHIEVEMENT_NO_GEAR_RUN);
+                SteamAchievements.Unlock(AchievementId.NoGearRun);
             }
 
             if(!saveData.archerUsedInBattle)
             {
                 Debug.Log($"Unlocking No Archers Achievement");
-                SteamStatic.UnlockAchievement(SteamData.ACHIEVEMENT_NO_ARCHERS_RUN);
+                SteamAchievements.Unlock(AchievementId.NoArchersRun);
             }
 
             SavePostRunDifficultyData();
@@ -1609,7 +1714,7 @@ namespace TJ
 #endif
             {
                 Debug.Log($"Unlocking Max Difficulty All Heroes Achievement");
-                SteamStatic.UnlockAchievement(SteamData.ACHIEVEMENT_MAX_DIFFICULTY_ALL_HEROES);
+                SteamAchievements.Unlock(AchievementId.MaxDifficultyAllHeroes);
             }
         }
         public void CheckForFourFactions()
@@ -1626,7 +1731,7 @@ namespace TJ
             if (racesInArmy.Count >= 4)
             {
                 Debug.Log($"Unlocking Four Factions Achievement");
-                SteamStatic.UnlockAchievement(SteamData.ACHIEVEMENT_FOUR_UNIQUE_FACTIONS_RUN);
+                SteamAchievements.Unlock(AchievementId.FourUniqueFactionsRun);
             }
         }
 

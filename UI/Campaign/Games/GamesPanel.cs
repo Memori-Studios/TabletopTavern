@@ -161,6 +161,7 @@ namespace TJ.Games
             }
 
             lastBet = bet;
+            CampaignManager.Instance.CampaignSaveManager.RegisterGoldWagered(bet);
             IAudioRequester.Instance.PlaySFX(SFXData.ChoiceMade);
             buttonsPanel.FadeOutAsync();
             RollDice(bet);

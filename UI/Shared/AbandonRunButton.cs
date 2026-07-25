@@ -1,6 +1,7 @@
 using UnityEngine;
 using UnityEngine.UI;
 using Memori.SaveData;
+using TabletopTavern.Analytics;
 
 namespace TJ
 {
@@ -17,6 +18,12 @@ namespace TJ
         public void AbandonRun()
         {
             campaignSaveManager = FindFirstObjectByType<CampaignSaveManager>();
+
+            if (SaveDataHandler.CampaignSaveExists())
+            {
+                var abandonedSave = SaveDataHandler.Load();
+                GameEventTracker.RunEnded(abandonedSave.heroID, (int)abandonedSave.difficultyLevel, RunResult.Abandon, abandonedSave.RunStats.chaptersCompleted);
+            }
             
             if(campaignSaveManager == null) 
             {

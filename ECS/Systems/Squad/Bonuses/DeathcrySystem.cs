@@ -17,6 +17,7 @@ partial struct DeathcrySystem : ISystem
     {
         var entityManager = state.EntityManager;
         float deltaTime = SystemAPI.Time.DeltaTime;
+        var config = RaceBonusRuleData.Deathcry;
 
         bool playerSideFell = false;
         bool enemySideFell = false;
@@ -82,14 +83,14 @@ partial struct DeathcrySystem : ISystem
                         Entity unitEntity = entityBuffer[i].Entity;
                         if (!entityManager.HasComponent<MeleeAttack>(unitEntity)) continue;
                         MeleeAttack attack = entityManager.GetComponentData<MeleeAttack>(unitEntity);
-                        attack.MeleeAttackValue += 20;
+                        attack.MeleeAttackValue += config.MeleeAttackBonus;
                         entityManager.SetComponentData(unitEntity, attack);
                     }
-                    deathcry.ValueRW.AppliedBonus = 20;
-                    SyncBonusBuffer(bonusBuffer, 20);
+                    deathcry.ValueRW.AppliedBonus = config.MeleeAttackBonus;
+                    SyncBonusBuffer(bonusBuffer, config.MeleeAttackBonus);
                 }
 
-                deathcry.ValueRW.TimeRemaining = 20f;
+                deathcry.ValueRW.TimeRemaining = config.DurationSeconds;
             }
         }
 

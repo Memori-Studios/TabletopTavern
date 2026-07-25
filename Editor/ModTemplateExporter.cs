@@ -37,6 +37,9 @@ namespace TJ
             File.WriteAllText(Path.Combine(templateFolder, EconomyOverrideLoader.FileName),
                 EconomyOverrideLoader.ExportTemplate());
 
+            File.WriteAllText(Path.Combine(templateFolder, RaceBonusOverrideLoader.FileName),
+                RaceBonusOverrideLoader.ExportTemplate());
+
             File.WriteAllText(Path.Combine(templateFolder, LocalizationOverrideLoader.FileName),
                 LocalizationOverrideLoader.ExportTemplate());
 

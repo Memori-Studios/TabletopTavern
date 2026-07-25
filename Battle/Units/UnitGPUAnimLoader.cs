@@ -28,14 +28,29 @@ public class UnitGPUAnimLoader : MonoBehaviour
 
     private readonly List<Entity> _requestEntities = new();
     private readonly List<Entity> _prefabsEntities = new();
+    // Units already requested this battle. Guards against duplicate load requests (and duplicate
+    // UnitGPUAnimPrefabs singletons) when PreloadUnitsAsync is called more than once - e.g. an
+    // incremental summon-spell preload after the initial army preload. Added synchronously so a
+    // rapid double request cannot slip through before the async load completes.
+    private readonly HashSet<UnitName> _requestedUnits = new();
 
     /// <summary>
     /// Begins async loading of GPU anim prefabs (and rider prefabs for cavalry) for the given unit names.
-    /// onComplete is called once all prefabs are ready and SpawnManager can proceed.
+    /// onComplete is called once all prefabs are ready and SpawnManager can proceed. Units already
+    /// requested this battle are skipped.
     /// </summary>
     public Coroutine PreloadUnitsAsync(IEnumerable<UnitName> unitNames, Action onComplete)
     {
         return StartCoroutine(LoadRoutine(unitNames, onComplete));
+    }
+
+    /// <summary>
+    /// Loads a single unit's GPU anim prefabs on demand, after the initial army preload has already run
+    /// (e.g. a summon spell swapped into the loadout during deployment). No-op if already loaded.
+    /// </summary>
+    public void PreloadAdditionalUnit(UnitName unitName)
+    {
+        PreloadUnitsAsync(new[] { unitName }, null);
     }
 
     private IEnumerator LoadRoutine(IEnumerable<UnitName> unitNames, Action onComplete)
@@ -53,6 +68,7 @@ public class UnitGPUAnimLoader : MonoBehaviour
         {
             var refs = allRefs[i];
             if (!unitNamesSet.Contains(refs.unitName)) continue;
+            if (!_requestedUnits.Add(refs.unitName)) continue; // already requested this battle
 
             // Load the three anim variants
             for (int v = 0; v < 3; v++)
@@ -136,5 +152,7 @@ public class UnitGPUAnimLoader : MonoBehaviour
         foreach (var e in _requestEntities)
             if (entityManager.Exists(e)) entityManager.DestroyEntity(e);
         _requestEntities.Clear();
+
+        _requestedUnits.Clear();
     }
 }

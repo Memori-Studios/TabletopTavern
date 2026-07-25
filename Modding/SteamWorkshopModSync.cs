@@ -33,19 +33,26 @@ namespace TJ
         public static async Task SyncSubscribedItemsToModsFolderAsync()
         {
             List<UgcItem> items = await SteamWorkshop.GetSubscribedItemsAsync();
-            if (items.Count == 0) return;
 
             ModLoadOrder.EnsureModsDirectoryExists();
 
+            // Folder names we must keep. A subscribed item is kept even if it isn't installed yet
+            // (it'll finish downloading and get copied on a later pass) - only *unsubscribed* items
+            // should be pruned below. Built for every subscribed item, not just installed ones.
+            HashSet<string> subscribedFolderNames = new HashSet<string>();
+
             foreach (UgcItem item in items)
             {
+                string folderName = WorkshopFolderPrefix + item.Id.Value;
+                subscribedFolderNames.Add(folderName);
+
                 if (!item.IsInstalled || string.IsNullOrEmpty(item.Directory))
                 {
                     Debug.LogWarning($"[SteamWorkshopModSync] Subscribed item {item.Id} ('{item.Title}') isn't installed yet, skipping this sync pass.");
                     continue;
                 }
 
-                string targetFolder = Path.Combine(ModLoadOrder.ModsRootPath, WorkshopFolderPrefix + item.Id.Value);
+                string targetFolder = Path.Combine(ModLoadOrder.ModsRootPath, folderName);
                 try
                 {
                     CopyModContent(item.Directory, targetFolder);
@@ -56,7 +63,34 @@ namespace TJ
                 }
             }
 
+            // Prune Workshop-synced folders the player has since unsubscribed from. Runs even when
+            // the subscribed list is empty (last mod unsubscribed) - so it can't sit behind the old
+            // early-return. Only touches workshop_ folders, never locally-authored mods.
+            PruneUnsubscribedWorkshopFolders(subscribedFolderNames);
+
             Debug.Log($"[SteamWorkshopModSync] Synced {items.Count} subscribed Workshop item(s) into {ModLoadOrder.ModsRootPath}.");
+        }
+
+        // Deletes any Mods/workshop_<id>/ folder whose id is no longer in the subscribed set - i.e.
+        // mods the player unsubscribed from. Without this the local copy would linger and keep being
+        // auto-enabled by ModLoadOrder, so unsubscribing would never actually disable the mod.
+        private static void PruneUnsubscribedWorkshopFolders(HashSet<string> subscribedFolderNames)
+        {
+            foreach (string dir in Directory.GetDirectories(ModLoadOrder.ModsRootPath))
+            {
+                string folderName = Path.GetFileName(dir);
+                if (!IsWorkshopSyncedFolder(folderName) || subscribedFolderNames.Contains(folderName)) continue;
+
+                try
+                {
+                    Directory.Delete(dir, recursive: true);
+                    Debug.Log($"[SteamWorkshopModSync] Removed unsubscribed Workshop mod folder {folderName}.");
+                }
+                catch (Exception e)
+                {
+                    Debug.LogError($"[SteamWorkshopModSync] Failed to remove unsubscribed Workshop mod folder {folderName}: {e.Message}");
+                }
+            }
         }
 
         private static void CopyModContent(string sourceDir, string targetDir)

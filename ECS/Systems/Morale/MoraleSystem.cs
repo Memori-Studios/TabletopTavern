@@ -30,7 +30,9 @@ namespace TJ.Morale {
             RallyingTagLookup = state.GetComponentLookup<RallyingTag>(true);
         }
 
-        [BurstCompile]
+        // Not [BurstCompile]: reads the managed RaceBonusRuleData.SanguineCourt.ImmuneToFlankMorale
+        // toggle on the main thread to thread it into the (still-Bursted) MoraleUpdateJob. Only the
+        // scheduling wrapper is de-Bursted - the per-entity morale math stays in the Bursted job.
         public void OnUpdate(ref SystemState state)
         {
             IsTerrifiedTagLookup.Update(ref state);
@@ -51,7 +53,8 @@ namespace TJ.Morale {
                 TakingFireDamageTagLookup = TakingFireDamageTagLookup,
                 ArmyLossesPenaltyTagLookup = ArmyLossesPenaltyTagLookup,
                 SanguineCourtRaceTagLookup = SanguineCourtRaceTagLookup,
-                RallyingTagLookup = RallyingTagLookup
+                RallyingTagLookup = RallyingTagLookup,
+                SanguineImmuneToFlank = RaceBonusRuleData.SanguineCourt.ImmuneToFlankMorale
             }.ScheduleParallel(state.Dependency);
         }
     }
@@ -69,6 +72,7 @@ namespace TJ.Morale {
         [ReadOnly] public ComponentLookup<ArmyLossesPenaltyTag> ArmyLossesPenaltyTagLookup;
         [ReadOnly] public ComponentLookup<SanguineCourtRaceTag> SanguineCourtRaceTagLookup;
         [ReadOnly] public ComponentLookup<RallyingTag> RallyingTagLookup;
+        public bool SanguineImmuneToFlank;
         public const float RECENT_HEALTH_LOSS_PENALTY = 0.075f;
         public const float NO_RECENT_HEALTH_LOSS_REGENERATION = 2f;
         public const float MORALE_TOTAL_HEAL_DEPLETION_PENALTY = 0.75f;
@@ -104,7 +108,7 @@ namespace TJ.Morale {
             }
             
             totalModifier -= MORALE_TOTAL_HEAL_DEPLETION_PENALTY * (1f - healthPercentage);  // More casualties = bigger penalty
-            totalModifier -= MORALE_FLANK_PENALTY * (takingFlankingDamage && !SanguineCourtRaceTagLookup.HasComponent(entity) ? 1f : 0f); // Flanked penalty
+            totalModifier -= MORALE_FLANK_PENALTY * (takingFlankingDamage && !(SanguineImmuneToFlank && SanguineCourtRaceTagLookup.HasComponent(entity)) ? 1f : 0f); // Flanked penalty (Sanguine Court immune unless a mod disables it)
             totalModifier -= MORALE_RETREATING_ALLIES_PENALTY * (hasRetreatingAllies ? 1f : 0f); // Nearby allies retreating penalty
             totalModifier -= MORALE_THREAT_PENALTY * (isTerrified ? 1f : 0f); // Terrified penalty
             totalModifier -= MORALE_ARMY_LOSSES_PENALTY * (armyLosses ? 1f : 0f); // Army losses penalty

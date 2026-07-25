@@ -187,8 +187,11 @@ namespace TJ
                 float mouseYDir = SettingsManager.Instance.InvertMouseY.Value ? 1f : -1f;
                 yaw += Input.GetAxis("Mouse X") * _rotationSpeed * Time.unscaledDeltaTime;
                 pitch += mouseYDir * Input.GetAxis("Mouse Y") * _rotationSpeed * Time.unscaledDeltaTime;
-                
-                // pitch = Mathf.Clamp(pitch, -90f, 90f); // Prevent upside-down view
+
+                // Normalize the read-back-from-eulerAngles value (0..360) to a signed range, then clamp
+                // strictly inside 90 degrees to avoid the gimbal-lock flip when looking straight down.
+                if (pitch > 180f) pitch -= 360f;
+                pitch = Mathf.Clamp(pitch, -89f, 89f);
                 cameraTarget.eulerAngles = new Vector3(pitch, yaw, 0f);
                 minFocalDistance = 1f;
             }
@@ -211,12 +214,16 @@ namespace TJ
                 {
                     yaw = cameraTarget.eulerAngles.y;
                     pitch = cameraTarget.eulerAngles.x - 0.5f * keyRotationSpeedMultiplier;
+                    if (pitch > 180f) pitch -= 360f;
+                    pitch = Mathf.Clamp(pitch, -89f, 89f);
                     cameraTarget.eulerAngles = new Vector3(pitch, yaw, 0f);
                 }
                 if (InputHandler.Instance.RotatePitchDown_Input)
                 {
                     yaw = cameraTarget.eulerAngles.y;
                     pitch = cameraTarget.eulerAngles.x + 0.5f * keyRotationSpeedMultiplier;
+                    if (pitch > 180f) pitch -= 360f;
+                    pitch = Mathf.Clamp(pitch, -89f, 89f);
                     cameraTarget.eulerAngles = new Vector3(pitch, yaw, 0f);
                 }
             }

@@ -17,11 +17,14 @@ namespace TJ.Morale
             state.RequireForUpdate<BattlePhase>();
         }
 
-        [BurstCompile]
+        // Not [BurstCompile]: reads the managed RaceBonusRuleData.SanguineCourt immunity toggle so
+        // mods can turn Sanguine Court's retreating-allies morale immunity on/off. This system is
+        // event-driven (only iterates when a squad is breaking), so the cost is negligible.
         public void OnUpdate(ref SystemState state)
         {
             EntityManager entityManager = state.EntityManager;
             EntityCommandBuffer entityCommandBuffer = SystemAPI.GetSingleton<EndSimulationEntityCommandBufferSystem.Singleton>().CreateCommandBuffer(state.WorldUnmanaged);
+            bool sanguineImmune = RaceBonusRuleData.SanguineCourt.ImmuneToRetreatingAlliesMorale;
     
             foreach (var (squad, squadMovementComponent, alertNearbyUnitsOfBreakingTag) in
                 SystemAPI.Query<RefRO<SquadEntity>, RefRO<SquadMovementComponent>, RefRO<AlertNearbyUnitsOfBreakingTag>>())
@@ -53,7 +56,7 @@ namespace TJ.Morale
 
                     if(distance < TabletopTavernConstants.NEARBY_ALLIES_RETREATING_DISTANCE)
                     {
-                        if (entityManager.HasComponent<SanguineCourtRaceTag>(enemySquad.ValueRO.SelfEntity)) continue;
+                        if (sanguineImmune && entityManager.HasComponent<SanguineCourtRaceTag>(enemySquad.ValueRO.SelfEntity)) continue;
                         // Debug.Log($"Alerting squad {enemySquad.ValueRO.SquadId} of nearby retreating allies!");
                         entityManager.SetComponentData(enemySquad.ValueRO.SelfEntity, new RetreatingNearbyAllies { AlertTimer = TabletopTavernConstants.NEARBY_ALLIES_RETREATING_PENALTY_TIME });
                         entityManager.SetComponentEnabled<RetreatingNearbyAllies>(enemySquad.ValueRO.SelfEntity, true);

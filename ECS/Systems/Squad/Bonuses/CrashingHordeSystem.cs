@@ -17,16 +17,18 @@ partial struct CrashingHordeSystem : ISystem
 
     public void OnUpdate(ref SystemState state)
     {
+        var config = RaceBonusRuleData.CrashingHorde;
+
         _updateTimer -= SystemAPI.Time.DeltaTime;
         if (_updateTimer > 0f) return;
-        _updateTimer = 1f;
+        _updateTimer = config.UpdateInterval;
 
         var entityManager = state.EntityManager;
 
         int healthyCount = 0;
         foreach (var squadState in SystemAPI.Query<RefRO<SquadStateComponent>>().WithAll<GruntkinRaceTag>())
         {
-            if (squadState.ValueRO.CurrentHealthValue > squadState.ValueRO.MaxHealthValue * 0.5f)
+            if (squadState.ValueRO.CurrentHealthValue > squadState.ValueRO.MaxHealthValue * config.HealthThreshold)
                 healthyCount++;
         }
 
@@ -37,14 +39,14 @@ partial struct CrashingHordeSystem : ISystem
             RefRW<CrashingHordeComponent>>()
             .WithAll<GruntkinRaceTag>())
         {
-            bool isSelfHealthy = squadState.ValueRO.CurrentHealthValue > squadState.ValueRO.MaxHealthValue * 0.5f;
+            bool isSelfHealthy = squadState.ValueRO.CurrentHealthValue > squadState.ValueRO.MaxHealthValue * config.HealthThreshold;
             int othersHealthy = isSelfHealthy ? healthyCount - 1 : healthyCount;
-            int desiredStacks = Mathf.Min(othersHealthy, 4);
+            int desiredStacks = Mathf.Min(othersHealthy, config.MaxStacks);
             int delta = desiredStacks - horde.ValueRO.AppliedStacks;
 
             if (delta == 0) continue;
 
-            int weaponStrengthDelta = delta * 5;
+            int weaponStrengthDelta = delta * config.WeaponStrengthPerStack;
             for (int i = 0; i < entityBuffer.Length; i++)
             {
                 Entity unitEntity = entityBuffer[i].Entity;
@@ -67,7 +69,7 @@ partial struct CrashingHordeSystem : ISystem
                     {
                         UnitStat = UnitStat.WeaponStrength,
                         BattlefieldBonusEnum = BattlefieldBonusEnum.CrashingHorde,
-                        Value = desiredStacks * 5,
+                        Value = desiredStacks * config.WeaponStrengthPerStack,
                         Applied = true,
                         Range = 999999f
                     }

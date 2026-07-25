@@ -16,7 +16,8 @@ namespace TJ.Morale
         private ComponentLookup<SquadMovementComponent> _transformLookup;
         private ComponentLookup<CausesTerrorTag> _causesTerrorTagLookup;
         private ComponentLookup<EntityTeam> _entityTeamLookup;
-        private EntityQuery _targetQuery; // Units that can be terrified
+        private EntityQuery _targetQuery; // Units that can be terrified (Sanguine Court immune - default)
+        private EntityQuery _targetQueryIncludingSanguine; // Same, but Sanguine Court is affectable (mod disabled their immunity)
         private EntityQuery _terrorQuery; // Units that cause terror
 
         public void OnCreate(ref SystemState state)
@@ -36,6 +37,15 @@ namespace TJ.Morale
                 ComponentType.Exclude<SanguineCourtRaceTag>()
             );
 
+            // Same target set but without the Sanguine Court exclusion, used only when a mod turns
+            // off their terror immunity via RaceBonusRuleData.SanguineCourt.ImmuneToTerror.
+            _targetQueryIncludingSanguine = state.GetEntityQuery(
+                ComponentType.ReadOnly<SquadEntity>(),
+                ComponentType.ReadOnly<SquadMovementComponent>(),
+                ComponentType.Exclude<StalwartTag>(),
+                ComponentType.Exclude<GarrisonGateSquadTag>()
+            );
+
             // Query for terror-causing units
             _terrorQuery = state.GetEntityQuery(
                 ComponentType.ReadOnly<CausesTerrorTag>(),
@@ -43,7 +53,8 @@ namespace TJ.Morale
             );
         }
 
-        [BurstCompile]
+        // Not [BurstCompile]: reads the managed RaceBonusRuleData.SanguineCourt.ImmuneToTerror
+        // toggle to pick the target query. The actual terror work stays in the two jobs below.
         public void OnUpdate(ref SystemState state)
         {
             _isTerrifiedLookup.Update(ref state);
@@ -51,14 +62,16 @@ namespace TJ.Morale
             _causesTerrorTagLookup.Update(ref state);
             _entityTeamLookup.Update(ref state);
 
+            EntityQuery targetQuery = RaceBonusRuleData.SanguineCourt.ImmuneToTerror ? _targetQuery : _targetQueryIncludingSanguine;
+
             // Collect terror-causing units
             NativeArray<Entity> terrorEntities = _terrorQuery.ToEntityArray(Allocator.TempJob);
             NativeArray<SquadMovementComponent> terrorTransforms = _terrorQuery.ToComponentDataArray<SquadMovementComponent>(Allocator.TempJob);
             NativeArray<CausesTerrorTag> terrorTags = _terrorQuery.ToComponentDataArray<CausesTerrorTag>(Allocator.TempJob);
 
             // Collect target units
-            NativeArray<Entity> targetEntities = _targetQuery.ToEntityArray(Allocator.TempJob);
-            NativeArray<SquadMovementComponent> targetTransforms = _targetQuery.ToComponentDataArray<SquadMovementComponent>(Allocator.TempJob);
+            NativeArray<Entity> targetEntities = targetQuery.ToEntityArray(Allocator.TempJob);
+            NativeArray<SquadMovementComponent> targetTransforms = targetQuery.ToComponentDataArray<SquadMovementComponent>(Allocator.TempJob);
 
             var enableJob  = new TerrorApplicationJob
             {

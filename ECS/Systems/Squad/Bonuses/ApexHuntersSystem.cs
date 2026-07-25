@@ -18,6 +18,7 @@ partial struct ApexHuntersSystem : ISystem
     {
         var entityManager = state.EntityManager;
         float deltaTime = SystemAPI.Time.DeltaTime;
+        var config = RaceBonusRuleData.ApexHunters;
 
         bool shouldUpdate = false;
         foreach (var pack in SystemAPI.Query<RefRW<ApexHuntersComponent>>()
@@ -26,7 +27,7 @@ partial struct ApexHuntersSystem : ISystem
             pack.ValueRW.UpdateTimer -= deltaTime;
             if (pack.ValueRO.UpdateTimer <= 0f)
             {
-                pack.ValueRW.UpdateTimer = 0.5f;
+                pack.ValueRW.UpdateTimer = config.UpdateInterval;
                 shouldUpdate = true;
             }
             break;
@@ -38,7 +39,7 @@ partial struct ApexHuntersSystem : ISystem
         foreach (var pack in SystemAPI.Query<RefRW<ApexHuntersComponent>>()
             .WithAll<DrakosaurBroodRaceTag>())
         {
-            pack.ValueRW.UpdateTimer = 0.5f;
+            pack.ValueRW.UpdateTimer = config.UpdateInterval;
         }
 
         // Build a map: TargetSquadEntity index → how many Drakosaur squads are targeting it
@@ -67,12 +68,12 @@ partial struct ApexHuntersSystem : ISystem
                 totalOnTarget = cnt;
 
             int otherCount = math.max(0, totalOnTarget - 1);
-            int desiredStacks = math.min(otherCount, 2);
+            int desiredStacks = math.min(otherCount, config.MaxStacks);
             int delta = desiredStacks - pack.ValueRO.AppliedStacks;
 
             if (delta == 0) continue;
 
-            int weaponDelta = delta * 8;
+            int weaponDelta = delta * config.WeaponStrengthPerStack;
             for (int i = 0; i < entityBuffer.Length; i++)
             {
                 Entity unitEntity = entityBuffer[i].Entity;
@@ -83,7 +84,7 @@ partial struct ApexHuntersSystem : ISystem
             }
 
             pack.ValueRW.AppliedStacks = desiredStacks;
-            SyncBonusBuffer(bonusBuffer, desiredStacks * 8);
+            SyncBonusBuffer(bonusBuffer, desiredStacks * config.WeaponStrengthPerStack);
         }
 
         targetCounts.Dispose();

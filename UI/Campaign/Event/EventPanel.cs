@@ -315,7 +315,8 @@ namespace TJ.Event
 
             await Task.Delay(500);
 
-            if (roll == 20) SteamStatic.UnlockAchievement(SteamData.ACHIEVEMENT_ROLL_20);
+            if (roll == 20) SteamAchievements.Unlock(AchievementId.Roll20);
+            if (roll == 1) SteamAchievements.Unlock(AchievementId.SnakeEyes);
 
             rerollButton.gameObject.SetActive(true);
             acceptRollButton.gameObject.SetActive(true);

@@ -611,6 +611,27 @@ partial struct BattlefieldBonusJob : IJobEntity
                                     ShootAttackLookup[unitEntity] = sa;
                                 }
                                 break;
+                            // Mirror the Speed/Armor apply cases above so timed debuffs (Sunder,
+                            // Shieldwall's -speed) reverse when they expire or the squad leaves range.
+                            // Without these the reduction leaked permanently - Emblazing dodged it via
+                            // its own dedicated RemoveEmblazing path, so nothing hit this gap before.
+                            case UnitStat.Speed:
+                                if (AgentLocomotionLookup.HasComponent(unitEntity))
+                                {
+                                    var loc = AgentLocomotionLookup[unitEntity];
+                                    loc.Speed -= bonus.Value;
+                                    loc.Acceleration -= bonus.Value;
+                                    AgentLocomotionLookup[unitEntity] = loc;
+                                }
+                                break;
+                            case UnitStat.Armor:
+                                if (ArmoredTagLookup.HasComponent(unitEntity))
+                                {
+                                    var at = ArmoredTagLookup[unitEntity];
+                                    at.ArmorMitigation -= bonus.Value;
+                                    ArmoredTagLookup[unitEntity] = at;
+                                }
+                                break;
                         }
                     }
                 }

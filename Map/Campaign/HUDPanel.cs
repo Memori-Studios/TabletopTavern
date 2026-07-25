@@ -305,7 +305,7 @@ namespace TJ.Map
             reserveTroopsAreaImage.enabled = false;
             if (thirdReserveSlotLockedButton != null) thirdReserveSlotLockedButton.CheckLockedState();
 
-            if(deployedTroopsCount + reserveTroopsCount == 10 + campaignSaveManager.MaxReserveSlots) SteamStatic.UnlockAchievement(SteamData.ACHIEVEMENT_FULL_ARMY);
+            if(deployedTroopsCount + reserveTroopsCount == 10 + campaignSaveManager.MaxReserveSlots) SteamAchievements.Unlock(AchievementId.FullArmy);
         }
         public void HoverSquad(SquadToLoad squad, bool _hovered, Transform _squadCardTransform)
         {

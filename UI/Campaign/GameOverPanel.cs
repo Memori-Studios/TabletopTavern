@@ -8,7 +8,7 @@ using Memori.Scenes;
 using Memori.Audio;
 using Memori.Localization;
 using System.Threading.Tasks;
-using TabletopAnalytics;
+using TabletopTavern.Analytics;
 using Memori.Notifications;
 using MoreMountains.Feedbacks;
 
@@ -106,13 +106,7 @@ public class GameOverPanel : MonoBehaviour
         renownEarnedText.text = $"<color={ColorData.Legendary}>{renownAward.total}</color>";
         renownBreakdownText.text = $"{renownAward.chaptersCompleted} {chaptersLocalized}  |  {renownAward.actsCompleted} {actsLocalized} (+{renownAward.actRenown})  |  {difficultyNamestring} (x{renownAward.difficultyMultiplier:0.00})";
 
-        // AnalyticsManager.Instance.LogRunEnd(
-        //     saveData.runUUID.ToString(),
-        //     _beatDemo ? RunResult.Win : RunResult.Loss,
-        //     runStats.chaptersCompleted,
-        //     saveData.goldAmount,
-        //     runStats.enemiesSlain
-        // );
+        GameEventTracker.RunEnded(saveData.heroID, (int)saveData.difficultyLevel, _beatDemo ? RunResult.Win : RunResult.Loss, runStats.chaptersCompleted);
 
         CampaignManager.Instance.CampaignSaveManager.DeleteCampaignSave();
     }
