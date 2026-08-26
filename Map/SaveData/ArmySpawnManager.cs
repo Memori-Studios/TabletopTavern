@@ -573,6 +573,11 @@ namespace Memori.SaveData
                     case UnitType.Hybrid:    meleeUnits.Add(squad);  break;
                     case UnitType.Ranged:    rangedUnits.Add(squad); break;
                     case UnitType.Artillery: rangedUnits.Add(squad); break;
+                    // Mages hold the back line, matching BoxFormation.GetTypePriority which ranks them
+                    // with artillery. Without a case here a mage matches NO branch - it is UnitSize.Infantry
+                    // so the cavalry and monstrous pre-checks miss it too - so it lands in neither list, is
+                    // never assigned a row, and stays stranded at its staging position.
+                    case UnitType.Mage:      rangedUnits.Add(squad); break;
                 }
             }
 
@@ -932,6 +937,11 @@ namespace Memori.SaveData
                         case UnitType.Hybrid: meleeUnits.Add(squad); break;
                         case UnitType.Ranged: rangedUnits.Add(squad); break;
                         case UnitType.Artillery: rangedUnits.Add(squad); break;
+                        // Mages hold the back line, matching BoxFormation.GetTypePriority which ranks them
+                        // with artillery. Without a case here a mage matches NO branch - it is UnitSize.Infantry
+                        // so the cavalry and monstrous pre-checks miss it too - so it lands in neither list, is
+                        // never assigned a row, and stays stranded at its staging position.
+                        case UnitType.Mage: rangedUnits.Add(squad); break;
                     }
                 }
             }
@@ -1378,6 +1388,10 @@ namespace Memori.SaveData
         public GameObject GetGateGameObject(int gateIndex) =>
             _gateGameObjects.TryGetValue(gateIndex, out GameObject go) ? go : null;
 
+        // Gates spawned this battle. Zero outside garrison battles, so it doubles as
+        // "is this a garrison battle" for the Siegebreaker check in BattleManager.
+        public int GateCount => _gateGameObjects.Count;
+
         public void SpawnGateSquad(Vector3 position, int gateIndex, GameObject gateGO, GarrisonWallsSO wallsData)
         {
             _gateGameObjects[gateIndex] = gateGO;
@@ -1488,6 +1502,11 @@ namespace Memori.SaveData
                     case UnitType.Hybrid:    meleeSquads.Add(squadData);  break;
                     case UnitType.Ranged:    rangedSquads.Add(squadData); break;
                     case UnitType.Artillery: rangedSquads.Add(squadData); break;
+                    // Mages hold the back line, matching BoxFormation.GetTypePriority which ranks them
+                    // with artillery. Without a case here a mage matches NO branch - it is UnitSize.Infantry
+                    // so the cavalry and monstrous pre-checks miss it too - so it lands in neither list, is
+                    // never assigned a row, and stays stranded at its staging position.
+                    case UnitType.Mage:      rangedSquads.Add(squadData); break;
                 }
             }
 

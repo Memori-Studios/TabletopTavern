@@ -22,6 +22,7 @@ public class ArcherRangeDrawer : MonoBehaviour
     bool _toggledOn = false;
     int squadId;
     bool inMeleeMode = false;
+    bool _isCaster = false;
 
     Coroutine _fadeRoutine;
     Color _arcTargetColor, _arc2TargetOuter, _lineTargetColor;
@@ -117,10 +118,20 @@ public class ArcherRangeDrawer : MonoBehaviour
 
         if (entityManager.HasComponent<RangedSquad>(cachedEntity))
             range = entityManager.GetComponentData<RangedSquad>(cachedEntity).AttackRange;
+        // A mage carries MageSquad instead of RangedSquad, so without this its ring stayed at the
+        // field default of 0 and drew nothing. MageSquadRangeSystem keeps AttackRange in sync with
+        // the unit's MageCast.Range, exactly as RangedSquadRangeSystem does for archers.
+        else if (entityManager.HasComponent<MageSquad>(cachedEntity))
+        {
+            range = entityManager.GetComponentData<MageSquad>(cachedEntity).AttackRange;
+            _isCaster = true;
+        }
 
         arc.Radius     = range;
         arc2.Radius    = range - 3.75f;
         arc2.Thickness = 7.5f;
+
+        if (_isCaster) ApplyCasterShape();
 
         Vector3 center = Vector3.zero;
 
@@ -139,6 +150,30 @@ public class ArcherRangeDrawer : MonoBehaviour
         leftLine.End    = endPoint;
         rightLine.Start = center + (width * Vector3.right) + (height * Vector3.forward);
         rightLine.End   = startPoint;
+    }
+
+    // An archer faces its target, and the prefab authors that honestly: both discs are DiscType.Arc
+    // spanning 45 to 135 degrees, with two lines running out from the squad's front corners to the
+    // arc ends. A caster has no such cone. MageSquadFindTargetSystem and MageCastSystem both gate on
+    // math.distance(SquadCenter, targetCenter) > AttackRange with no facing term anywhere, so a mage
+    // casts in every direction and the inherited arc was drawing a limit that does not exist - the
+    // player would read three quarters of the real threat range as safe.
+    //
+    // A full ring is the truthful shape. The blast radius is deliberately NOT drawn here: the spell
+    // lands on the target, not on the caster, so a second ring centred on the mage would read as a
+    // minimum range or a self-aura and be a worse lie than the one being fixed.
+    //
+    // Only this branch writes Type and the line enables, so the archer presentation stays exactly as
+    // authored and cannot regress. Every squad instantiates its own drawer, so mutating this instance
+    // affects nothing else. Disabling a ShapeRenderer hides it (OnDisable clears the MeshRenderer),
+    // and the Fade coroutine writing Color to a disabled line is a harmless property set.
+    private void ApplyCasterShape()
+    {
+        arc.Type  = DiscType.Ring;
+        arc2.Type = DiscType.Ring;
+
+        leftLine.enabled  = false;
+        rightLine.enabled = false;
     }
 
     public void TurnOn()
@@ -200,6 +235,13 @@ public class ArcherRangeDrawer : MonoBehaviour
 
     public void SwitchToMelee(bool _toMelee)
     {
+        // A caster has no melee mode to switch into - it never carries RangedSquad, so the ECS half
+        // of this toggle is inert for it. The button is shown for any selection containing a shooter
+        // though, and SquadManager.SetMeleeMode skips only UnitType.Melee, so a mage caught in a
+        // mixed selection would latch inMeleeMode and TurnOn() would early-return from then on,
+        // hiding its range ring until the player happened to toggle back.
+        if (_isCaster) return;
+
         inMeleeMode = _toMelee;
         if (inMeleeMode) TurnOff();
         else TurnOn();

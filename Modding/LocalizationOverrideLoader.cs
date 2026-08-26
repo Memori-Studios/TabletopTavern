@@ -38,6 +38,9 @@ namespace TJ
         {
             var file = new LocalizationOverrideFile();
             file.overrides.Add(new LocalizationOverrideEntryDto { locale = "en", key = "heroBonusTitle2", text = "Inspiring Presence" });
+            // Paired with the heroName1 key visible in the exported hero_overrides.json template, to
+            // show that renaming a hero is a text override rather than a hero_overrides.json edit.
+            file.overrides.Add(new LocalizationOverrideEntryDto { locale = "en", key = "heroName1", text = "Edric the Unyielding" });
             return JsonUtility.ToJson(file, true);
         }
 

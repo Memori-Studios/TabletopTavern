@@ -85,6 +85,13 @@ namespace TJ
             {
                 saveData = SaveDataHandler.Load();
             }
+
+            // MaxReserveSlots is metaprogression-derived and must be known here: MapSceneUIManager.SetUp()
+            // renders the troops panel before Load() runs. Resolve it and expand a save array that predates
+            // the third-reserve-slot unlock, otherwise RefreshTroopsPanel (which only draws
+            // min(playerArmy.Length, 10 + MaxReserveSlots) slots) never creates the third reserve slot.
+            maxReserveSlots = SaveDataHandler.IsMetaprogressionNodeUnlocked(_thirdReserveSlotMetaprogressionModel) ? 3 : 2;
+            EnsureArmyCapacity();
         }
         public void Load()
         {
@@ -143,7 +150,12 @@ namespace TJ
             DeleteCampaignSave();
             // Debug.Log($"Overriding campaign save data");
             Hero hero = HeroData.GetHeroByID(testHeroId);
-            ArmySaveData armySaveData = Resources.Load<ArmySaveData>("Armies/Heroes/" + hero.HeroName + "StarterArmy");
+            // HeroName is a localization key everywhere else, but doubles as a Resources path here.
+            // A hero_overrides.json mod can change it, which breaks only this editor-only path.
+            string starterArmyPath = "Armies/Heroes/" + hero.HeroName + "StarterArmy";
+            ArmySaveData armySaveData = Resources.Load<ArmySaveData>(starterArmyPath);
+            if (armySaveData == null)
+                Debug.LogWarning($"No starter army at '{starterArmyPath}'. If a mod overrides this hero's heroName, that rename breaks this lookup.");
 
             PlayerSaveData playerSaveData = SaveDataHandler.LoadPlayerSaveData();
             Guid runUUID = Guid.NewGuid();
@@ -282,9 +294,12 @@ namespace TJ
         {
             return saveData.withdrawnSquads.ToArray();
         }
+        // The campaign-seeded stream. GetSeededRandom's raw value steps in small increments between
+        // adjacent nodes and layers, which System.Random turns into identical first draws, so it is mixed
+        // first. Callers that feed the raw seed to UnityEngine.Random.InitState instead do not need this.
         public System.Random GetCampaignRandom()
         {
-            return new System.Random(GetSeededRandom());
+            return new System.Random(MathUtilities.MixSeed(GetSeededRandom()));
         }
         public int GetHeroID()
         {
@@ -418,7 +433,10 @@ namespace TJ
         {
             for (int i = 0; i < saveData.playerArmy.Length; i++)
             {
-                if (saveData.playerArmy[i].UnitName == UnitName.Ashguard)
+                if (saveData.playerArmy[i].UnitIndex == -1) continue;
+
+                SquadAttributes attrs = TabletopTavernData.Instance.GetSquadStats(saveData.playerArmy[i].UnitName).SquadAttributes;
+                if (attrs.Unstoppable)
                 {
                     ModifySpecificUnitHealth(0.25f, saveData.playerArmy[i].UniqueID);
                 }
@@ -562,7 +580,9 @@ namespace TJ
                 // });
                 OnUnitHealthChanged?.Invoke();
             }
-        public void RecruitSquad(SquadStats _squadsStats, float healthOfSquad = 1f)
+        // Sole path for gaining a unit mid-run. _viaRaiseDead flags the Sanguine Court post-battle
+        // reward so everything else can disqualify DeadShallServe.
+        public void RecruitSquad(SquadStats _squadsStats, float healthOfSquad = 1f, bool _viaRaiseDead = false)
         {
             EnsureArmyCapacity();
             int nextEmptyUnitIndex = GetNextEmptyUnitIndex(saveData.playerArmy);
@@ -598,6 +618,7 @@ namespace TJ
 
             Debug.Log($"[Unit] Recruited {_squadsStats.unitName} ({_squadsStats.RarityTier} {_squadsStats.unitType}) at slot {nextEmptyUnitIndex}");
             saveData.RunStats.unitsRecruited++;
+            if (!_viaRaiseDead) saveData.RunStats.gainedUnitOutsideRaiseDead = true;
             OnArmyStructureChanged?.Invoke();
         }
         public void MoveUnitToIndex(string _uniqueID, int _index)
@@ -1299,6 +1320,12 @@ namespace TJ
             SaveCampaign();
             OnConsumablesChanged?.Invoke();
         }
+
+        // Persisted "guarantee next roll" flag set by drinking a Fateshine Elixir. Read + cleared by the
+        // roll sites (EventPanel, GamesPanel, and - via SaveDataHandler - BattleDiceRollPanel).
+        public bool FateshineElixirArmed => saveData.fateshineElixirArmed;
+        public void ArmFateshineElixir()     { saveData.fateshineElixirArmed = true;  SaveCampaign(); }
+        public void ConsumeFateshineElixir() { saveData.fateshineElixirArmed = false; SaveCampaign(); }
         #endregion
 
         #region Healing
@@ -1490,7 +1517,8 @@ namespace TJ
 
             foreach (var playerSquad in _playerSquads)
             {
-                if (TabletopTavernData.Instance.GetSquadStats(playerSquad.UnitName).unitType == UnitType.Ranged)
+                // Hybrids shoot, so they disqualify the No Archers run just like a dedicated shooter.
+                if (TabletopTavernConstants.FightsAtRange(TabletopTavernData.Instance.GetSquadStats(playerSquad.UnitName).unitType))
                 {
                     saveData.archerUsedInBattle = true;
                     break;
@@ -1513,18 +1541,28 @@ namespace TJ
                 //check if it has the forge fury tempering attribute
                 if (!TabletopTavernData.Instance.GetSquadStats(squadToCheck.UnitName).SquadAttributes.ForgefuryTempering) continue;
 
-                //check if unit is already prestige 2
-                if (squadToCheck.UnitPrestige >= 2) continue;
-                
                 //try get squad kills stored for this unit
-                if (!saveData.HistoricalKillStore.Exists(x => x.SquadGUID == squadToCheck.UniqueID)) continue;
+                int killStoreIndex = saveData.HistoricalKillStore.FindIndex(x => x.SquadGUID == squadToCheck.UniqueID);
+                if (killStoreIndex < 0) continue;
 
-                SquadKillsStored squadKillsStored = saveData.HistoricalKillStore[saveData.HistoricalKillStore.FindIndex(x => x.SquadGUID == squadToCheck.UniqueID)];
-                
+                int kills = saveData.HistoricalKillStore[killStoreIndex].Kills;
 
-                if (squadKillsStored.Kills >= TabletopTavernConstants.FORGEFURY_TEMPERING_KILLS_REQUIRED * (squadToCheck.UnitPrestige + 1))
+                // Thresholds are cumulative (50 for prestige 1, 100 for prestige 2), so a squad that
+                // banks enough kills in a single battle must be able to prestige more than once here -
+                // otherwise the second level silently waits for the next battle's results screen.
+                // PrestigeSpecificUnit writes back into playerArmy in place, so re-read the slot each pass.
+                while (saveData.playerArmy[i].UnitPrestige < 2 &&
+                       kills >= TabletopTavernConstants.FORGEFURY_TEMPERING_KILLS_REQUIRED * (saveData.playerArmy[i].UnitPrestige + 1))
                 {
-                    PrestigeSpecificUnit(Array.Find(saveData.playerArmy, x => x.UniqueID == squadKillsStored.SquadGUID));
+                    int prestigeBefore = saveData.playerArmy[i].UnitPrestige;
+                    PrestigeSpecificUnit(saveData.playerArmy[i]);
+
+                    // Guard against spinning forever if the prestige didn't take (e.g. GUID lookup miss).
+                    if (saveData.playerArmy[i].UnitPrestige == prestigeBefore)
+                    {
+                        Debug.LogError($"[Unit] ForgefuryTempering prestige did not apply to {squadToCheck.UnitName} ({squadToCheck.UniqueID}), aborting.");
+                        break;
+                    }
                 }
             }
         }
@@ -1626,6 +1664,12 @@ namespace TJ
             // Bare Essentials: no consumable used all run.
             if (!saveData.RunStats.consumableUsed)
                 SteamAchievements.Unlock(AchievementId.BareEssentials);
+
+            // Dead Shall Serve: Sanguine Court run where every unit gained came from Raise Dead.
+            // The starting army does not route through RecruitSquad, so it never disqualifies.
+            if (!saveData.RunStats.gainedUnitOutsideRaiseDead &&
+                HeroData.GetRaceFromHero(saveData.heroID) == Race.SanguineCourt)
+                SteamAchievements.Unlock(AchievementId.DeadShallServe);
 
             // "Uh, pause...": never used the pause button all run. Godking only - on lower
             // difficulties you can trivially auto-resolve every battle and never get the chance to pause.

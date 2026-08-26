@@ -54,11 +54,9 @@ namespace TJ.Games
         private int largeBet;
 
         private bool diceRolled = false;
-        private bool guarentee20 = false;
         private int lastBet;
         private int lastGoldChange;
         public bool CanRewind => diceRolled;
-        public void Guarentee20() => guarentee20 = true;
 
         private void Awake()
         {
@@ -191,12 +189,12 @@ namespace TJ.Games
                 }
             }
 
-            if (guarentee20)
+            if (campaignSaveManager.FateshineElixirArmed)
             {
                 playerRoll = 6;
                 houseRoll  = 1;
                 margin     = 5;
-                guarentee20 = false;
+                campaignSaveManager.ConsumeFateshineElixir();
             }
 
             string resultMessage;

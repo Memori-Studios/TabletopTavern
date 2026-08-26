@@ -42,6 +42,7 @@ public class SquadDisplayCardBattle : SquadDisplayCard, IDragHandler, IEndDragHa
     bool inMeleeCombat;
     bool ceaseFiring;
     bool _wasRanged;
+    bool _wasCaster;
     bool _rangedCheckDone;
     bool outOfAmmo;
     
@@ -68,6 +69,9 @@ public class SquadDisplayCardBattle : SquadDisplayCard, IDragHandler, IEndDragHa
         {
             _rangedCheckDone = true;
             _wasRanged = entityManager.HasComponent<RangedSquad>(squadEntity.SelfEntity);
+            // A mage loses MageSquad rather than RangedSquad when it runs dry, so it needs its own
+            // latch - without it a spent mage never reads as spent.
+            _wasCaster = entityManager.HasComponent<MageSquad>(squadEntity.SelfEntity);
         }
 
         isMoving = entityManager.HasComponent<SquadMoveOverrideTag>(squadEntity.SelfEntity);
@@ -76,7 +80,8 @@ public class SquadDisplayCardBattle : SquadDisplayCard, IDragHandler, IEndDragHa
         defensiveStance = entityManager.IsComponentEnabled<DefensiveStanceTag>(squadEntity.SelfEntity);
         inMeleeCombat = entityManager.HasComponent<InCombat>(squadEntity.SelfEntity);
         ceaseFiring = entityManager.IsComponentEnabled<CeaseFireTag>(squadEntity.SelfEntity);
-        outOfAmmo = _wasRanged && !entityManager.HasComponent<RangedSquad>(squadEntity.SelfEntity);
+        outOfAmmo = (_wasRanged && !entityManager.HasComponent<RangedSquad>(squadEntity.SelfEntity))
+                 || (_wasCaster && !entityManager.HasComponent<MageSquad>(squadEntity.SelfEntity));
 
         isFiring = !outOfAmmo && entityManager.HasComponent<FormationEngagedInRangedCombat>(squadEntity.SelfEntity);
         if(isFiring) {
@@ -186,14 +191,16 @@ public class SquadDisplayCardBattle : SquadDisplayCard, IDragHandler, IEndDragHa
         if(distanceInX < -60)
         {
             int index = cachedDummySquadCard.transform.GetSiblingIndex();
+            // The dragged card parks at the last sibling index and the dummy holds its slot, so the
+            // last real card sits at childCount - 2. Without this the dummy can be pushed past the
+            // end, where GetGroupNumberForSquadAtIndex returns -1 and reads as "ungrouped".
+            if (index >= transform.parent.childCount - 2) return;
             // Block if the card to the right is in a different group (or grouped when we're not).
             int neighborGroup = BattleManager.Instance.GroupManager.GetGroupNumberForSquadAtIndex(index + 1);
             if(neighborGroup != _dragGroupNumber) return;
-            if (index < transform.parent.childCount) {
-                cachedDummySquadCard.transform.SetSiblingIndex(index+1);
-                initialPosition = cachedDummySquadCard.transform.position;
-                IAudioRequester.Instance.PlaySFX(SFXData.TinyClick);
-            }
+            cachedDummySquadCard.transform.SetSiblingIndex(index+1);
+            initialPosition = cachedDummySquadCard.transform.position;
+            IAudioRequester.Instance.PlaySFX(SFXData.TinyClick);
         }
 
         if (distanceInX > 60)

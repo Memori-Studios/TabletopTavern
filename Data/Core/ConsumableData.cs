@@ -125,48 +125,26 @@ namespace TJ
                 ConsumableEnum.LambSauce //Legendary
             };
         }
-        public static ConsumableEnum GetRandomConsumable()
+        // Consumable draws are seeded on purpose - there is deliberately no UnityEngine.Random variant.
+        // Campaign consumable offers use this with a campaign-derived stream
+        // (CampaignSaveManager.GetCampaignRandom/GetSeededRandom) so leaving and re-entering a node -
+        // exiting to the main menu, for example - regenerates the same offer instead of rerolling it.
+        // Same protection gear already gets through CampaignSaveManager.DrawRandomGear.
+        public static ConsumableEnum GetRandomConsumable(System.Random random)
         {
-            return GetAllConsumableEnums()[Random.Range(0, GetAllConsumableEnums().Length)];
-        }
-        public static ConsumableEnum GetWeightedConsumable(int actNumber, bool hasLuckyHorseshoe = false)
-        {
-            ConsumableEnum GetRandomWeightedItem(ConsumableEnum[] items, float[] weights)
-            {
-                float totalWeight = 0f;
-                foreach (float weight in weights)
-                {
-                    totalWeight += weight;
-                }
-
-                float randomValue = Random.Range(0, totalWeight);
-                float cumulativeWeight = 0f;
-
-                for (int i = 0; i < items.Length; i++)
-                {
-                    cumulativeWeight += weights[i];
-                    if (randomValue <= cumulativeWeight)
-                    {
-                        return items[i];
-                    }
-                }
-
-                return items[items.Length - 1]; // Fallback in case of rounding errors
-            }
             ConsumableEnum[] allConsumables = GetAllConsumableEnums();
-            if (hasLuckyHorseshoe)
-                allConsumables = System.Array.FindAll(allConsumables, c => GetConsumable(c).ConsumableRarity != ConsumableRarity.Common);
-            float[] weights = new float[allConsumables.Length];
-            for (int i = 0; i < allConsumables.Length; i++)
-            {
-                weights[i] = ConsumableDropChance(allConsumables[i], actNumber);
-            }
-
-            return GetRandomWeightedItem(allConsumables, weights);
+            return allConsumables[random.Next(0, allConsumables.Length)];
         }
+        // Takes a raw campaign seed (CampaignSaveManager.GetSeededRandom, usually plus a per-item offset)
+        // and mixes it, without which adjacent seeds hand back the same consumable.
         public static ConsumableEnum GetWeightedConsumable(int bookNumber, int seed)
         {
-            ConsumableEnum GetRandomWeightedItem(ConsumableEnum[] items, float[] weights, System.Random random)
+            return GetWeightedConsumable(bookNumber, new System.Random(MathUtilities.MixSeed(seed)));
+        }
+        // Rarity-weighted draw. Seeded for the same reason as GetRandomConsumable(System.Random) above.
+        public static ConsumableEnum GetWeightedConsumable(int bookNumber, System.Random random, bool hasLuckyHorseshoe = false)
+        {
+            ConsumableEnum GetRandomWeightedItem(ConsumableEnum[] items, float[] weights)
             {
                 float totalWeight = 0f;
                 foreach (float weight in weights)
@@ -185,13 +163,14 @@ namespace TJ
                 return items[items.Length - 1];
             }
 
-            System.Random random = new(seed);
             ConsumableEnum[] allConsumables = GetAllConsumableEnums();
+            if (hasLuckyHorseshoe)
+                allConsumables = System.Array.FindAll(allConsumables, c => GetConsumable(c).ConsumableRarity != ConsumableRarity.Common);
             float[] weights = new float[allConsumables.Length];
             for (int i = 0; i < allConsumables.Length; i++)
                 weights[i] = ConsumableDropChance(allConsumables[i], bookNumber);
 
-            return GetRandomWeightedItem(allConsumables, weights, random);
+            return GetRandomWeightedItem(allConsumables, weights);
         }
         public static float ConsumableDropChance(ConsumableEnum _consumable, int actNumber)
         {

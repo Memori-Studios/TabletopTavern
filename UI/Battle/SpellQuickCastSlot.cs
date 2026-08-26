@@ -16,7 +16,20 @@ namespace TJ
 
         public void SetUp(SpellData spellData, Action _onPointerEnter, Action _onPointerExit)
         {
+            // An empty slot (hotbar longer than the loadout) shows no icon and cannot be queued.
+            if(spellData == null)
+            {
+                spellSprite.enabled = false;
+                onPointerEnter = null;
+                onPointerExit = null;
+                tooltipTrigger.SetUpToolTip();
+                return;
+            }
+
+            spellSprite.enabled = true;
             spellSprite.sprite = spellData.SpellSprite;
+            // Same faction colour the picker and the hotbar use, so a spell is recognisable here too.
+            spellSprite.color = ColorData.GetRaceDisplayColor(spellData.Race);
             onPointerEnter = _onPointerEnter;
             onPointerExit = _onPointerExit;
 

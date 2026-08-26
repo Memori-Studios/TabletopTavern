@@ -103,7 +103,7 @@ public class GameOverPanel : MonoBehaviour
         goldEarnedText.text = runStats.goldEarned.ToString();
         enemiesSlainText.text = runStats.enemiesSlain.ToString();
 
-        renownEarnedText.text = $"<color={ColorData.Legendary}>{renownAward.total}</color>";
+        renownEarnedText.text = $"<color={ColorData.Tier4}>{renownAward.total}</color>";
         renownBreakdownText.text = $"{renownAward.chaptersCompleted} {chaptersLocalized}  |  {renownAward.actsCompleted} {actsLocalized} (+{renownAward.actRenown})  |  {difficultyNamestring} (x{renownAward.difficultyMultiplier:0.00})";
 
         GameEventTracker.RunEnded(saveData.heroID, (int)saveData.difficultyLevel, _beatDemo ? RunResult.Win : RunResult.Loss, runStats.chaptersCompleted);

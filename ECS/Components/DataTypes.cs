@@ -3,7 +3,10 @@ using System.Collections.Generic;
 using Unity.Mathematics;
 using TJ;
 
-public enum UnitType { Melee, Ranged, Hybrid, Artillery, Structure }
+// Append only - ordinals are serialized as stats.unitType in every SquadData asset.
+// Mage casts a spell instead of shooting: no ShootAttack, charges instead of ammo, and it
+// fights in melee when engaged. See the unit type predicates in TabletopTavernConstants.
+public enum UnitType { Melee, Ranged, Hybrid, Artillery, Structure, Mage }
 public enum UnitCondition { None, InForest, InCombat, IsCharging, IsTerrified, InSwamp, IsExhausted, IsOutOfAmmo, GarrisonDefender, DefendersResolve }
 public enum UnitStat { MeleeAttack, MeleeDefense, WeaponStrength, 
     Accuracy, Range, MissileStrength, HitPoints, None, Speed, 
@@ -72,6 +75,11 @@ public enum UnitName
     Kaiju, ObsidianScales,
 
     Gate,
+
+    // Append only, and never without its SquadData asset in the same change: the stats blob is
+    // sized by SquadStatsDictionary.Count but indexed by this ordinal, so a name with no asset
+    // reads past the end of the BlobArray inside Burst rather than logging anything.
+    BishopOfIron,
 }
 [System.Serializable] public struct SquadSpawnData {
     public int squadId;
@@ -210,7 +218,8 @@ public static class BonusTagRegistry
     private static readonly Dictionary<string, System.Func<UnitName, SquadStats, bool>> _tags = new()
     {
         { "Goblin", (unitName, stats) => TabletopTavernConstants.IsAGoblinUnit(unitName) },
-        { "MeleeInfantry", (unitName, stats) => stats.unitType == UnitType.Melee && stats.unitSize == UnitSize.Infantry },
+        // Hybrids count: they hold the melee line, so Hero 5's Melee Infantry bonus applies to them.
+        { "MeleeInfantry", (unitName, stats) => TabletopTavernConstants.FightsInMelee(stats.unitType) && stats.unitSize == UnitSize.Infantry },
     };
 
     public static bool Evaluate(string tag, UnitName unitName, SquadStats stats)

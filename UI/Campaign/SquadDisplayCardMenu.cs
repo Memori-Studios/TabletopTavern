@@ -1,3 +1,4 @@
+using System.Collections;
 using TMPro;
 using UnityEngine;
 using UnityEngine.EventSystems;
@@ -62,6 +63,9 @@ namespace TJ
         bool cachedShowOptions, cachedShowRenamePrestige, cachedShowMerge, cachedShowPrestige;
         bool isPrestigeAvailable;
         Canvas canvas;
+        bool wantsInheritedCanvasSorting;
+        Coroutine inheritCanvasSortingRoutine;
+        const int INHERIT_CANVAS_SORTING_ATTEMPTS = 5;
         bool isEnemy;
         public Team CardTeam => isEnemy ? Team.Enemy : Team.Player;
         bool inReserve;
@@ -113,6 +117,87 @@ namespace TJ
             graphicRaycaster = GetComponent<GraphicRaycaster>();
 
             SetUpToolTips();
+        }
+        private void OnEnable()
+        {
+            // Becoming active is the first moment a card built into a hidden column can stop being
+            // a root canvas, so this is where that deferred request is honoured.
+            if (wantsInheritedCanvasSorting) InheritCanvasSorting();
+        }
+        /// <summary>
+        /// Drops this card's canvas overrides so it renders inside whatever canvas it was placed in.
+        ///
+        /// The prefab keeps Override Sorting on (card at 2, health bar text at 101) so the map HUD
+        /// can lift a dragged card to 102 above its neighbours. That override also detaches the card
+        /// from its parent chain, so anywhere the containing panel sorts above 2 the card is drawn
+        /// behind that panel and the slot reads as empty - run setup's Total Play Panel is at 104.
+        /// Cards there are locked and never dragged, so the override buys them nothing.
+        ///
+        /// Unity forces overrideSorting true while the card counts as a ROOT canvas and silently
+        /// discards the write, so being parented at Instantiate is not enough on its own - an
+        /// INACTIVE card is a root canvas too. Run setup builds the recruit tiers into a source
+        /// column that stays inactive until its first SetFocus, which is why those cards came out
+        /// stuck at order 2, behind a Total Play Panel at 104, only on a fresh panel open.
+        /// So this latches the request, verifies the write, and re-applies it in OnEnable.
+        /// </summary>
+        public void InheritCanvasSorting()
+        {
+            wantsInheritedCanvasSorting = true;
+            canvas = GetComponent<Canvas>();
+
+            if (TryInheritCanvasSorting()) return;
+
+            // An inactive card IS a root canvas, so the override cannot be released yet and no
+            // coroutine can run to retry. Not an error - OnEnable picks it up when the column is
+            // shown. Run setup builds the recruit tiers into a source column that is still inactive
+            // until its first SetFocus, so this is the normal path there on a fresh panel open.
+            if (!isActiveAndEnabled) return;
+
+            if (inheritCanvasSortingRoutine != null) StopCoroutine(inheritCanvasSortingRoutine);
+            inheritCanvasSortingRoutine = StartCoroutine(RetryInheritCanvasSorting());
+        }
+        /// <summary>Returns whether the override was actually released.</summary>
+        private bool TryInheritCanvasSorting()
+        {
+            canvas.overrideSorting = false;
+            healthBarTextCanvas.overrideSorting = false;
+            return !canvas.overrideSorting;
+        }
+        private IEnumerator RetryInheritCanvasSorting()
+        {
+            // One frame is all the parent canvases need to register. The cap is a backstop so a card
+            // that is genuinely a root canvas reports itself instead of retrying forever.
+            for (int attempt = 0; attempt < INHERIT_CANVAS_SORTING_ATTEMPTS; attempt++)
+            {
+                yield return null;
+                if (!wantsInheritedCanvasSorting) yield break;
+                if (TryInheritCanvasSorting())
+                {
+                    inheritCanvasSortingRoutine = null;
+                    yield break;
+                }
+            }
+            inheritCanvasSortingRoutine = null;
+            Debug.LogError($"[SquadDisplayCardMenu] {name} is still overriding canvas sorting after {INHERIT_CANVAS_SORTING_ATTEMPTS} frames - Unity sees no enabled parent Canvas. Parent chain: {GetHierarchyPath()}");
+        }
+        /// <summary>
+        /// Diagnostic only. Names every ancestor and flags which of them Unity would accept as this
+        /// card's parent canvas, which is the one thing the "still a root canvas" error cannot show.
+        /// </summary>
+        private string GetHierarchyPath()
+        {
+            System.Text.StringBuilder path = new();
+            for (Transform t = transform.parent; t != null; t = t.parent)
+            {
+                path.Append(" < ").Append(t.name);
+                if (!t.gameObject.activeInHierarchy) path.Append("(inactive)");
+                Canvas parentCanvas = t.GetComponent<Canvas>();
+                if (parentCanvas != null)
+                {
+                    path.Append(parentCanvas.enabled ? "[Canvas enabled]" : "[Canvas DISABLED]");
+                }
+            }
+            return path.ToString();
         }
         public void LockCard(bool _lock)
         {
@@ -560,9 +645,7 @@ namespace TJ
         {
             string prestigeLocalised = LocalizationManager.Instance.GetText("Prestige");
             string prestigeTooltipLocalised = LocalizationManager.Instance.GetText("PrestigeTooltip");
-            string unitTypeLocalised = TabletopTavernConstants.UsesMeleePrestige(squad.UnitName)
-                ? LocalizationManager.Instance.GetText(squad.UnitName.ToString())
-                : LocalizationManager.Instance.GetText(unitType.ToString());
+            string unitTypeLocalised = LocalizationManager.Instance.GetText(unitType.ToString());
             string unitsGainLocalised = LocalizationManager.Instance.GetText("UnitsGain");
             string meleeAttackLocalised = LocalizationManager.Instance.GetText("MeleeAttack");
             string meleeDefenseLocalised = LocalizationManager.Instance.GetText("MeleeDefense");
@@ -574,11 +657,16 @@ namespace TJ
             string perLevelLocalised = LocalizationManager.Instance.GetText("PerLevel");
             string mergeUnitsDescriptionLocalised = LocalizationManager.Instance.GetText("MergeUnitsDescription");
 
-            if(unitType == UnitType.Melee || unitType == UnitType.Hybrid || TabletopTavernConstants.UsesMeleePrestige(squad.UnitName)) {
+            if(TabletopTavernConstants.FightsInMelee(unitType)) {
                 prestigeTooltipLocalised += $"[{unitTypeLocalised}] {unitsGainLocalised} <color={ColorData.Green}>+{TabletopTavernConstants.PRESTIGE_BONUS}</color> <color={ColorData.UnitStat}>{meleeAttackLocalised}</color>, <color={ColorData.Green}>+{TabletopTavernConstants.PRESTIGE_BONUS}</color> <color={ColorData.UnitStat}>{meleeDefenseLocalised}</color> {andLocalised} <color={ColorData.Green}>+{TabletopTavernConstants.PRESTIGE_BONUS}</color> <color={ColorData.UnitStat}>{leadershipLocalised}</color> {perLevelLocalised}";
             } else if(unitType == UnitType.Ranged || unitType == UnitType.Artillery) {
                 int ammoBonusPerLevel = unitType == UnitType.Artillery ? TabletopTavernConstants.PRESTIGE_AMMO_BONUS_ARTILLERY : TabletopTavernConstants.PRESTIGE_AMMO_BONUS_RANGED;
                 prestigeTooltipLocalised += $"[{unitTypeLocalised}] {unitsGainLocalised} <color={ColorData.Green}>+{TabletopTavernConstants.PRESTIGE_BONUS}</color> <color={ColorData.UnitStat}>{accuracyLocalised}</color>, <color={ColorData.Green}>+{TabletopTavernConstants.PRESTIGE_BONUS}</color> <color={ColorData.UnitStat}>{rangeLocalised}</color> {andLocalised} <color={ColorData.Green}>+{ammoBonusPerLevel}</color> <color={ColorData.UnitStat}>{ammunitionLocalised}</color> {perLevelLocalised}";
+            } else if(TabletopTavernConstants.Casts(unitType)) {
+                // Range, Leadership and charges - no Accuracy. The branch above is an explicit
+                // whitelist and this one is neither of the first two, so without it a mage's
+                // prestige tooltip renders with no gains listed at all.
+                prestigeTooltipLocalised += $"[{unitTypeLocalised}] {unitsGainLocalised} <color={ColorData.Green}>+{TabletopTavernConstants.PRESTIGE_BONUS}</color> <color={ColorData.UnitStat}>{rangeLocalised}</color>, <color={ColorData.Green}>+{TabletopTavernConstants.PRESTIGE_BONUS}</color> <color={ColorData.UnitStat}>{leadershipLocalised}</color> {andLocalised} <color={ColorData.Green}>+{TabletopTavernConstants.PRESTIGE_AMMO_BONUS_MAGE}</color> <color={ColorData.UnitStat}>{ammunitionLocalised}</color> {perLevelLocalised}";
             }
 
             string renameLocalised = LocalizationManager.Instance.GetText("Rename Unit");

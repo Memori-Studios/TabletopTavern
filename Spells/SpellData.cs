@@ -6,8 +6,16 @@ using Memori.Localization;
 namespace TJ.Spells
 {
     // Append only - ordinals are serialized into SpellData .asset files.
+    // RallyTheBanners is Edric's signature, held by 'Iron Legion Spell 1 - IL.asset'. It briefly
+    // declared LesserMoraleSpell, colliding with the real Lesser Morale Spell asset, which then
+    // stood in as Edric's signature until this one was authored as a charge-empowerment aura.
     public enum Spell { None, LesserMoraleSpell, LesserDamageSpell, LesserWindSpell, LesserWeaponStrengthSpell, LightningStrike, NaturesWrath, Heal, Fireball, SkeletalSummon, HuntersMark, Sunder,
-        IaijutsuFlash, ArtilleryBombardment, Cyclone, Dread, Smokescreen, Rampage, Shieldwall, Starstep, HealingGrove, SnareTrap, Taunt, VenomousBite, SnareWeb }
+        IaijutsuFlash, ArtilleryBombardment, Cyclone, Dread, Smokescreen, Rampage, Shieldwall, Starstep, HealingGrove, SnareTrap, Taunt, VenomousBite, SnareWeb, RallyTheBanners,
+        // Cast by a mage UNIT rather than the player. Deliberately absent from SpellRegistry: that
+        // registry drives the run-setup grimoire, and GetGrimoireSpells only lists spells that are
+        // always-available or some hero's signature, so a unit spell would render as a permanently
+        // locked row nobody could ever unlock. A mage reaches its spell through SquadAssets.mageSpell.
+        Smite }
     // World: raycast ground point, stays fixed. Squad: follows the target squad's live
     // position through warmup and damage resolution.
     public enum SpellTargetingType { World, Squad }
@@ -33,6 +41,8 @@ namespace TJ.Spells
         public SpellTargetingType SpellTargetingType;
         public SpellType SpellType;
         public float SpellCooldown;
+        // Spent from the per-battle mana budget on cast. Cooldown paces casts within a battle; mana caps how many there are.
+        public int SpellManaCost;
         public Sprite SpellSprite;
         public float SpellRadius;
         public float SpellWarmUpDuration;
@@ -87,6 +97,12 @@ namespace TJ.Spells
         // Optional. When set, the pre-battle browse menu tints each spell's background with a gradient
         // built from this race's PrimaryColor -> SecondaryColor, to visually group spells by race.
         public RaceData RaceData;
+
+        [Header("Mage Unit Casting")]
+        // How a mage UNIT picks a target for this spell. Ignored by hotbar casts, which the player
+        // aims. Read by EntityWatcher at squad spawn into MageSquad.TargetPriority, because
+        // MageSquadFindTargetSystem cannot read a managed ScriptableObject.
+        public MageTargetPriority MageTargetPriority;
 
         [Header("Summon")]
         public bool SummonsSquad;

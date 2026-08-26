@@ -264,14 +264,14 @@ namespace TJ
                 }
             }
 
-            //ranged/artillery ammo only needs to be checked a couple times a second, not every frame
+            //ranged/artillery ammo and mage charges only need to be checked a couple times a second, not every frame
             ammoRefreshTimer += Time.deltaTime;
             if (ammoRefreshTimer >= AMMO_REFRESH_INTERVAL)
             {
                 ammoRefreshTimer = 0f;
-                if (entityManager.HasComponent<RangedSquad>(squadEntity.SelfEntity))
+                if (entityManager.HasComponent<SquadAmmunition>(squadEntity.SelfEntity))
                 {
-                    int currentAmmunition = entityManager.GetComponentData<RangedSquad>(squadEntity.SelfEntity).Ammunition;
+                    int currentAmmunition = entityManager.GetComponentData<SquadAmmunition>(squadEntity.SelfEntity).Value;
                     if (lastAmmunition != currentAmmunition)
                     {
                         lastAmmunition = currentAmmunition;
@@ -352,40 +352,15 @@ namespace TJ
             Race race = TabletopTavernData.Instance.GetRaceFromUnitName(squadStats.unitName);
             RaceData raceData = TabletopTavernData.Instance.GetRaceData(race);
 
-            Color passiveColor = raceData != null ? race switch
-            {
-                Race.IronLegion      => raceData.PrimaryColor,
-                Race.Gruntkin        => raceData.PrimaryColor,
-                Race.RavenHost       => raceData.PrimaryColor,
-                Race.TaelindorForest => raceData.PrimaryColor,
-                Race.SanguineCourt   => raceData.SecondaryColor,
-                Race.SakuraDynasty   => raceData.SecondaryColor,
-                Race.DeepstoneHold   => raceData.PrimaryColor,
-                Race.DrakosaurBrood  => raceData.PrimaryColor,
-                _                    => raceData.PrimaryColor,
-            } : Color.white;
-
-            float alpha = race switch
-            {
-                Race.IronLegion      => 25f,
-                Race.Gruntkin        => 85f,
-                Race.RavenHost       => 65f,
-                Race.TaelindorForest => 15f,
-                Race.SanguineCourt   => 10f,
-                Race.SakuraDynasty   => 10f,
-                Race.DeepstoneHold   => 35f,
-                Race.DrakosaurBrood  => 25f,
-                _                    => 25f,
-            };
-
+            Color passiveColor = ColorData.GetRacePassiveColor(race, raceData);
             raceColorImage1.color = passiveColor;
-            raceColorImage2.color = new Color(passiveColor.r, passiveColor.g, passiveColor.b, alpha / 255f);
+            raceColorImage2.color = ColorData.WithAlpha255(passiveColor, ColorData.GetRacePassiveAlpha(race));
 
             string campaignBonusTitle = LocalizationManager.Instance.GetText("Campaign Bonus");
             string campaignRaceTitle = LocalizationManager.Instance.GetText(race.ToString());
             passiveTitleText.text = $"{campaignBonusTitle} - {campaignRaceTitle}";
             string passiveName = LocalizationManager.Instance.GetText(race.ToString() + "PassiveName");
-            string passiveDesc = LocalizationManager.Instance.GetText(race.ToString() + "PassiveDescription");
+            string passiveDesc = RacePassiveInfo.GetDescription(race);
             passiveNameText.text = passiveName;
 
             passiveTooltipTrigger.SetUpToolTip(_title: passiveName, _description: passiveDesc);

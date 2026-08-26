@@ -144,11 +144,21 @@ public class UnitPositioningManager : MonoBehaviour
                 float3 averagePosition = float3.zero;
                 quaternion desiredRotation = quaternion.AxisAngle(math.up(), (battleInputManager.Angle + 90) * Mathf.Deg2Rad);
 
-                for(int i = 0; i < kvp.Value.Count; i++)
+                // The pool was laid out per squad in this same order, but only ActivePointCount points
+                // were positioned. Reading past that returns stale coordinates, so clamp instead.
+                int availablePoints = Mathf.Clamp(positionDrawer.ActivePointCount - unitIndexOffset, 0, kvp.Value.Count);
+                if(availablePoints == 0)
+                {
+                    Debug.LogWarning($"QueueSquadCommand: no preview points for squad {kvp.Key} (pool has {positionDrawer.ActivePointCount}, offset {unitIndexOffset}) - skipping move");
+                    unitIndexOffset += kvp.Value.Count;
+                    continue;
+                }
+
+                for(int i = 0; i < availablePoints; i++)
                 {
                     averagePosition += movePositionArray[i + unitIndexOffset];
                 }
-                averagePosition /= kvp.Value.Count;
+                averagePosition /= availablePoints;
                 averagePosition = new float3(averagePosition.x, 0, averagePosition.z);
                 unitIndexOffset += kvp.Value.Count;
 

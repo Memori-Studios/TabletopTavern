@@ -86,11 +86,10 @@ namespace TJ
             {
                 SquadEntity squadEntity = _entityManager.GetComponentData<SquadEntity>(entity);
                 UnitType    unitType    = TabletopTavernData.Instance.GetUnitTypeFromUnitName(squadEntity.UnitName);
-                switch (unitType)
-                {
-                    case UnitType.Artillery: _artillerySquads.Add(entity); break;
-                    case UnitType.Ranged:    _archerSquads.Add(entity);    break;
-                }
+                // Hybrids carry RangedSquad + RangedFireModeSquadComponent, so every archer brain
+                // below (volley escalation, desperation phase, retargeting) applies to them.
+                if (unitType == UnitType.Artillery) _artillerySquads.Add(entity);
+                else if (TabletopTavernConstants.FightsAtRange(unitType)) _archerSquads.Add(entity);
             }
             enemyEntities.Dispose();
         }
@@ -150,7 +149,7 @@ namespace TJ
                 if (!_entityManager.Exists(entity)) continue;
 
                 SquadEntity squadEntity = _entityManager.GetComponentData<SquadEntity>(entity);
-                if (TabletopTavernData.Instance.GetUnitTypeFromUnitName(squadEntity.UnitName) != UnitType.Ranged) continue;
+                if (!TabletopTavernConstants.FightsAtRange(TabletopTavernData.Instance.GetUnitTypeFromUnitName(squadEntity.UnitName))) continue;
                 if (!_entityManager.HasComponent<RangedFireModeSquadComponent>(squadEntity.SelfEntity)) continue;
 
                 SetSquadToFireAtWill(squadEntity.SelfEntity);

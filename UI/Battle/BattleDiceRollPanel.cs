@@ -44,7 +44,19 @@ namespace TJ
 
         public async Task<int> ShowAndRoll()
         {
-            bool hasFateshineElixir = SaveDataHandler.Load().consumables.Contains(ConsumableEnum.FateshineElixir);
+            CampaignSaveData saveData = SaveDataHandler.Load();
+            bool armed = saveData.fateshineElixirArmed;
+            bool hasFateshineElixir = saveData.consumables.Contains(ConsumableEnum.FateshineElixir);
+
+            // Drunk-on-the-map guarantee: auto-apply to this initiative roll and clear the persisted flag.
+            if (armed)
+            {
+                saveData.fateshineElixirArmed = false;
+                SaveDataHandler.SaveCampaign(saveData);
+                IAudioRequester.Instance.PlaySFX(SFXData.Drink);
+                return await AutoRoll(6);
+            }
+
             if (SettingsManager.Instance.AutoRollInitiative.Value && !hasFateshineElixir)
                 return await AutoRoll();
 
@@ -80,9 +92,9 @@ namespace TJ
             int result = useElixir ? 6 : Random.Range(1, 7);
             if (useElixir)
             {
-                CampaignSaveData saveData = SaveDataHandler.Load();
-                saveData.consumables.Remove(ConsumableEnum.FateshineElixir);
-                SaveDataHandler.SaveCampaign(saveData);
+                CampaignSaveData elixirSaveData = SaveDataHandler.Load();
+                elixirSaveData.consumables.Remove(ConsumableEnum.FateshineElixir);
+                SaveDataHandler.SaveCampaign(elixirSaveData);
                 IAudioRequester.Instance.PlaySFX(SFXData.Drink);
             }
 
@@ -165,7 +177,7 @@ namespace TJ
             if (_loseSubText != null) _loseSubText.color = playerSecond ? _dimColor  : _loseColor;
         }
 
-        private async Task<int> AutoRoll()
+        private async Task<int> AutoRoll(int forcedResult = 0)
         {
             StartBattleRequested = false;
             _panelGroup.CGEnable();
@@ -178,7 +190,7 @@ namespace TJ
             if (_loseText    != null) _loseText.color    = _dimColor;
             if (_loseSubText != null) _loseSubText.color = _dimColor;
 
-            int result = Random.Range(1, 7);
+            int result = forcedResult > 0 ? forcedResult : Random.Range(1, 7);
             await AnimateRoll(result);
 
             string resultSFX = result switch

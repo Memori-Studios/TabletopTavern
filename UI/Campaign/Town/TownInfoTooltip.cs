@@ -52,24 +52,24 @@ public class TownInfoTooltip : MemoriButtonV2
         description += descriptionLocalized;
 
         description += $"\n\n{garrisonLocalized}:<color {ColorData.Tier1}></color>";
-        description += $"\n<color {ColorData.Common}>{villageLocalized}: 4 {garrisonUnitsLocalized}</color>";
-        description += $"\n<color {ColorData.Uncommon}>{castleLocalized}: 6 {garrisonUnitsLocalized}</color>";
-        description += $"\n<color {ColorData.Rare}>{cityLocalized}: 7 {garrisonUnitsLocalized}</color>";
+        description += $"\n<color {ColorData.Tier1}>{villageLocalized}: 4 {garrisonUnitsLocalized}</color>";
+        description += $"\n<color {ColorData.Tier2}>{castleLocalized}: 6 {garrisonUnitsLocalized}</color>";
+        description += $"\n<color {ColorData.Tier3}>{cityLocalized}: 7 {garrisonUnitsLocalized}</color>";
 
         description += $"\n\n{bountyLocalized}:<color {ColorData.Tier1}></color>";
-        description += $"\n<color {ColorData.Common}>{villageLocalized}: 4-6 </color><sprite name=GoldSprite>";
-        description += $"\n<color {ColorData.Uncommon}>{castleLocalized}: 9-11 </color><sprite name=GoldSprite>";
-        description += $"\n<color {ColorData.Rare}>{cityLocalized}: 14-16 </color><sprite name=GoldSprite>";
+        description += $"\n<color {ColorData.Tier1}>{villageLocalized}: 4-6 </color><sprite name=GoldSprite>";
+        description += $"\n<color {ColorData.Tier2}>{castleLocalized}: 9-11 </color><sprite name=GoldSprite>";
+        description += $"\n<color {ColorData.Tier3}>{cityLocalized}: 14-16 </color><sprite name=GoldSprite>";
 
         // description += $"\n\n{merchantDistrictLocalized}:<color {ColorData.Tier1}></color>";
-        // description += $"\n<color {ColorData.Common}>{smallLocalized}: 3 {gearItemsLocalized} ({noConsumablesLocalized})</color>";
-        // description += $"\n<color {ColorData.Uncommon}>{mediumLocalized}: 5 {gearItemsLocalized}</color>";
-        // description += $"\n<color {ColorData.Rare}>{largeLocalized}: 7 {gearItemsLocalized}</color>";
+        // description += $"\n<color {ColorData.Tier1}>{smallLocalized}: 3 {gearItemsLocalized} ({noConsumablesLocalized})</color>";
+        // description += $"\n<color {ColorData.Tier2}>{mediumLocalized}: 5 {gearItemsLocalized}</color>";
+        // description += $"\n<color {ColorData.Tier3}>{largeLocalized}: 7 {gearItemsLocalized}</color>";
 
         // description += $"\n\n{recruitmentOptionsLocalized}:<color {ColorData.Tier1}></color>";
-        // description += $"\n<color {ColorData.Common}>{weakLocalized}: 1 {unitsAvailableLocalized}</color>";
-        // description += $"\n<color {ColorData.Uncommon}>{moderateLocalized}: 2 {unitsAvailableLocalized}</color>";
-        // description += $"\n<color {ColorData.Rare}>{strongLocalized2}: 3 {unitsAvailableLocalized}</color>";
+        // description += $"\n<color {ColorData.Tier1}>{weakLocalized}: 1 {unitsAvailableLocalized}</color>";
+        // description += $"\n<color {ColorData.Tier2}>{moderateLocalized}: 2 {unitsAvailableLocalized}</color>";
+        // description += $"\n<color {ColorData.Tier3}>{strongLocalized2}: 3 {unitsAvailableLocalized}</color>";
 
         descText.text = description;
     }

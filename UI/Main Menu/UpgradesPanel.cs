@@ -2,6 +2,7 @@ using Memori.Tooltip;
 using UnityEngine;
 using TMPro;
 using Memori.SaveData;
+using Memori.Steamworks;
 using Memori.Metaprogression;
 using System.Collections.Generic;
 using UnityEngine.UI;
@@ -42,7 +43,6 @@ namespace TJ.MainMenu
         int _renownAvailable = 0;
         bool _isOpen = false;
 
-        [ContextMenu("Display Nodes")]
         private void Start()
         {
             _metaprogressionCamera.enabled = false;
@@ -75,17 +75,12 @@ namespace TJ.MainMenu
 
                 if (presenter != null)
                 {
-                    bool parentIsUnlocked = true;
-                    if(presenter.ParentPresenter != null) parentIsUnlocked = presenter.ParentPresenter.IsUnlocked;
-
-                    string costText = parentIsUnlocked ? "" : $"<color {ColorData.Error}>{LocalizationManager.Instance.GetText("upgradesLockedRequiresPreviousNode")}</color>\n";
-                    costText += LocalizationManager.Instance.GetText("Cost") + ": " + presenter.MetaprogressionModel.NodeCost.ToString();
-
                     if(_selectedNode != presenter)
                     {
                         _selectedNode = presenter;
                         IAudioRequester.Instance.PlaySFX(SFXData.ButtonHover);
 
+                        string costText = BuildNodeCostText(presenter);
                         int nodeValue = presenter.MetaprogressionModel.NodeValue;
                         string nodeName = LocalizationManager.Instance.GetText($"metaprogressionModel{presenter.MetaprogressionModel.NodeId}") + (nodeValue != 0 ? $" {nodeValue}" : "") + (presenter.MetaprogressionModel.AddGoldSprite ? " <sprite name=GoldSprite>" : "");
                         
@@ -121,9 +116,34 @@ namespace TJ.MainMenu
                 PurchaseUnlockNode();
             }
         }
+        /// <summary>
+        /// The body of a node's hover tooltip: its price, or why it cannot be bought.
+        ///
+        /// A gated node shows only "Not yet available." - quoting a price for something no amount of
+        /// Renown can buy reads as a bug. The key is shared with the spell grimoire's unobtainable
+        /// row rather than duplicated: the sentence is generic and already translated everywhere, and
+        /// the two surfaces are saying the same thing.
+        /// </summary>
+        private string BuildNodeCostText(MetaprogressionPresenter _presenter)
+        {
+            if(_presenter.MetaprogressionModel.ComingSoon)
+                return $"<color={ColorData.Error}>{LocalizationManager.Instance.GetText("SpellLockedUnknownDesc")}</color>";
+
+            bool parentIsUnlocked = true;
+            if(_presenter.ParentPresenter != null) parentIsUnlocked = _presenter.ParentPresenter.IsUnlocked;
+
+            string costText = parentIsUnlocked ? "" : $"<color={ColorData.Error}>{LocalizationManager.Instance.GetText("upgradesLockedRequiresPreviousNode")}</color>\n";
+            return costText + LocalizationManager.Instance.GetText("Cost") + ": " + _presenter.MetaprogressionModel.NodeCost.ToString();
+        }
         public void PurchaseUnlockNode()
         {
             if(_selectedNode == null) return;
+
+            if(_selectedNode.MetaprogressionModel.ComingSoon)
+            {
+                NotificationManager.Instance.DisplayNotification(LocalizationManager.Instance.GetText("SpellLockedUnknownDesc"));
+                return;
+            }
 
             if(_unlockedNodes.Contains(_selectedNode.MetaprogressionModel))
             {
@@ -150,6 +170,35 @@ namespace TJ.MainMenu
             IAudioRequester.Instance.PlaySFX(SFXData.SelectHero);
             CalculateRenownSpent();
             _metaprogressionManager.HighlightAvailableUpgrades(_unlockedNodes, _renownAvailable);
+            CheckMetaprogressionComplete();
+        }
+        /// <summary>
+        /// "Legend of the Tavern" - every node in the Renown tree unlocked. Walks the tree rather than
+        /// comparing counts, so a node appearing twice in the topology cannot unlock this early.
+        ///
+        /// Gated nodes are excluded, because requiring one no player can buy would make the
+        /// achievement unobtainable for the whole patch. The tradeoff is deliberate: someone who
+        /// clears the tree now keeps the achievement after the gated branch ships, since Steam
+        /// achievements are never revoked.
+        /// </summary>
+        private void CheckMetaprogressionComplete()
+        {
+            MetaprogressionTreeModel treeModel = _metaprogressionManager.MetaprogressionTreeModel;
+
+            // Counted rather than taken from the array length: an empty tree, or one that is entirely
+            // gated, would otherwise satisfy the loop below and unlock immediately.
+            int nodesRequired = 0;
+            foreach(ChildParentPair pair in treeModel.MetaProgressionTree)
+            {
+                if(pair.Child == null) continue;
+                if(pair.Child.ComingSoon) continue;
+
+                nodesRequired++;
+                if(!_unlockedNodes.Contains(pair.Child)) return;
+            }
+            if(nodesRequired == 0) return;
+
+            SteamAchievements.Unlock(AchievementId.LegendOfTheTavern);
         }
         private void CalculateRenownSpent()
         {
@@ -184,6 +233,10 @@ namespace TJ.MainMenu
             _metaprogressionManager.DisplayNodes(_unlockedNodes);
             _metaprogressionManager.HighlightAvailableUpgrades(_unlockedNodes, SaveDataHandler.GetRenown());
             CalculateRenownSpent();
+            // Backstop, in the same spirit as the collection achievements re-evaluating on panel open.
+            // Purchasing used to be the only trigger, which gating breaks: a player holding every
+            // buyable node has nothing left to click, so the completion check would never run again.
+            CheckMetaprogressionComplete();
         }
         public override async void ClosePanel()
         {
@@ -226,6 +279,9 @@ namespace TJ.MainMenu
             {
                 MetaprogressionModel node = pair.Child;
                 if(unlockedNodes.Contains(node)) continue;
+
+                //a gated node can never be bought, so it must not light the main-menu indicator
+                if(node.ComingSoon) continue;
 
                 //check if parent is unlocked
                 if(pair.Parent != null && !unlockedNodes.Contains(pair.Parent)) continue;

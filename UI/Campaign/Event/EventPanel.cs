@@ -90,7 +90,6 @@ namespace TJ.Event
         [SerializeField] bool rollAccepted = false;
         int rollBonus = 0;
         int roll = 0;
-        bool guarentee20 = false;
         bool eventRolled = false;
         public bool CanReroll => !rollAccepted && eventRolled;
         string collapsedEventName;
@@ -285,10 +284,10 @@ namespace TJ.Event
             rollBonus = 0;
             System.Random random = campaignSaveManager.GetCampaignRandom();
             roll = random.Next(1, 21);
-            if (guarentee20)
+            if (campaignSaveManager.FateshineElixirArmed)
             {
                 roll = 20;
-                guarentee20 = false;
+                campaignSaveManager.ConsumeFateshineElixir();
             }
 
             //old
@@ -499,10 +498,6 @@ namespace TJ.Event
 
                 await Task.Yield();
             }
-        }
-        public void Guarentee20()
-        {
-            guarentee20 = true;
         }
         // public void ActivateStartLitGuidance()
         // {

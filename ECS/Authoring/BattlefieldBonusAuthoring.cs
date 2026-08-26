@@ -31,7 +31,11 @@ LesserWindSpell,
 LesserMoraleSpell,
 // Generic per-stat spell bonus. Routes to the default per-unit UnitStat switch in
 // BattlefieldBonusSystem; a multi-stat SpellData emits one applicator with this enum per stat pair.
-SpellStatBonus
+SpellStatBonus,
+// Edric's signature. Squad-level like Snow and LesserMoraleSpell, so it carries a ChargeEmpoweredTag
+// rather than a per-unit stat: ChargeBonus is not a live stat, it is read from the stats blob by
+// SquadChargeBonusApplicationSystem at charge time and emitted there as MeleeAttack + WeaponStrength.
+RallyTheBanners
 }
 public struct BattlefieldBonusApplicator : IComponentData
 {

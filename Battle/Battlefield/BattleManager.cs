@@ -8,6 +8,7 @@ using TJ;
 using TJ.Battle;
 using TJ.Spells;
 using Memori.SaveData;
+using Memori.Steamworks;
 using Unity.Collections;
 using TJ.Map;
 
@@ -99,6 +100,11 @@ public class BattleManager : Singleton<BattleManager>
         UnityEngine.Debug.Log($"BattleManager: NotifyGateDestroyed: gateIndex={gateIndex}");
         _breachedGateIndices.Add(gateIndex);
         OnGateDestroyed?.Invoke(gateIndex);
+
+        // "Siegebreaker" - every gate in this garrison breached. GateCount is 0 outside garrison battles.
+        int gateCount = ArmySpawnManager.GateCount;
+        if (gateCount > 0 && _breachedGateIndices.Count >= gateCount)
+            SteamAchievements.Unlock(AchievementId.Siegebreaker);
     }
 
     private bool _onlySakuraUnits;
@@ -162,7 +168,10 @@ public class BattleManager : Singleton<BattleManager>
     }
     public void BreakSquad(SquadEntity _squadEntity)
     {
-        // Debug.Log($"BattleManager: AlertOfSquadBroken {brokenSquadId}");
+        // Logged because a break is permanent and silently makes the squad uncommandable: the
+        // only player-facing sign is the broken overlay on its card, so bug reports of "my unit
+        // ran off and I couldn't control it" need this line to be distinguishable from a bug.
+        UnityEngine.Debug.Log($"[Morale] Squad {_squadEntity.SquadId} ({_squadEntity.UnitName}, {_squadEntity.Team}) broke and is withdrawing - it can no longer be commanded");
         unitPositioningManager.OrderSquadToWithdraw(_squadEntity);
         uIManager.MarkSquadAsBroken(_squadEntity.SquadId, true);
         OnSquadBrokenEvent?.Invoke(_squadEntity.SquadId);
@@ -245,6 +254,14 @@ public class BattleManager : Singleton<BattleManager>
 
         Entity battlefieldBonusAppliedBufferSingletonEntity = entityManager.CreateEntity();
         entityManager.AddBuffer<BattlefieldBonusAppliedBufferElement>(battlefieldBonusAppliedBufferSingletonEntity);
+
+#if SPELLS
+        // Mage casting rides the same define as the rest of the spell system. Gating it here rather
+        // than at the EntityWatcher drain is deliberate: MageCastSystem bails when this singleton is
+        // absent, so a build without SPELLS never accumulates cast requests nothing would consume.
+        Entity mageCastRequestBufferSingletonEntity = entityManager.CreateEntity();
+        entityManager.AddBuffer<MageCastRequestBufferElement>(mageCastRequestBufferSingletonEntity);
+#endif
 
         amySaveDataManager.SpawnDeferredEnemy();
         amySaveDataManager.NotifyOutridersIfPresent();

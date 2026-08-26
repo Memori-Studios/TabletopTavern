@@ -42,6 +42,9 @@ namespace TJ.Engagement
         };
         private const float GARRISON_AUTORESOLVE_BONUS = 1.4f;
         private bool _isGarrisonBattle;
+        // One-shot per battle. Reset wherever the armies are (re)built, not in RunSimulationLoop,
+        // which is called once per round.
+        private bool _mageAlphaStrikeApplied;
 
         private struct CachedBattleResult
         {
@@ -178,7 +181,7 @@ namespace TJ.Engagement
 
             if(_team == Team.Player)
             {
-                if(campaignSaveManager.CheckForGear(GearID.ArmingSwords) && unitType == UnitType.Melee) 
+                if(campaignSaveManager.CheckForGear(GearID.ArmingSwords) && TabletopTavernConstants.FightsInMelee(unitType))
                     meleeAttack += GearData.GetGear(GearID.ArmingSwords).GearModifierValue;
                 if(campaignSaveManager.CheckForGear(GearID.BucklerShields) && (squadStats.SquadAttributes.StandardShields || squadStats.SquadAttributes.HeavyShields))
                     meleeDefense += GearData.GetGear(GearID.BucklerShields).GearModifierValue;
@@ -192,7 +195,7 @@ namespace TJ.Engagement
                     range += GearData.GetGear(GearID.Longbows).GearModifierValue;
                 if(campaignSaveManager.CheckForGear(GearID.Glaives) && squadStats.SquadAttributes.AntiLarge) 
                     WeaponStrength += GearData.GetGear(GearID.Glaives).GearModifierValue;
-                if(campaignSaveManager.CheckForGear(GearID.TexanBBQ) && unitType == UnitType.Melee) 
+                if(campaignSaveManager.CheckForGear(GearID.TexanBBQ) && TabletopTavernConstants.FightsInMelee(unitType))
                     WeaponStrength += GearData.GetGear(GearID.TexanBBQ).GearModifierValue;
                 if(campaignSaveManager.CheckForGear(GearID.BallisticCharts)) 
                     accuracy += (GearData.GetGear(GearID.BallisticCharts).GearModifierValue/100f);
@@ -226,7 +229,7 @@ namespace TJ.Engagement
         int totalHealth = _squadToLoad.SquadCurrentHealth;
         float armorMitigation = (float)squadStats.Armor/(float)(squadStats.Armor + 100f);
 
-        if (squadStats.unitType == UnitType.Melee || squadStats.unitType == UnitType.Hybrid || TabletopTavernConstants.UsesMeleePrestige(squadStats.unitName))
+        if (TabletopTavernConstants.FightsInMelee(squadStats.unitType))
         {
             meleeAttack += _squadToLoad.UnitPrestige * TabletopTavernConstants.PRESTIGE_BONUS;
             meleeDefense += _squadToLoad.UnitPrestige * TabletopTavernConstants.PRESTIGE_BONUS;
@@ -237,6 +240,28 @@ namespace TJ.Engagement
             accuracy += (_squadToLoad.UnitPrestige * TabletopTavernConstants.PRESTIGE_BONUS) / 100f;
             range += _squadToLoad.UnitPrestige * TabletopTavernConstants.PRESTIGE_BONUS;
         }
+        // Mages match the live path: Range and Leadership, no Accuracy. Without this branch a
+        // mage matches neither condition above - the second is an explicit whitelist - and gets
+        // no prestige at all in auto-resolve while getting it correctly in a manual battle.
+        else if (TabletopTavernConstants.Casts(squadStats.unitType))
+        {
+            range += _squadToLoad.UnitPrestige * TabletopTavernConstants.PRESTIGE_BONUS;
+            squadStats.Leadership += _squadToLoad.UnitPrestige * TabletopTavernConstants.PRESTIGE_BONUS;
+            // Charges are the mage's damage budget here, so prestige has to reach them or the alpha
+            // strike ignores prestige entirely. Same expression the live path uses in EntityWatcher's
+            // mage branch, folded into the stat copy so HandleMageAlphaStrike can just read Ammunition.
+            squadStats.Ammunition += _squadToLoad.UnitPrestige * TabletopTavernConstants.PRESTIGE_AMMO_BONUS_MAGE;
+        }
+
+        if (squadStats.SquadAttributes.Overdraw)
+            range *= TabletopTavernConstants.OVERDRAW_RANGE_MULTIPLIER;
+
+        // Steady Aim waives the Fire-at-Will accuracy penalty, and auto-resolve has no fire modes.
+        // Squads default to Volley, so the live trait only pays off while the player is in rapid
+        // fire - modelled here as roughly half the 20 point penalty rather than the full amount.
+        // Shooters only, matching live battle: artillery has no fire mode to switch.
+        if (squadStats.SquadAttributes.SteadyAim && TabletopTavernConstants.FightsAtRange(squadStats.unitType))
+            accuracy += (TabletopTavernConstants.FIRE_AT_WILL_ACCURACY_PENALTY / 2f) / 100f;
 
         squadStats.MeleeAttack = meleeAttack;
         squadStats.MeleeDefense = meleeDefense;
@@ -274,6 +299,7 @@ namespace TJ.Engagement
         enemyArmy = CampaignManager.Instance.CampaignSaveManager.SaveData.enemyArmy;
         playerAutoResolveStats = new AutoResolveSquad[playerArmy.Length];
         enemyAutoResolveStats = new AutoResolveSquad[enemyArmy.Length];
+        _mageAlphaStrikeApplied = false;
         playerArmyIsDefeated = false;
         enemyArmyIsDefeated = false;
 
@@ -304,6 +330,7 @@ namespace TJ.Engagement
             playerArmy[i].HitPointsPerUnit = maxUnitCount;
         }
         playerAutoResolveStats = new AutoResolveSquad[playerArmy.Length];
+        _mageAlphaStrikeApplied = false;
         playerArmyIsDefeated = false;
 
         for (int i = 0; i < playerArmy.Length; i++) {
@@ -364,6 +391,7 @@ namespace TJ.Engagement
     {
         unitsSlainData = new();
         AssignTargets();
+        HandleMageAlphaStrike();
         HandleRangedUnits();
         HandleMeleeUnits();
         RemoveSlainUnits();
@@ -377,7 +405,9 @@ namespace TJ.Engagement
             for (int i = 0; i < _targetSquadStats.Length; i++)
             {
                 if (HasRouted(_targetSquadStats[i])) continue;
-                if (_targetSquadStats[i].squadStats.unitType == UnitType.Melee || _targetSquadStats[i].squadStats.unitType == UnitType.Hybrid)
+                // Hybrids are front-line targets. AssignTargets only falls through to the ranged
+                // pool once no melee squad is left, so this is what exposes them from turn one.
+                if (TabletopTavernConstants.FightsInMelee(_targetSquadStats[i].squadStats.unitType))
                     meleeSquads.Add(_targetSquadStats[i]);
             }
 
@@ -391,13 +421,36 @@ namespace TJ.Engagement
             for (int i = 0; i < _targetSquadStats.Length; i++)
             {
                 if (HasRouted(_targetSquadStats[i])) continue;
-                if (_targetSquadStats[i].squadStats.unitType == UnitType.Ranged || _targetSquadStats[i].squadStats.unitType == UnitType.Artillery)
+                // Mages hold the back line beside archers and artillery, so they belong in the same
+                // pool. Without this a mage is in NEITHER pool - FightsInMelee excludes it by design -
+                // and a squad in neither pool can never be targeted, so it takes no damage all battle.
+                if (_targetSquadStats[i].squadStats.unitType == UnitType.Ranged
+                    || _targetSquadStats[i].squadStats.unitType == UnitType.Artillery
+                    || TabletopTavernConstants.Casts(_targetSquadStats[i].squadStats.unitType))
                     rangedSquads.Add(_targetSquadStats[i]);
             }
 
             if (rangedSquads.Count == 0) return -1; //if there are no ranged squads, return -1
 
             return rangedSquads[UnityEngine.Random.Range(0, rangedSquads.Count)].SquadIndex; //random chance to target one of the ranged squads
+        }
+        // Both pools above are positive whitelists, so any UnitType appended later drops out of both
+        // and silently becomes untargetable - it takes no damage for the whole battle, and if both
+        // sides are reduced to such squads CheckArmyStatus never routs either one and the caller's
+        // while loop spins forever. Falling back to anything still standing rules that out by
+        // construction rather than by remembering to update two lists.
+        static int FindAnySquadTarget(AutoResolveSquad[] _targetSquadStats)
+        {
+            List<AutoResolveSquad> standingSquads = new();
+            for (int i = 0; i < _targetSquadStats.Length; i++)
+            {
+                if (HasRouted(_targetSquadStats[i])) continue;
+                standingSquads.Add(_targetSquadStats[i]);
+            }
+
+            if (standingSquads.Count == 0) return -1;
+
+            return standingSquads[UnityEngine.Random.Range(0, standingSquads.Count)].SquadIndex;
         }
         
         for (int i = 0; i < playerAutoResolveStats.Length; i++)
@@ -410,6 +463,7 @@ namespace TJ.Engagement
                 int newTarget = FindRangedSquadTarget(enemyAutoResolveStats);
                 if (newTarget != -1) newTargetIndex = newTarget;
             }
+            if (newTargetIndex == -1) newTargetIndex = FindAnySquadTarget(enemyAutoResolveStats);
 
             playerAutoResolveStats[i].TargetIndex = newTargetIndex;
         }
@@ -424,6 +478,7 @@ namespace TJ.Engagement
                 int newTarget = FindRangedSquadTarget(playerAutoResolveStats);
                 if (newTarget != -1) newTargetIndex = newTarget;
             }
+            if (newTargetIndex == -1) newTargetIndex = FindAnySquadTarget(playerAutoResolveStats);
             
             enemyAutoResolveStats[i].TargetIndex = newTargetIndex;
         }
@@ -465,6 +520,19 @@ namespace TJ.Engagement
             int damage = _attackingSquad.squadStats.MissileStrength * (int)hits * 2;
             if (_attackingSquad.squadStats.SquadAttributes.FlamingAmmo)
                 damage = (int)(damage * 1.25f);
+
+            // Shooter traits. Auto-resolve has no reload timer, blast radius or ammo count, so each
+            // one maps to the damage throughput it buys in a live battle:
+            // Shot Discipline -> shots per minute, Demolisher -> blast damage, Powder Reserves ->
+            // not running dry mid-fight (the loosest of the three, since ammo is unmodelled here).
+            if (_attackingSquad.squadStats.SquadAttributes.ShotDiscipline)
+                damage = (int)(damage / TabletopTavernConstants.SHOT_DISCIPLINE_RELOAD_MULTIPLIER);
+            if (_attackingSquad.squadStats.SquadAttributes.Demolisher)
+                damage = (int)(damage * TabletopTavernConstants.DEMOLISHER_EXPLOSION_MULTIPLIER);
+            if (_attackingSquad.squadStats.SquadAttributes.PowderReserves ||
+                _attackingSquad.squadStats.SquadAttributes.DeepQuivers)
+                damage = (int)(damage * 1.1f);
+
             damage = (int)(damage * bonusModifier);
             damage = math.max(1, damage);
             return damage;
@@ -473,7 +541,14 @@ namespace TJ.Engagement
         foreach (AutoResolveSquad attackingSquad in playerAutoResolveStats)
         {
             if (HasRouted(attackingSquad)) continue;
-            if(attackingSquad.squadStats.unitType == UnitType.Melee || attackingSquad.squadStats.unitType == UnitType.Hybrid) continue;
+            // Hybrids resolve entirely through HandleMeleeUnits. Auto-resolve has no approach phase
+            // to shoot during, and they are front-line targets here, so they simply fight.
+            // Mages skip this loop too, but for the opposite reason: they have no missile attack to
+            // resolve here at all. Their contribution is the one-off alpha strike, applied before
+            // normal resolution begins - without this guard a mage would deal ranged damage every
+            // round using an accuracy and missile strength it does not have.
+            if(TabletopTavernConstants.FightsInMelee(attackingSquad.squadStats.unitType)) continue;
+            if(TabletopTavernConstants.Casts(attackingSquad.squadStats.unitType)) continue;
             if(attackingSquad.TargetIndex == -1) continue;
 
             AutoResolveSquad targetSquad = TargetSquadFromIndex(attackingSquad.TargetIndex, enemyAutoResolveStats);
@@ -484,7 +559,8 @@ namespace TJ.Engagement
         foreach (AutoResolveSquad attackingSquad in enemyAutoResolveStats)
         {
             if (HasRouted(attackingSquad)) continue;
-            if(attackingSquad.squadStats.unitType == UnitType.Melee || attackingSquad.squadStats.unitType == UnitType.Hybrid) continue;
+            if(TabletopTavernConstants.FightsInMelee(attackingSquad.squadStats.unitType)) continue;
+            if(TabletopTavernConstants.Casts(attackingSquad.squadStats.unitType)) continue;
             if(attackingSquad.TargetIndex == -1) continue;
 
             AutoResolveSquad targetSquad = TargetSquadFromIndex(attackingSquad.TargetIndex, playerAutoResolveStats);
@@ -493,6 +569,84 @@ namespace TJ.Engagement
             ModifyDamageDealt(ref damage, targetSquad, attackingSquad.squadStats);
             unitsSlainData.Add(new int3(attackingSquad.SquadIndex, targetSquad.SquadIndex, damage));
         }
+    }
+    // A mage's entire ranged contribution, resolved once at the start of the battle.
+    //
+    // In a live battle it spends one charge per cast on a long cooldown and converts to a melee body
+    // when the pool empties. Auto-resolve has no clock to spread that over, so the whole pool is spent
+    // up front, scaled by the spell's area of effect, and the mage then fights on with its melee
+    // stats, which is
+    // exactly what HandleMeleeUnits already does for it (its attacker guard skips only Ranged and
+    // Artillery). That makes the two paths agree on the mage's total output without modelling cooldowns.
+    //
+    // Damage is queued into unitsSlainData like every other source so RemoveSlainUnits applies it and
+    // kill credit is recorded the same way. ModifyDamageDealt is deliberately NOT applied: spell damage
+    // is DamageType.Magical, which ignores armor in the live pipeline, and the rest of that method is
+    // weapon-flavoured multipliers (AntiInfantry, MonsterSlayer, cavalry) that a spell has no business
+    // picking up.
+    private void HandleMageAlphaStrike()
+    {
+        if (_mageAlphaStrikeApplied) return;
+        _mageAlphaStrikeApplied = true;
+
+        // Damage queued but not yet applied, keyed by SquadIndex. unitsSlainData is not drained until
+        // RemoveSlainUnits, so without this every charge would be measured against full health and an
+        // already-dead squad would keep absorbing casts.
+        Dictionary<int, int> queuedDamage = new();
+
+        void StrikeWith(AutoResolveSquad[] _attackingSquads, AutoResolveSquad[] _targetSquads, float _bonusModifier)
+        {
+            foreach (AutoResolveSquad mageSquad in _attackingSquads)
+            {
+                if (!TabletopTavernConstants.Casts(mageSquad.squadStats.unitType)) continue;
+                if (HasRouted(mageSquad)) continue;
+                if (mageSquad.TargetIndex == -1) continue;
+
+                // A mage whose SquadData has no mageSpell assigned contributes nothing rather than
+                // throwing - the same posture SpellManager takes on an unauthored spell asset.
+                var mageSpell = TabletopTavernData.Instance.SquadAssetsDictionary[mageSquad.squadStats.unitName].mageSpell;
+                if (mageSpell == null) continue;
+
+                // Charges are a SQUAD-level pool (SquadAmmunition), never per model.
+                int chargesLeft = mageSquad.squadStats.Ammunition;
+                if (chargesLeft <= 0) continue;
+
+                // Spend on the assigned target first, then spill into anything else still standing.
+                // One cast removes a large fraction of a squad, so committing every charge to a single
+                // target would throw away everything past its last model - in a live battle the mage
+                // simply retargets and keeps casting.
+                List<int> targetOrder = new() { mageSquad.TargetIndex };
+                foreach (AutoResolveSquad candidate in _targetSquads)
+                    if (candidate.SquadIndex != mageSquad.TargetIndex) targetOrder.Add(candidate.SquadIndex);
+
+                foreach (int targetIndex in targetOrder)
+                {
+                    if (chargesLeft <= 0) break;
+
+                    AutoResolveSquad targetSquad = TargetSquadFromIndex(targetIndex, _targetSquads);
+                    if (HasRouted(targetSquad)) continue;
+
+                    queuedDamage.TryGetValue(targetIndex, out int alreadyQueued);
+                    int healthLeft = targetSquad.finalHealth - alreadyQueued;
+                    if (healthLeft <= 0) continue;
+
+                    // The blast cannot catch more models than the squad still has standing.
+                    int modelsHit = math.min(TabletopTavernConstants.MAGE_AOE_MODELS_HIT, targetSquad.UnitsAlive);
+                    int perCast   = math.max(1, (int)(mageSpell.SpellModifierValue * modelsHit * _bonusModifier));
+
+                    int castsSpent = math.min(chargesLeft, (healthLeft + perCast - 1) / perCast);
+                    int damage     = math.min(castsSpent * perCast, healthLeft);
+
+                    queuedDamage[targetIndex] = alreadyQueued + damage;
+                    unitsSlainData.Add(new int3(mageSquad.SquadIndex, targetIndex, damage));
+                    chargesLeft -= castsSpent;
+                }
+            }
+        }
+
+        StrikeWith(playerAutoResolveStats, enemyAutoResolveStats, 1f);
+        StrikeWith(enemyAutoResolveStats, playerAutoResolveStats,
+            ENEMY_AUTORESOLVE_SPECIAL_BONUS * (_isGarrisonBattle ? GARRISON_AUTORESOLVE_BONUS : 1f));
     }
     private void HandleMeleeUnits()
     {
@@ -531,8 +685,6 @@ namespace TJ.Engagement
                 damage = (int)(damage * 1.1f);
             if (_attackingSquad.squadStats.SquadAttributes.ThrowingAxes)
                 damage = (int)(damage * 1.15f);
-            if (_attackingSquad.squadStats.SquadAttributes.Unstoppable)
-                damage = (int)(damage * 1.2f);
 
             damage = (int)(damage * bonusModifier);
             damage = math.max(1, damage);

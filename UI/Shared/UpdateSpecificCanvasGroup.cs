@@ -10,7 +10,7 @@ namespace TJ
         {
             if(spellsUpdate)
             {
-#if UNITY_EDITOR || SPELLS
+#if SPELLS
             CGEnable();
 #else
             CGDisable();

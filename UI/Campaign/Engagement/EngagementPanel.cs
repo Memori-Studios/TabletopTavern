@@ -165,6 +165,13 @@ namespace TJ.Engagement
         private const float ENGAGEMENT_WATCHDOG_TIMEOUT = 5f;
         private const int ENGAGEMENT_MAX_RETRIES = 2;
 
+        // A run can also finish "successfully" and still strand the player: ShowEngagementResult activates
+        // the action buttons, but the canvas group carrying them is faded in by a fire-and-forget async Task
+        // that sets blocksRaycasts before it starts lerping alpha. A dropped continuation there leaves an
+        // invisible click-eating screen with the enemy cards (own sorted canvas) as the only responsive
+        // thing. This flag marks "results are on screen" so the watchdog can sanity-check visibility.
+        private bool _showedEngagementResult;
+
         #region SetUp
         public void SetUp(CampaignSaveManager _campaignSaveManager, MapSceneUIManager _mapSceneUIManager)
         {
@@ -278,6 +285,7 @@ namespace TJ.Engagement
         {
             int runId = ++_engagementRunId;
             _engagementRunComplete = false;
+            _showedEngagementResult = false;
             StartCoroutine(EngagementLoadWatchdog(runId));
 
             TurnOffAllOptionalRewards();
@@ -378,7 +386,8 @@ namespace TJ.Engagement
                         }
                     }
                     
-                    if (campaignSaveManager.SaveData.bookNumber == 1
+                    if (!garrisonFight
+                        && campaignSaveManager.SaveData.bookNumber == 1
                         && heroRace == Race.Gruntkin
                         && engagementType != EngagementType.Horde
                         && enemyArmy.Length > 1)
@@ -418,7 +427,9 @@ namespace TJ.Engagement
                     if (weather == Weather.Rain)
                         TutorialManager.Instance.LoadStepsFromRandomSpot(new TutorialStep[1] { TutorialData.RainWeather });
 
-                    battlefieldBiomeText.text = LocalizationManager.Instance.GetText(biome.ToString());
+                    // Display only - the preset still stores Biome.Plains. A garrison is a walled fight
+                    // rather than one of the four biomes, and calling it Plains told the player nothing.
+                    battlefieldBiomeText.text = LocalizationManager.Instance.GetText(garrisonFight ? "Garrison" : biome.ToString());
 
                     campaignSaveManager.SaveBattlefieldPreset(new BattleFieldPreset()
                     {
@@ -482,7 +493,13 @@ namespace TJ.Engagement
         {
             yield return new WaitForSecondsRealtime(ENGAGEMENT_WATCHDOG_TIMEOUT);
 
-            if (runId != _engagementRunId || _engagementRunComplete) yield break; // completed, or superseded already
+            if (runId != _engagementRunId) yield break; // superseded already
+
+            if (_engagementRunComplete)
+            {
+                VerifyEngagementResultVisible();
+                yield break;
+            }
 
             Debug.LogError($"[EngagementPanel] LoadEngagement (runId {runId}) did not complete within {ENGAGEMENT_WATCHDOG_TIMEOUT}s - treating as stalled.");
 
@@ -501,6 +518,22 @@ namespace TJ.Engagement
                 continueButton.gameObject.SetActive(true);
                 continueButton.enabled = true;
             }
+        }
+        // Companion check to the stall handling above, for the case where the run *did* complete but the
+        // results screen came up invisible (see _showedEngagementResult). Alpha 0 with the results still
+        // up is never a legitimate state, so snap the group visible rather than leaving the player with a
+        // screen whose only responsive element is the enemy cards.
+        private void VerifyEngagementResultVisible()
+        {
+            if (!_showedEngagementResult) return;
+
+            // Won runs put the action buttons on endBattleCanvasGroup; lost runs put them on runLostCanvasGroup.
+            MemoriCanvasGroup group = campaignSaveManager.SaveData.playerWonBattle ? endBattleCanvasGroup : runLostCanvasGroup;
+            if (group == null || group.canvasGroup == null) return;
+            if (group.canvasGroup.alpha > 0f) return;
+
+            Debug.LogError($"[EngagementPanel] Engagement result is on screen but {group.name} is at alpha 0 - forcing it visible so the player isn't stranded.");
+            group.CGEnable();
         }
         public async Task LoadEnemyCompany(bool _playfeedbacks, int runId)
         {
@@ -693,7 +726,10 @@ namespace TJ.Engagement
             }
 
             //consumable
-            generateConsumable = Random.Range(0, 100) < CampaignManager.Instance.GoldManager.PotionRewardsOdds;
+            // Both the drop roll and the pick come off the campaign seed, so re-opening the results panel
+            // (exiting to the main menu and back) can't reroll the consumable reward.
+            System.Random rewardRandom = campaignSaveManager.GetCampaignRandom();
+            generateConsumable = rewardRandom.Next(0, 100) < CampaignManager.Instance.GoldManager.PotionRewardsOdds;
 
             if(SaveDataHandler.IsMetaprogressionNodeUnlocked(_postBattleConsumableMetaprogressionModel)) {
                 generateConsumable = true;
@@ -703,7 +739,7 @@ namespace TJ.Engagement
             {
                 bool hasLuckyHorseshoe = CampaignManager.Instance.GearManager.CheckForGear(GearID.LuckyHorseshoe);
                 int bookNumber = campaignSaveManager.SaveData.bookNumber;
-                consumableEnum = ConsumableData.GetWeightedConsumable(bookNumber, hasLuckyHorseshoe);
+                consumableEnum = ConsumableData.GetWeightedConsumable(bookNumber, rewardRandom, hasLuckyHorseshoe);
                 Consumable consumableData = ConsumableData.GetConsumable(consumableEnum);
                 string consumableNameLocalized = LocalizationManager.Instance.GetText(consumableData.ConsumableEnum.ToString() + "Name");
                 consumableText.text = consumableNameLocalized;
@@ -935,10 +971,15 @@ namespace TJ.Engagement
             if(battleWon)
                 IAudioRequester.Instance.PlaySFX(SFXData.Trumpet);
 
-            endBattleCanvasGroup.FadeInAsync();
+            // Snap rather than fade: this group carries the only actionable buttons on the results screen
+            // (Claim Rewards / Continue / Loot Town), and FadeInAsync sets blocksRaycasts up front while
+            // lerping alpha across awaited frames. If that continuation is ever dropped the player is left
+            // staring at an invisible screen that still eats clicks. endBattlePanel's Animator still juices.
+            endBattleCanvasGroup.CGEnable();
             TutorialManager.Instance.LoadStepsFromRandomSpot(new TutorialStep[1] { TutorialData.HealthRecovery });
             HideEndBattlePanel();
 
+            _showedEngagementResult = true;
             if (runId == _engagementRunId)
                 _engagementRunComplete = true;
         }
@@ -1151,7 +1192,7 @@ namespace TJ.Engagement
             {
                 if (!campaignSaveManager.CheckForRoomToRecruit()) break;
                 SquadStats squadStats = TabletopTavernData.Instance.GetSquadStats(unitName);
-                campaignSaveManager.RecruitSquad(squadStats, 1);
+                campaignSaveManager.RecruitSquad(squadStats, 1, _viaRaiseDead: true);
             }
 
             IAudioRequester.Instance.PlaySFX(SFXData.RecruitUnit);
@@ -1269,7 +1310,12 @@ namespace TJ.Engagement
                 ShowPurgeTheBlightButton();
             }
             else if(HeroBonusManager.Instance.ActiveHeroID == 9) {
-                _generatedConsumbale = ConsumableData.GetRandomConsumable();
+                // Campaign-seeded so it is repeatable on re-entry. Advance one draw first rather than
+                // offsetting the seed - System.Random diffuses adjacent seeds poorly, so seed+1 would risk
+                // tracking the drop roll GenerateBattleRewards takes off the same stream.
+                System.Random consumableRandom = campaignSaveManager.GetCampaignRandom();
+                consumableRandom.Next();
+                _generatedConsumbale = ConsumableData.GetRandomConsumable(consumableRandom);
                 Consumable consumableData = ConsumableData.GetConsumable(_generatedConsumbale);
                 string consumableNameLocalized = LocalizationManager.Instance.GetText(consumableData.ConsumableEnum.ToString() + "Name");
                 _generatedConsumbaleText.text = consumableNameLocalized;
@@ -1349,6 +1395,7 @@ namespace TJ.Engagement
         #region Closing
         public void CompleteEngagement(bool garrisonEngagement)
         {
+            _showedEngagementResult = false; // player is on their way out; visibility check no longer applies
             // Resolve the kobold hero-bonus auto-prestige (and anything PrestigeUnitsOnKills already
             // queued up during results display) before deciding where to go next, so the trait picker
             // gates leaving this screen rather than surfacing later on whatever screen comes after.
@@ -1396,6 +1443,7 @@ namespace TJ.Engagement
         public override void ClosePanel()
         {
             Debug.Log("[Map] Closing EngagementPanel");
+            _showedEngagementResult = false;
             mapSceneUIManager.HUDPanel.HideConsumablesBlocker();
             StartCoroutine(CampaignManager.Instance.MapCamera.LerpFocusedOnNodeVolume(0f, 0.25f));
             battleOptionsCanvasGroup.CGDisable();

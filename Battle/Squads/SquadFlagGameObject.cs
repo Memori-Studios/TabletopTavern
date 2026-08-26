@@ -54,6 +54,11 @@ namespace TJ
         private MaterialPropertyBlock _block;
         bool isRanged, isArtillery, isGate;
 
+        // Latched from the unit type at SetUp rather than read from MageSquad on demand: by the time
+        // the pool runs dry SquadRanOutOfAmmoSystem has already stripped MageSquad, so a live
+        // component check would report false exactly when the readout needs to know.
+        bool isMage;
+
         private static readonly int LowMoraleID = Shader.PropertyToID("_LowMorale");
         private static readonly int AlphaID = Shader.PropertyToID("_Alpha");
         private static readonly int CameraHideID = Shader.PropertyToID("_CameraHide");
@@ -78,6 +83,7 @@ namespace TJ
             normalRarityFlagPostGO.SetActive(!isLegendary);
             legendaryRarityFlagPostGO.SetActive(isLegendary);
             ammunition = _ammunition;
+            isMage = TabletopTavernConstants.Casts(TabletopTavernData.Instance.GetUnitTypeFromUnitName(unitName));
             broken = false;
             _block = new MaterialPropertyBlock();
 
@@ -216,16 +222,18 @@ namespace TJ
 
                 if (ammoBar == null) return;
 
-                if (ammunition > 0 && EntityManager.HasComponent<RangedSquad>(squadEntity))
+                // Keyed on SquadAmmunition, not RangedSquad, so a mage's charges drive the same bar.
+                // A mage never carries RangedSquad, so testing for that component here read as
+                // instantly-out-of-ammo and dropped its range drawer on the first update.
+                if (ammunition > 0 && EntityManager.HasComponent<SquadAmmunition>(squadEntity))
                 {
-                    RangedSquad rangedAttack = EntityManager.GetComponentData<RangedSquad>(squadEntity);
-                    ammoBar.value = rangedAttack.Ammunition;
+                    ammoBar.value = EntityManager.GetComponentData<SquadAmmunition>(squadEntity).Value;
                 }
                 else if (ammoBar.gameObject.activeSelf)
                 {
                     if (squadId > 0)
                     {
-                        string noAmmoLocalized = LocalizationManager.Instance.GetText("SquadOutOfAmmo");
+                        string noAmmoLocalized = LocalizationManager.Instance.GetText(isMage ? "SquadOutOfCharges" : "SquadOutOfAmmo");
                         NotificationManager.Instance.DisplayNotification(noAmmoLocalized);
                     }
 

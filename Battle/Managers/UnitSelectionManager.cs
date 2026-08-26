@@ -8,6 +8,7 @@ using Memori.Audio;
 using TJ;
 using TJ.Map;
 using Memori.Input;
+using Memori.Notifications;
 using TJ.IrregularGrid;
 using System.Linq;
 
@@ -159,6 +160,7 @@ public class UnitSelectionManager : MonoBehaviour
         {
             if (!battleInputManager.MinimumDistanceFromInitialClickHit)
             {
+                RefreshSelectedUnitCounts();
                 BattleManager.Instance.SetCursorMode(CursorMode.MouseDown);
                 positionDrawer.MovePositionToMouse(battleInputManager.InitialMouseWorldPosition);
                 positionDrawer.TurnOn(
@@ -240,6 +242,8 @@ public class UnitSelectionManager : MonoBehaviour
 
             if (!BattleManager.Instance.PositionDrawer.ValidPositions)
             {
+                //the order is dropped here, so say why - failing silently reads as unresponsive input
+                NotificationManager.Instance.ErrorNotification(BattleManager.Instance.PositionDrawer.PositionErrorMessage);
                 positionDrawer.TurnOff();
                 return;
             }
@@ -279,6 +283,7 @@ public class UnitSelectionManager : MonoBehaviour
     }
     private void HandleRotateFormation()
     {
+        RefreshSelectedUnitCounts();
         battleInputManager.SetAngle(-90f);
         positionDrawer.SetLookRotation(Quaternion.Euler(0, battleInputManager.Angle, 0));
 
@@ -534,13 +539,9 @@ public class UnitSelectionManager : MonoBehaviour
         }
 
         // Debug.Log($"Select squads by group {_selectedSquadIds.Count}");
+        // SelectSquads already added every id and fired OnSelectedSquadsChanged, which is what syncs
+        // the ECS Selected components — a follow-up AttemptSquadSelect pass short-circuits on every id.
         SelectSquads(_selectedSquadIds);
-        foreach (int squadId in _selectedSquadIds)
-        {
-            // BattleManager.Instance.UIManager.SquadCardDisplaySelected(squadId, true);
-            AttemptSquadSelect(squadId, true);
-        }
-        // OnSelectedSquadsChanged?.Invoke(selectedSquadIds);
     }
     #endregion
 
@@ -674,6 +675,48 @@ public class UnitSelectionManager : MonoBehaviour
         }
         entityArray.Dispose();
         entityQuery.Dispose();
+    }
+    /// <summary>
+    /// Rebuilds the cached per-squad selected-unit counts from live entities and re-syncs the
+    /// formation. GetSelectedUnitsCount only runs on selection change, so battlefield casualties
+    /// leave the cache over-counting, which desyncs the position drawer's point pool from the units
+    /// it represents. Call this before any pool layout so the preview matches reality.
+    /// Key order is preserved so the formation layout order does not shift mid-selection.
+    /// </summary>
+    public void RefreshSelectedUnitCounts()
+    {
+        if (selectedSquadEntityAndEntitiesCountDict.Count == 0) return;
+
+        EntityManager entityManager = World.DefaultGameObjectInjectionWorld.EntityManager;
+        EntityQuery entityQuery = new EntityQueryBuilder(Allocator.Temp).WithAll<Selected>().Build(entityManager);
+        NativeArray<Entity> entityArray = entityQuery.ToEntityArray(Allocator.Temp);
+
+        Dictionary<int, int> liveCounts = new();
+        for (int i = 0; i < entityArray.Length; i++)
+        {
+            int squadId = entityManager.GetComponentData<Unit>(entityArray[i]).squadId;
+            liveCounts.TryGetValue(squadId, out int count);
+            liveCounts[squadId] = count + 1;
+        }
+        entityArray.Dispose();
+        entityQuery.Dispose();
+
+        bool changed = false;
+        Dictionary<int, int> rebuilt = new();
+        foreach (int squadId in selectedSquadEntityAndEntitiesCountDict.Keys)
+        {
+            int live = liveCounts.TryGetValue(squadId, out int c) ? c : 0;
+            if (live != selectedSquadEntityAndEntitiesCountDict[squadId]) changed = true;
+            if (live > 0) rebuilt[squadId] = live;
+        }
+        if (!changed) return;
+
+        selectedSquadEntityAndEntitiesCountDict.Clear();
+        foreach (KeyValuePair<int, int> kvp in rebuilt)
+        {
+            selectedSquadEntityAndEntitiesCountDict[kvp.Key] = kvp.Value;
+        }
+        positionDrawer.Formation.SetUnitCounts(selectedSquadEntityAndEntitiesCountDict);
     }
     private void SetSelectedSquadAngle(Quaternion rotation)
     {

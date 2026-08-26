@@ -18,24 +18,30 @@ partial struct RangedSquadRemoveAmmunitionSystem : ISystem
         EntityManager entityManager = state.EntityManager;
         EntityCommandBuffer entityCommandBuffer = SystemAPI.GetSingleton<EndSimulationEntityCommandBufferSystem.Singleton>().CreateCommandBuffer(state.WorldUnmanaged);
 
-        // Squads updating on entity destroyed
-        foreach (var (squad, rangedSquad, entityBuffer) in SystemAPI.Query<
-            RefRO<SquadEntity>, 
-            RefRW<RangedSquad>,
+        // Keyed on SquadAmmunition rather than RangedSquad, so this covers mages too: MageCastSystem
+        // adds the same AmmuntionSpent tag an archer's shot does, and a charge is spent here.
+        foreach (var (squad, ammunition, entityBuffer) in SystemAPI.Query<
+            RefRO<SquadEntity>,
+            RefRW<SquadAmmunition>,
             DynamicBuffer<EntityReferenceBufferElement>>())
         {
             //skip this the first time the squad is processed
             for (int i = 0; i < entityBuffer.Length; i++)
             {
                 Entity referencedEntity = entityBuffer[i].Entity;
-                if(entityManager.HasComponent<AmmuntionSpent>(referencedEntity)) 
+                if(entityManager.HasComponent<AmmuntionSpent>(referencedEntity))
                 {
                     entityCommandBuffer.RemoveComponent<AmmuntionSpent>(referencedEntity);
-                    rangedSquad.ValueRW.Ammunition -= 1;
+                    ammunition.ValueRW.Value -= 1;
                 }
             }
+            // A shooter spends a whole volley at once, so where exactly the pool crosses empty is
+            // noise and the original < 0 is preserved byte for byte. A mage is one model spending
+            // one charge per cast, so that same rule would hand it one cast more than its authored
+            // charge count - a third again as many on a 3-charge Bishop. Hence the separate boundary.
+            int depletedAt = entityManager.HasComponent<MageSquad>(squad.ValueRO.SelfEntity) ? 0 : -1;
             //update healthbar ammo count
-            if (rangedSquad.ValueRW.Ammunition < 0)
+            if (ammunition.ValueRO.Value <= depletedAt)
             {
                 entityCommandBuffer.AddComponent<RanOutOfAmmoTag>(squad.ValueRO.SelfEntity);
             }

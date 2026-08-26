@@ -4,7 +4,7 @@ using UnityEngine;
 
 partial struct UnitPrestigeSystemSetUpSystem : ISystem
 {
-    [BurstCompile]
+    // [BurstCompile]
     public void OnUpdate(ref SystemState state) {
 
         EntityManager entityManager = state.EntityManager;
@@ -23,9 +23,22 @@ partial struct UnitPrestigeSystemSetUpSystem : ISystem
             RefRO<Unit>
         >().WithEntityAccess()) {
 
-            bool isPureRanged = !TabletopTavernConstants.UsesMeleePrestige(unit.ValueRO.unitName)
+            // Hybrids carry RangedFireModeUnitComponent too, so the component check alone no longer
+            // separates a pure shooter from a unit that shoots but takes melee prestige.
+            bool isPureRanged = !TabletopTavernConstants.FightsInMelee(unit.ValueRO.unitType)
                              && entityManager.HasComponent<RangedFireModeUnitComponent>(entity);
-            if(isPureRanged) {
+            if(TabletopTavernConstants.Casts(unit.ValueRO.unitType)) {
+                // Range only. A placed AoE has no to-hit roll, so Accuracy would be dead weight
+                // here, and melee stats are not what a caster is prestiged for. Leadership is
+                // granted in SquadManager and charges in EntityWatcher, matching where those two
+                // are already handled for every other unit type.
+                // This branch has to come first: isPureRanged is a conjunction, and a mage has no
+                // RangedFireModeUnitComponent, so it reads false and would otherwise fall into the
+                // melee else below and quietly collect MeleeAttack and MeleeDefense instead.
+                MageCast mageCast = entityManager.GetComponentData<MageCast>(entity);
+                mageCast.Range += TabletopTavernConstants.PRESTIGE_BONUS * UnitPrestigeSetUpTag.ValueRO.PrestigeLevel;
+                entityManager.SetComponentData(entity, mageCast);
+            } else if(isPureRanged) {
                 ShootAttack ShootAttack = entityManager.GetComponentData<ShootAttack>(entity);
                 ShootAttack.Range += TabletopTavernConstants.PRESTIGE_BONUS * UnitPrestigeSetUpTag.ValueRO.PrestigeLevel;
                 ShootAttack.Accuracy += TabletopTavernConstants.PRESTIGE_BONUS * UnitPrestigeSetUpTag.ValueRO.PrestigeLevel;

@@ -19,6 +19,10 @@ namespace TJ.MainMenu
     {
         [Header("Selected Army")]
         [SerializeField] private SquadBattleInfo squadBattleInfo;
+        // The commander screen needs its own inspector: squadBattleInfo lives on the warband
+        // screen, which is inactive while the commander screen is up, so the signature-unit hover
+        // had nowhere to render.
+        [SerializeField] private SquadBattleInfo commanderSquadBattleInfo;
         [SerializeField] private Transform startingUnitsParent;
         [SerializeField] private SquadToLoad[] _squadsToLoad;
         public SquadToLoad[] SelectedArmy => _squadsToLoad;
@@ -44,8 +48,8 @@ namespace TJ.MainMenu
         public ArmySaveData ArmySaveData => armySaveData;
 
         [Header("Treasury")]
-        [SerializeField] private TMP_Text remainingTreasuryText;
-        [SerializeField] private TMP_Text gearCostTextRare, gearCostTextUncommon, gearCostTextCommon;
+        [SerializeField] private TMP_Text gearCostTextRare;
+        [SerializeField] private TMP_Text gearCostTextUncommon, gearCostTextCommon;
 
         [Header("Metaprogression")]
         [SerializeField] private MetaprogressionModel _startingGoldMetaprogressionModel;
@@ -53,19 +57,31 @@ namespace TJ.MainMenu
         [SerializeField] private MetaprogressionModel _startingGearReducedCostMetaprogressionModel;
         [SerializeField] private MetaprogressionModel _thirdReserveSlotMetaprogressionModel;
 
+        // The starting army is fixed at 10 deployed slots. Reserve slots sold by the metaprogression
+        // tree fill during a run, not at setup, so they deliberately do not raise this.
+        public const int MaxStartingArmySize = 10;
+
         GearID startingGearID;
         PlayPanel playPanel;
         public MonitoredData<int> remainingTreasury = new (0);
         List<UnitName> troopsRecruitied = new ();
         int startingGold;
         int startingGoldBonusFromMetaprogression;
+        int armyGoldSpend;
+        int gearGoldSpend;
         public int StartingGoldBonusFromMetaprogression => startingGoldBonusFromMetaprogression;
+        // Read by the warband purse so the breakdown never has to recompute the same costs.
+        public int StartingGold => startingGold;
+        public int ArmyGoldSpend => armyGoldSpend;
+        public int GearGoldSpend => gearGoldSpend;
         public Action<int> OnStartingArmyLengthChanged;
 
         public void SetUp(PlayPanel _playPanel)
         {
             playPanel = _playPanel;
-            remainingTreasury.OnValueChanged += UpdateRemainingTreasury;
+            // SetUp runs again on every hero change, so -= before += or these stack one subscription
+            // per hero selected (see the memory-leak checklist in CLAUDE.md).
+            remainingTreasury.OnValueChanged -= playPanel.RemainingTreasuryChanged;
             remainingTreasury.OnValueChanged += playPanel.RemainingTreasuryChanged;
             startingGold = playPanel.hero.StartingGold;
             
@@ -85,9 +101,9 @@ namespace TJ.MainMenu
             LoadStartingGear();
             LoadStartingArmy();
             RefreshArmyDisplay();
-            tier1CostText.text = LocalizationManager.Instance.GetText("Tier I") + " - " + TabletopTavernConstants.GetUnitCost(1).ToString() + " <sprite name=GoldSprite>";
-            tier2CostText.text = LocalizationManager.Instance.GetText("Tier II") + " - " + TabletopTavernConstants.GetUnitCost(2).ToString() + " <sprite name=GoldSprite>";
-            tier3CostText.text = LocalizationManager.Instance.GetText("Tier III") + " - " + TabletopTavernConstants.GetUnitCost(3).ToString() + " <sprite name=GoldSprite>";
+            tier1CostText.text = TabletopTavernConstants.GetUnitCost(1).ToString() + " <sprite name=GoldSprite>";
+            tier2CostText.text = TabletopTavernConstants.GetUnitCost(2).ToString() + " <sprite name=GoldSprite>";
+            tier3CostText.text = TabletopTavernConstants.GetUnitCost(3).ToString() + " <sprite name=GoldSprite>";
 
             int commonCost = GearData.GearCost(GearRarity.Common);
             int uncommonCost = GearData.GearCost(GearRarity.Uncommon);
@@ -100,9 +116,9 @@ namespace TJ.MainMenu
                 // Debug.Log($"Reduced starting gear costs to: Common {commonCost}, Uncommon {uncommonCost}, Rare {rareCost}");
             }
 
-            gearCostTextCommon.text = LocalizationManager.Instance.GetText("Common") + "\n" + commonCost.ToString() + " <sprite name=GoldSprite>";
-            gearCostTextUncommon.text = LocalizationManager.Instance.GetText("Uncommon") + "\n" + uncommonCost.ToString() + " <sprite name=GoldSprite>";
-            gearCostTextRare.text = LocalizationManager.Instance.GetText("Rare") + "\n" + rareCost.ToString() + " <sprite name=GoldSprite>";
+            gearCostTextCommon.text = commonCost.ToString() + " <sprite name=GoldSprite>";
+            gearCostTextUncommon.text = uncommonCost.ToString() + " <sprite name=GoldSprite>";
+            gearCostTextRare.text = rareCost.ToString() + " <sprite name=GoldSprite>";
 
             troopsRecruitied = SaveDataHandler.LoadPlayerSaveData().troopsRecruited;
             OnStartingArmyLengthChanged?.Invoke(_squadsToLoad.Length);
@@ -151,6 +167,7 @@ namespace TJ.MainMenu
                 SquadDisplayCardMenu squadDisplayCard = Instantiate(squadDisplayCardMenu, startingUnitsParent);
                 squadDisplayCard.SetUp(squad, false, _isEnemy: true);
                 squadDisplayCard.LockCard(true);
+                squadDisplayCard.InheritCanvasSorting();
                 squadDisplayCard.gameObject.AddComponent<TroopHoverPlayPanel>().SetUp(armyIndex, playPanel);
                 squadDisplayCard.gameObject.AddComponent<StartingTroopDoubleClickHandler>().SetUp(armyIndex, this);
                 squadDisplayCard.gameObject.AddComponent<MemoriTooltipTrigger>().SetUpToolTip(
@@ -173,7 +190,16 @@ namespace TJ.MainMenu
             );
             List<int> gearIdsAsInts = SaveDataHandler.GetGearIDsCollected();
             List<int> gearIdsAcknowledged = SaveDataHandler.GetGearIDsAcknowledged();
-            for (int i = 0; i < allGear.Length; i++)
+
+            // Adding a GearID without adding a card to gearCardParent used to throw here. Report the
+            // shortfall once instead, so new gear is merely invisible rather than breaking the panel.
+            if(gearCards.Length < allGear.Length)
+            {
+                Debug.LogError($"[StartingArmyManager] {allGear.Length} gear IDs but only {gearCards.Length} gear cards under {gearCardParent.name} - the last {allGear.Length - gearCards.Length} will not be shown.");
+            }
+
+            int cardCount = Mathf.Min(gearCards.Length, allGear.Length);
+            for (int i = 0; i < cardCount; i++)
             {
                 bool isCollected = gearIdsAsInts.Contains((int)allGear[i]);
                 bool acknowledged = gearIdsAcknowledged.Contains((int)allGear[i]);
@@ -208,37 +234,33 @@ namespace TJ.MainMenu
         }
         public void CalculateRemainingTreasury()
         {
-            // Debug.Log($"Calculating remaining treasury");
-            int totalAmountSpent = 0;
+            gearGoldSpend = 0;
             if(startingGearID != GearID.None) {
                 int gearCost = GearData.GearCost(GearData.GetGear(startingGearID).GearRarity);
                 if(SaveDataHandler.IsMetaprogressionNodeUnlocked(_startingGearReducedCostMetaprogressionModel)) {
                     gearCost -= _startingGearReducedCostMetaprogressionModel.NodeValue;
                     gearCost = Mathf.Max(0, gearCost);
-                    Debug.Log($"Reduced starting gear cost to: {gearCost}");
                 }
-                totalAmountSpent += gearCost;
+                gearGoldSpend = gearCost;
             }
+
             //get cost of each unit in army
+            armyGoldSpend = 0;
             foreach (var squad in _squadsToLoad)
             {
-                int unitCost = TabletopTavernData.Instance.GetUnitCost(squad.UnitName);
-                totalAmountSpent += unitCost;
+                armyGoldSpend += TabletopTavernData.Instance.GetUnitCost(squad.UnitName);
             }
-            int remainingAmount = startingGold - totalAmountSpent;
-            remainingTreasury.Value = remainingAmount;
-        }
-        public void UpdateRemainingTreasury(int _amount)
-        {
-            remainingTreasuryText.text = $"{_amount}";
+
+            remainingTreasury.Value = startingGold - (armyGoldSpend + gearGoldSpend);
         }
         public void PointerOverTroop(int _index)
         {
-            if(_index == 99) 
+            if(_index == PlayPanel.SIGNATURE_UNIT_HOVER_INDEX)
             {
-                squadBattleInfo.SetUpCampaign(playPanel.uniqueSquad, Team.Player);
+                commanderSquadBattleInfo.SetUpCampaign(playPanel.uniqueSquad, Team.Player);
                 return;
             }
+            if(_index < 0 || _index >= _squadsToLoad.Length) return;
             squadBattleInfo.SetUpCampaign(_squadsToLoad[_index], Team.Player);
         }
         public void PointerOverTroop(SquadToLoad _squadToLoad)
@@ -247,7 +269,10 @@ namespace TJ.MainMenu
         }
         public void PointerOffTroop()
         {
+            // Unhover early-outs when already faded, so hitting both is cheaper than tracking
+            // which screen the pointer left.
             squadBattleInfo.Unhover();
+            commanderSquadBattleInfo.Unhover();
         }
         public void RemoveTroop(int _index)
         {
@@ -271,11 +296,10 @@ namespace TJ.MainMenu
         }
         public void AddTroop(SquadToLoad _squadToAdd)
         {
-            int maxArmySize = 10;//SaveDataHandler.IsMetaprogressionNodeUnlocked(_thirdReserveSlotMetaprogressionModel) ? 13 : 12;
-            if(_squadsToLoad.Length == maxArmySize)
+            if(_squadsToLoad.Length >= MaxStartingArmySize)
             {
                 NotificationManager.Instance.ErrorNotification(
-                    LocalizationManager.Instance.GetText("You cannot add more than 10 units to your starting army.")
+                    string.Format(LocalizationManager.Instance.GetText("MaxStartingArmyError"), MaxStartingArmySize)
                 );
                 return;
             }
@@ -310,8 +334,19 @@ namespace TJ.MainMenu
             foreach (var unitName in unitsOfRace)
             {
                 int unitTier = TabletopTavernData.Instance.GetUnitTierFromUnitName(unitName);
-                GameObject unitCardObj = Instantiate(squadDisplayCardMenu.gameObject);
-                SquadDisplayCardMenu unitCard = unitCardObj.GetComponent<SquadDisplayCardMenu>();
+                Transform tierParent = unitTier switch
+                {
+                    1 => tier1UnitsParent,
+                    2 => tier2UnitsParent,
+                    3 => tier3UnitsParent,
+                    _ => null,
+                };
+                if (tierParent == null) continue;
+
+                // Parented at instantiation rather than at the end of the loop: Unity forces
+                // overrideSorting true on a root Canvas, so InheritCanvasSorting below is discarded
+                // if the card is still unparented when it runs, and reparenting never re-applies it.
+                SquadDisplayCardMenu unitCard = Instantiate(squadDisplayCardMenu, tierParent);
 
                 SquadToLoad newSquad = new SquadToLoad(unitName, 0, 0);
                 int baseUnitCount = TabletopTavernData.Instance.GetBaseUnitCount(newSquad.UnitName);
@@ -323,6 +358,7 @@ namespace TJ.MainMenu
                 
                 unitCard.SetUp(newSquad, false, _isEnemy: true);
                 unitCard.LockCard(true);
+                unitCard.InheritCanvasSorting();
                 unitCard.gameObject.AddComponent<TroopHoverPlayPanel>().SetUp(-1, playPanel);
                 
                 //check if squad is discovered
@@ -334,38 +370,20 @@ namespace TJ.MainMenu
                     );
                     unitCard.gameObject.AddComponent<StartingTroopDoubleClickHandler>().SetUp(-1, this);
                 } 
-                else 
+                else
                 {
                     //instantiate locked blocker
-                    GameObject lockedBlockerInstance = Instantiate(lockedBlocker, unitCard.transform);
+                    Instantiate(lockedBlocker, unitCard.transform);
                     unitCard.gameObject.AddComponent<MemoriTooltipTrigger>().SetUpToolTip(
-                        "Locked",
-                        "Recruit this troop in Campaign to unlock."
+                        LocalizationManager.Instance.GetText("Locked"),
+                        LocalizationManager.Instance.GetText("UnitNotDiscoveredDesc")
                     );
-                }
-
-
-                switch (unitTier)
-                {
-                    case 1:
-                        unitCardObj.transform.SetParent(tier1UnitsParent, false);
-                        break;
-                    case 2:
-                        unitCardObj.transform.SetParent(tier2UnitsParent, false);
-                        break;
-                    case 3:
-                        unitCardObj.transform.SetParent(tier3UnitsParent, false);
-                        break;
-                    default:
-                        Destroy(unitCardObj);
-                        break;
                 }
             }
         }
-        private void OnDestroy() 
+        private void OnDestroy()
         {
-            remainingTreasury.OnValueChanged -= UpdateRemainingTreasury;
-            remainingTreasury.OnValueChanged -= playPanel.RemainingTreasuryChanged;
+            if(playPanel != null) remainingTreasury.OnValueChanged -= playPanel.RemainingTreasuryChanged;
         }
     }
 }

@@ -34,9 +34,16 @@ partial struct SquadChargeBonusApplicationSystem : ISystem
         {
             entityCommandBuffer.RemoveComponent<ApplyChargeBonusTag>(squad.SelfEntity);
             // Debug.Log($"SquadChargeBonusApplicationSystem: applying charge bonus to squad {squad.SquadId}");
-            if (SystemAPI.HasComponent<InForestTag>(squad.SelfEntity) ||
+
+            // Rally the Banners: carries the squad through terrain that would otherwise cancel the
+            // charge outright, and adds to the impact. Read before the suppression check so the
+            // exemption applies.
+            bool empowered = SystemAPI.HasComponent<ChargeEmpoweredTag>(squad.SelfEntity);
+
+            if (!empowered &&
+               (SystemAPI.HasComponent<InForestTag>(squad.SelfEntity) ||
                 SystemAPI.HasComponent<InSwampTag>(squad.SelfEntity) ||
-                SystemAPI.HasComponent<InRainTag>(squad.SelfEntity))
+                SystemAPI.HasComponent<InRainTag>(squad.SelfEntity)))
             {
                 Debug.LogWarning($"SquadChargeBonusApplicationSystem: Squad {squad.SquadId} is in forest or swamp or rain, dont apply charge bonus.");
                 continue;
@@ -57,6 +64,9 @@ partial struct SquadChargeBonusApplicationSystem : ISystem
                 // ChargeBonus today, so unlike UnitSetUpSystem this doesn't need the Sakura check.
                 bonus += (int)HeroBonusRuleEvaluator.SumHeroStatBonus(UnitStat.ChargeBonus, squad.UnitName, campaignSaveDataHolder.ActiveHeroID, squadStats, campaignSaveDataHolder.EnemyRace, bonus);
             }
+
+            if (empowered)
+                bonus += (int)SystemAPI.GetComponent<ChargeEmpoweredTag>(squad.SelfEntity).BonusImpact;
 
             //apply bonus
             BattlefieldBonusBufferElement.Add(new BattlefieldBonusBufferElement { 

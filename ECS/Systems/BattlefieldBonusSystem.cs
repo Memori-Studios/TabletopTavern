@@ -24,6 +24,7 @@ partial struct BattlefieldBonusSystem : ISystem
     private ComponentLookup<InSnowTag> _inSnowLookup;
     private ComponentLookup<InForestTag> _inForestLookup;
     private ComponentLookup<RallyingTag> _rallyingLookup;
+    private ComponentLookup<ChargeEmpoweredTag> _chargeEmpoweredLookup;
     private ComponentLookup<LargeTag> _largeTagLookup;
     private ComponentLookup<LocalTransform> _existsLookup;
     // Unit + squad component writes
@@ -52,6 +53,7 @@ partial struct BattlefieldBonusSystem : ISystem
         _inSnowLookup            = state.GetComponentLookup<InSnowTag>(true);
         _inForestLookup          = state.GetComponentLookup<InForestTag>(true);
         _rallyingLookup          = state.GetComponentLookup<RallyingTag>(true);
+        _chargeEmpoweredLookup   = state.GetComponentLookup<ChargeEmpoweredTag>(true);
         _largeTagLookup          = state.GetComponentLookup<LargeTag>(true);
         _existsLookup            = state.GetComponentLookup<LocalTransform>(true);
         _agentLocomotionLookup   = state.GetComponentLookup<AgentLocomotion>(false);
@@ -79,6 +81,7 @@ partial struct BattlefieldBonusSystem : ISystem
         _inSnowLookup.Update(ref state);
         _inForestLookup.Update(ref state);
         _rallyingLookup.Update(ref state);
+        _chargeEmpoweredLookup.Update(ref state);
         _largeTagLookup.Update(ref state);
         _existsLookup.Update(ref state);
         _agentLocomotionLookup.Update(ref state);
@@ -109,6 +112,7 @@ partial struct BattlefieldBonusSystem : ISystem
             InSnowLookup            = _inSnowLookup,
             InForestLookup          = _inForestLookup,
             RallyingLookup          = _rallyingLookup,
+            ChargeEmpoweredLookup   = _chargeEmpoweredLookup,
             LargeTagLookup          = _largeTagLookup,
             ExistsLookup            = _existsLookup,
             AgentLocomotionLookup   = _agentLocomotionLookup,
@@ -139,6 +143,7 @@ partial struct BattlefieldBonusJob : IJobEntity
     [ReadOnly] public ComponentLookup<InSnowTag>                   InSnowLookup;
     [ReadOnly] public ComponentLookup<InForestTag>                 InForestLookup;
     [ReadOnly] public ComponentLookup<RallyingTag>                 RallyingLookup;
+    [ReadOnly] public ComponentLookup<ChargeEmpoweredTag>          ChargeEmpoweredLookup;
     [ReadOnly] public ComponentLookup<LargeTag>                    LargeTagLookup;
     [ReadOnly] public ComponentLookup<LocalTransform>              ExistsLookup;
     [NativeDisableParallelForRestriction] public ComponentLookup<AgentLocomotion> AgentLocomotionLookup;
@@ -262,28 +267,17 @@ partial struct BattlefieldBonusJob : IJobEntity
                 continue;
             }
 
+            // Only the buffer element is dropped here. InSwampTag/InForestTag removal is unconditional
+            // and lives at the end of Execute - see the note there for why it cannot be tied to
+            // finding a matching element.
             if (hasRemoveSwamp && bonus.BattlefieldBonusEnum == BattlefieldBonusEnum.Swamp)
             {
-                Ecb.RemoveComponent<InSwampTag>(sortKey, entity);
-                for (int j = 0; j < entityBuffer.Length; j++)
-                {
-                    Entity unitEntity = entityBuffer[j].Entity;
-                    if (ExistsLookup.HasComponent(unitEntity))
-                        Ecb.RemoveComponent<InSwampTag>(sortKey, unitEntity);
-                }
                 bonusBuffer.RemoveAt(i--);
                 continue;
             }
 
             if (hasRemoveForest && bonus.BattlefieldBonusEnum == BattlefieldBonusEnum.Forest)
             {
-                Ecb.RemoveComponent<InForestTag>(sortKey, entity);
-                for (int j = 0; j < entityBuffer.Length; j++)
-                {
-                    Entity unitEntity = entityBuffer[j].Entity;
-                    if (ExistsLookup.HasComponent(unitEntity))
-                        Ecb.RemoveComponent<InForestTag>(sortKey, unitEntity);
-                }
                 bonusBuffer.RemoveAt(i--);
                 continue;
             }
@@ -436,6 +430,19 @@ partial struct BattlefieldBonusJob : IJobEntity
                         Ecb.AddComponent(sortKey, entity, new RallyingTag { MoralePerSecond = bonus.Value });
                     }
                 }
+                else if (bonus.BattlefieldBonusEnum == BattlefieldBonusEnum.RallyTheBanners)
+                {
+                    // Squad-level like LesserMoraleSpell above. The tag is inert until the squad actually
+                    // charges - SquadChargeBonusApplicationSystem reads it then, so there is no stat to
+                    // reverse here and removal in the distance/duration block just drops the tag.
+                    bonus.Applied = true;
+                    bonusBuffer.RemoveAt(i--);
+                    bonusBuffer.Add(new BattlefieldBonusBufferElement { Value = bonus });
+                    if (!ChargeEmpoweredLookup.HasComponent(entity))
+                    {
+                        Ecb.AddComponent(sortKey, entity, new ChargeEmpoweredTag { BonusImpact = bonus.Value });
+                    }
+                }
                 else if (bonus.BattlefieldBonusEnum == BattlefieldBonusEnum.Fog)
                 {
                     bonus.Applied = true;
@@ -558,6 +565,13 @@ partial struct BattlefieldBonusJob : IJobEntity
                     if (bonus.BattlefieldBonusEnum == BattlefieldBonusEnum.LesserMoraleSpell)
                         Ecb.RemoveComponent<RallyingTag>(sortKey, entity);
 
+                    // Same shape as the regen tag above - no UnitStat.ChargeBonus case exists in the
+                    // per-unit loop below, so dropping the tag is the whole reversal. Any charge bonus
+                    // already granted stays until RemoveChargeBonusTag strips it, which is correct:
+                    // the banner empowered that charge, and expiry should not claw it back mid-impact.
+                    if (bonus.BattlefieldBonusEnum == BattlefieldBonusEnum.RallyTheBanners)
+                        Ecb.RemoveComponent<ChargeEmpoweredTag>(sortKey, entity);
+
                     for (int j = 0; j < entityBuffer.Length; j++)
                     {
                         Entity unitEntity = entityBuffer[j].Entity;
@@ -638,6 +652,38 @@ partial struct BattlefieldBonusJob : IJobEntity
                 bonusBuffer.RemoveAt(i--);
             }
         }
+
+        #region Biome tag removal
+        // Deliberately NOT gated on finding a matching element in bonusBuffer. RemoveSwampTag /
+        // RemoveForestTag are consumed every frame they exist (just below), but the apply side is a
+        // 1-2 frame pipeline: BattlefieldBiomeDetector -> ApplyBiomeBonusTag -> BiomeApplicationSystem
+        // adds the element -> this system adds the tag via the EndSimulation ECB. A squad that leaves
+        // the biome inside that window had its remove signal swallowed by the element not being in the
+        // buffer yet, stranding InSwampTag permanently: the detector has already flipped detectedBiome
+        // by then and never re-issues. Removing a component the entity does not have is a no-op, so
+        // running this whenever the remove tag is present is safe and idempotent.
+        if (hasRemoveSwamp)
+        {
+            Ecb.RemoveComponent<InSwampTag>(sortKey, entity);
+            for (int j = 0; j < entityBuffer.Length; j++)
+            {
+                Entity unitEntity = entityBuffer[j].Entity;
+                if (ExistsLookup.HasComponent(unitEntity))
+                    Ecb.RemoveComponent<InSwampTag>(sortKey, unitEntity);
+            }
+        }
+
+        if (hasRemoveForest)
+        {
+            Ecb.RemoveComponent<InForestTag>(sortKey, entity);
+            for (int j = 0; j < entityBuffer.Length; j++)
+            {
+                Entity unitEntity = entityBuffer[j].Entity;
+                if (ExistsLookup.HasComponent(unitEntity))
+                    Ecb.RemoveComponent<InForestTag>(sortKey, unitEntity);
+            }
+        }
+        #endregion
 
         if (hasRemoveRain)   Ecb.RemoveComponent<RemoveBattlefieldBonusRain>(sortKey, entity);
         if (hasRemoveFog)    Ecb.RemoveComponent<RemoveBattlefieldBonusFog>(sortKey, entity);

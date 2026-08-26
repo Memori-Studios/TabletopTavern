@@ -65,9 +65,16 @@ public struct SquadAttributes
     public bool DragonsHoard;
     public bool BackStabbers;
     public bool ThickScales;
+    public bool ShotDiscipline;
+    public bool Overdraw;
+    public bool SteadyAim;
+    public bool Demolisher;
+    public bool PowderReserves;
+    public bool DeepQuivers;
 }
 
-public enum UnitAttribute { None, ArmorPiercing, AntiInfantry, AntiLarge, Infantry, Large, StandardShields, Armored, Terrifying, Stalwart, Ethereal, SwampCreature, ForestDweller, Outrider, ChickenFlight, BloodFrenzy, Rage, Emblazing, Unstoppable, HeavyShields, ThrowingAxes, ArmorSundering, MonsterSlayer, ForgefuryTempering, TowerShields, FlamingAmmo, IsOnFire, DragonsHoard, BackStabbers, ThickScales }
+// Append only - ordinals are serialized into save data as SquadToLoad.PrestigeTrait.
+public enum UnitAttribute { None, ArmorPiercing, AntiInfantry, AntiLarge, Infantry, Large, StandardShields, Armored, Terrifying, Stalwart, Ethereal, SwampCreature, ForestDweller, Outrider, ChickenFlight, BloodFrenzy, Rage, Emblazing, Unstoppable, HeavyShields, ThrowingAxes, ArmorSundering, MonsterSlayer, ForgefuryTempering, TowerShields, FlamingAmmo, IsOnFire, DragonsHoard, BackStabbers, ThickScales, ShotDiscipline, Overdraw, SteadyAim, Demolisher, PowderReserves, DeepQuivers }
 [System.Serializable]
 public struct UnitAttributeSerialized
 {

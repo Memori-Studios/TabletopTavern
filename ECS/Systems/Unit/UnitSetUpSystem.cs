@@ -141,7 +141,7 @@ partial struct UnitSetUpSystem : ISystem
                 if(Contains(GearID.HeavyWeapons) && squadStats.RarityTier == UnitRarity.Rare) 
                     squadStats.SquadAttributes.ArmorPiercing = true; 
 
-                if(Contains(GearID.ArmingSwords) && squadStats.unitType == UnitType.Melee)
+                if(Contains(GearID.ArmingSwords) && TabletopTavernConstants.FightsInMelee(squadStats.unitType))
                     meleeAttack += GearData.GetGear(GearID.ArmingSwords).GearModifierValue;
                 if(Contains(GearID.BucklerShields) && (squadStats.SquadAttributes.StandardShields || squadStats.SquadAttributes.HeavyShields))
                     meleeDefense += GearData.GetGear(GearID.BucklerShields).GearModifierValue;
@@ -151,7 +151,7 @@ partial struct UnitSetUpSystem : ISystem
                     range += GearData.GetGear(GearID.Longbows).GearModifierValue;
                 if(Contains(GearID.Glaives) && squadStats.SquadAttributes.AntiLarge)
                     weaponStrength += GearData.GetGear(GearID.Glaives).GearModifierValue;
-                if(Contains(GearID.TexanBBQ) && squadStats.unitType == UnitType.Melee)
+                if(Contains(GearID.TexanBBQ) && TabletopTavernConstants.FightsInMelee(squadStats.unitType))
                     weaponStrength += GearData.GetGear(GearID.TexanBBQ).GearModifierValue;
                 if(Contains(GearID.BallisticCharts))
                     accuracy += GearData.GetGear(GearID.BallisticCharts).GearModifierValue;
@@ -178,13 +178,37 @@ partial struct UnitSetUpSystem : ISystem
                 Value = team
             });
 
-            if(squadStats.unitType != UnitType.Melee)
+            if(TabletopTavernConstants.Casts(squadStats.unitType))
+            {
+                // Mage. Deliberately ahead of the "!= Melee" branch below, which would otherwise
+                // catch it and hand it a ShootAttack, a RangedUnitTag and a RangedMeleeConverter
+                // it has no use for. A mage's reach and cadence live on MageCast instead, and that
+                // is what prestige Range writes to since there is no ShootAttack.Range to raise.
+                // MeleeAttack is still added unconditionally below, so it defends itself in melee.
+                entityCommandBuffer.AddComponent(entity, new MageCast {
+                    Range = range,
+                    Cooldown = squadStats.rateOfFire,
+                    Timer = squadStats.rateOfFire,
+                });
+            }
+            else if(squadStats.unitType != UnitType.Melee)
             {
                 float rangeMultiplier = 1;
                 float accuracyMultiplier = 1;
 
+                // Shooter traits. squadStats.SquadAttributes already has any prestige-granted
+                // trait merged in above, so these cover both innate and granted cases.
+                if (squadStats.SquadAttributes.Overdraw)
+                    rangeMultiplier *= TabletopTavernConstants.OVERDRAW_RANGE_MULTIPLIER;
+
                 LocalToWorld localTransform = SystemAPI.GetComponent<LocalToWorld>(entity);
                 float timerMax = squadStats.unitType == UnitType.Artillery || squadStats.unitType == UnitType.Structure ? squadStats.rateOfFire : TabletopTavernConstants.RANGED_ATTACK_COOLDOWN;
+                if (squadStats.SquadAttributes.ShotDiscipline)
+                    timerMax *= TabletopTavernConstants.SHOT_DISCIPLINE_RELOAD_MULTIPLIER;
+
+                // Waives the Fire-at-Will accuracy penalty; read per shot in RangedUnitAttackSystem.
+                if (squadStats.SquadAttributes.SteadyAim)
+                    entityCommandBuffer.AddComponent<SteadyAimTag>(entity);
 
                 entityCommandBuffer.AddComponent<RangedMeleeConverter>(entity);
                 entityCommandBuffer.AddComponent<RangedUnitTag>(entity);
@@ -200,7 +224,9 @@ partial struct UnitSetUpSystem : ISystem
                     shootAnimationDelay = isArtillery ? 0.25f : 0.5f,
                 });
 
-                if(squadStats.unitType == UnitType.Ranged || squadStats.unitType == UnitType.Artillery) {
+                // RangedUnitAttackSystem's query requires this component, so anything meant to fire
+                // must have it. Structures get theirs from ArmySpawnManager instead.
+                if(TabletopTavernConstants.FightsAtRange(squadStats.unitType) || squadStats.unitType == UnitType.Artillery) {
                     entityCommandBuffer.AddComponent(entity, new RangedFireModeUnitComponent { FireMode = RangedFireMode.Volley });
                 }
 
@@ -356,11 +382,17 @@ partial struct UnitSetUpSystem : ISystem
 
             if (squadStats.unitType == UnitType.Artillery)
             {
+                // Demolisher scales the blast itself (damage and radius), leaving knockback force
+                // alone so shots don't start flinging units clean off the battlefield.
+                float explosionMultiplier = squadStats.SquadAttributes.Demolisher
+                    ? TabletopTavernConstants.DEMOLISHER_EXPLOSION_MULTIPLIER
+                    : 1f;
+
                 entityCommandBuffer.AddComponent(entity, new ArtilleryUnit
                 {
                     SquadID = unit.ValueRO.squadId,
-                    ExplosionDamage = squadStats.ExplosionDamage,
-                    ExplosionRange = squadStats.ExplosionRange,
+                    ExplosionDamage = (int)(squadStats.ExplosionDamage * explosionMultiplier),
+                    ExplosionRange = squadStats.ExplosionRange * explosionMultiplier,
                     ExplosionForce = squadStats.ExplosionForce
                 });
                 entityCommandBuffer.AddComponent(entity, new ResistKnockbackTag { });

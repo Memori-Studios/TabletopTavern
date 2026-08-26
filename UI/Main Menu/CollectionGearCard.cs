@@ -10,18 +10,19 @@ using MoreMountains.Feedbacks;
 using Memori.SaveData;
 using Memori.Localization;
 using Memori.Notifications;
+using Memori.Tooltip;
 
 namespace TJ.MainMenu
 {
     public class CollectionGearCard : MemoriButtonV2, IPointerEnterHandler, IPointerExitHandler, IPointerClickHandler
     {
         [Header("Tooltip")]
-        [SerializeField] private CanvasGroup tooltipCanvasGroup;
-        [SerializeField] private TMP_Text gearName;
-        [SerializeField] private TMP_Text gearDescriptionText, gearFlavorText;
-
-        [SerializeField] private Image gearImage, gearRarityImage, gearRarityImage2, gearRarityTracery1, gearRarityTracery2;
-        [SerializeField] private Image mouseOverHighlight1, mouseOverHighlight2;
+        [SerializeField] private MemoriTooltipTrigger memoriTooltipTrigger;
+        // [SerializeField] private CanvasGroup tooltipCanvasGroup;
+        // [SerializeField] private TMP_Text gearName;
+        // [SerializeField] private TMP_Text gearDescriptionText, gearFlavorText;
+        [SerializeField] private Image mouseOverHighlight1; //, mouseOverHighlight2;
+        [SerializeField] private Image gearImage, gearRarityImage,  gearRarityTracery1; // gearRarityImage2, gearRarityTracery2,
         [SerializeField] private Animator iconAnimator;
 
         GearID gearID;
@@ -50,18 +51,16 @@ namespace TJ.MainMenu
 
             ColorData.XMLTagColorApplicator(ref gearDescLocalized);
 
-            gearName.text = isCollected ? gearNameLocalized : LocalizationManager.Instance.GetText("Gear Not Discoverd");
-            gearDescriptionText.text = isCollected ? gearDescLocalized: LocalizationManager.Instance.GetText("Obtain in Campaign");
-            gearFlavorText.text = isCollected ? gearFlavorLocalized : "????????";
+            string title = isCollected ? gearNameLocalized : LocalizationManager.Instance.GetText("Gear Not Discoverd");
+            string desc = isCollected ? gearDescLocalized: LocalizationManager.Instance.GetText("Obtain in Campaign");
+            string flavor = isCollected ? gearFlavorLocalized : "????????";
 
             gearImage.color = isCollected ? Color.white : new Color(0.1f, 0.1f, 0.1f, 1f);
             
             gearRarityTracery1.color = new Color(rarityColor.r, rarityColor.g, rarityColor.b, 5f/255f);
-            gearRarityTracery2.color = new Color(rarityColor.r, rarityColor.g, rarityColor.b, 5f/255f);
             gearRarityImage.color = new Color(rarityColor.r, rarityColor.g, rarityColor.b, 25f/255f);
-            gearRarityImage2.color = new Color(rarityColor.r, rarityColor.g, rarityColor.b, 25f/255f);
 
-            tooltipCanvasGroup.CGDisable();
+            // tooltipCanvasGroup.CGDisable();
 
             if(collectionPanel != null) {
                 if(!isCollected) {
@@ -72,14 +71,16 @@ namespace TJ.MainMenu
             } else {
                 collectionUnacknowledgedIndicator.SetActive(false);
             }
+
+            memoriTooltipTrigger.SetUpToolTip(title, desc, flavor);
         }
         public override void OnPointerEnter(PointerEventData eventData)
         {
             base.OnPointerEnter(eventData);
             // IAudioRequester.Instance.PlaySFX(SFXData.ButtonHover);
-            tooltipCanvasGroup.CGEnable();
+            // tooltipCanvasGroup.CGEnable();
             mouseOverHighlight1.enabled = true;
-            mouseOverHighlight2.enabled = true;
+            // mouseOverHighlight2.enabled = true;
             iconAnimator.SetTrigger("Highlighted");
 
             if (!acknowledged && isCollected)
@@ -94,9 +95,9 @@ namespace TJ.MainMenu
         public override void OnPointerExit(PointerEventData eventData)
         {
             base.OnPointerExit(eventData);
-            tooltipCanvasGroup.CGDisable();
+            // tooltipCanvasGroup.CGDisable();
             mouseOverHighlight1.enabled = false;
-            mouseOverHighlight2.enabled = false;
+            // mouseOverHighlight2.enabled = false;
             iconAnimator.SetTrigger("Normal");
         }
         public void OnPointerClick(PointerEventData eventData)

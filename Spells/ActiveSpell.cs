@@ -34,10 +34,35 @@ public class ActiveSpell : MonoBehaviour
     private SpellData spellData;
     private Entity targetSquadEntity = Entity.Null;
 
-    public void Load(SpellData _spellData, float3 position, Entity _targetSquadEntity = default)
+    // Who cast this. Defaulted to the player casting from the hotbar, which was the only caster
+    // when this class was written and used to be hardcoded down in CastSpell. Mage units pass their
+    // own team and squad id, which is what lets an enemy mage damage the player rather than its own
+    // army, and what gets a mage's kills credited instead of landing on the "no killer" sentinel.
+    private Team sourceTeam = Team.Player;
+    private int sourceSquadId = 0;
+
+    /// <summary>
+    /// TargetTeam on a SpellData is authored from the caster's point of view - Enemy means "whoever
+    /// the caster is fighting". For a player cast that resolves to itself, but an enemy mage has to
+    /// flip it or its Smite would land on the enemy army. Neutral is a wildcard and never flips.
+    /// </summary>
+    private Team ResolvedTargetTeam
+    {
+        get
+        {
+            if (spellData.TargetTeam == Team.Neutral) return Team.Neutral;
+            if (sourceTeam != Team.Enemy) return spellData.TargetTeam;
+            return spellData.TargetTeam == Team.Enemy ? Team.Player : Team.Enemy;
+        }
+    }
+
+    public void Load(SpellData _spellData, float3 position, Entity _targetSquadEntity = default,
+                     Team _sourceTeam = Team.Player, int _sourceSquadId = 0)
     {
         spellData = _spellData;
         targetSquadEntity = _targetSquadEntity;
+        sourceTeam = _sourceTeam;
+        sourceSquadId = _sourceSquadId;
         transform.position = position;
 
         if(HasBonusDiscs) SetDisplayOfBonus(spellData.SpellModifierValue, spellData.SpellRadius);
@@ -125,7 +150,14 @@ public class ActiveSpell : MonoBehaviour
             // Spawns a real player squad that lasts until killed. No SpellEntity is created, so
             // SpellSystem never sees this cast - the squad is the entire effect. CleanUpSpell still
             // runs below, but that only governs this GameObject's visuals, not the squad's lifetime.
-            BattleManager.Instance.ArmySpawnManager.SummonSquad(spellData.SummonedUnitName, transform.position);
+            //
+            // SummonSquad only ever spawns for the player: it takes a positive squad id (9000+) and
+            // EntityWatcher keys PlayerSquad off id > 0. An enemy caster would summon a squad that
+            // fights for the player, so this stays player-only until enemy summoning is built.
+            if (sourceTeam == Team.Enemy)
+                Debug.LogError($"ActiveSpell: '{spellData.name}' summons, but enemy summoning is not supported - cast ignored.", spellData);
+            else
+                BattleManager.Instance.ArmySpawnManager.SummonSquad(spellData.SummonedUnitName, transform.position);
         }
         else if (spellData.MarksTarget)
         {
@@ -168,7 +200,7 @@ public class ActiveSpell : MonoBehaviour
                 BlastRadius = spellData.SpellRadius,
                 Damage = spellData.SpellModifierValue,
                 SpellForce = spellData.SpellForce,
-                OwnerTeam = Team.Player,
+                OwnerTeam = sourceTeam,
                 RemainingArmedTime = spellData.SpellDuration
             });
         }
@@ -176,6 +208,15 @@ public class ActiveSpell : MonoBehaviour
         {
             // Starstep - blink the player's selected squad to the cast point (only the first selected
             // player squad). No squad selected means nothing happens.
+            //
+            // Reads the live player selection, which an enemy caster has no equivalent of, so this
+            // is player-only. An enemy mage casting it would silently teleport a PLAYER squad.
+            if (sourceTeam == Team.Enemy)
+            {
+                Debug.LogError($"ActiveSpell: '{spellData.name}' teleports the selected squad, which is player-only - enemy cast ignored.", spellData);
+                StartCoroutine(CleanUpSpell());
+                return;
+            }
             UnitSelectionManager selection = BattleManager.Instance.UnitSelectionManager;
             foreach (int squadId in selection.SelectedSquadIds)
             {
@@ -198,7 +239,9 @@ public class ActiveSpell : MonoBehaviour
                     {
                         UnitStat = stat,
                         BattlefieldBonusEnum = type,
-                        Team = spellData.TargetTeam,
+                        // Resolved, not raw: an enemy mage's "buff my side" has to land on the
+                        // enemy side, and its debuff on the player's.
+                        Team = ResolvedTargetTeam,
                         Value = value,
                         Guid = Guid.NewGuid(),
                         OriginationPoint = transform.position,
@@ -231,16 +274,18 @@ public class ActiveSpell : MonoBehaviour
         {
             Entity spellEntity = entityManager.CreateEntity();
 
-            // Only the player casts spells right now, so TeamOfSource/DamageSourceSquadId are
-            // fixed here rather than left as designer-configurable fields on the SpellData asset.
-            // Neutral-targeted spells use Team.Neutral as a wildcard so ApplyDamageSystem's
+            // TeamOfSource and DamageSourceSquadId come from whoever cast this - the hotbar passes
+            // the player and squad 0, a mage unit passes its own team and squad id. They used to be
+            // hardcoded to Player/0, which meant an enemy mage would have damaged its own army and
+            // no mage kill could ever be credited.
+            // Neutral-targeted spells still use Team.Neutral as a wildcard so ApplyDamageSystem's
             // team-alignment checks don't exempt either side (see ApplyDamageSystem.cs).
             DamageBufferElement damageBufferElement = new ()
             {
                 DamageType = spellData.HealsInsteadOfDamage ? DamageType.Healing : DamageType.Magical,
                 AttackStrength = spellData.SpellModifierValue,
-                TeamOfSource = spellData.TargetTeam == Team.Neutral ? Team.Neutral : Team.Player,
-                DamageSourceSquadId = 0
+                TeamOfSource = spellData.TargetTeam == Team.Neutral ? Team.Neutral : sourceTeam,
+                DamageSourceSquadId = sourceSquadId
             };
 
             ecb.AddComponent(spellEntity, new SpellEntity {

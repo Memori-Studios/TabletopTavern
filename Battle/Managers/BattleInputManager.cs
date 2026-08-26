@@ -10,7 +10,6 @@ using TJ.Map;
 using Memori.Input;
 using Unity.Mathematics;
 using Memori.Notifications;
-using Memori.Localization;
 using Memori.Audio;
 
 public enum CursorMode {Free, MouseDown, UnitsSelected, Reposition, SpawnSquad, CastSpell, QuickCastMenu, PostGame }
@@ -263,20 +262,21 @@ public class BattleInputManager : MonoBehaviour
         {
             RotatingSelectedUnits(false);
 
-            List<SetDestination> positions;
+            //casualties since the last selection change would otherwise leave the cached counts high
+            unitSelectionManager.RefreshSelectedUnitCounts();
+
+            List<SetDestination> livePositions = unitSelectionManager.GetSelectedUnitsRepositionPositions();
+            List<SetDestination> positions = livePositions;
             if (BattleManager.Instance.GroupManager.AreSelectedSquadsInLockedGroup(
                     unitSelectionManager.SelectedSquadIds, out TJ.Battle.SquadGroup lockedGroup))
             {
-                positions = lockedGroup.LockedPositions;
+                //a locked layout that no longer matches the live squads would preview stale points
+                if (lockedGroup.LockedPositions != null && lockedGroup.LockedPositions.Count == livePositions.Count)
+                    positions = lockedGroup.LockedPositions;
             }
-            else
-            {
-                positions = unitSelectionManager.GetSelectedUnitsRepositionPositions();
-            }
-            
+
             positionDrawer.PreviewMoveFormation(
                 unitSelectionManager.GetMousePositionOffsetByFormationCenter(),
-                unitSelectionManager.SelectedSquadEntityAndEntitiesCountDict,
                 positions
             );
         }
@@ -293,8 +293,7 @@ public class BattleInputManager : MonoBehaviour
             {
                 positionDrawer.TurnOff();
                 // Debug.Log($"Invalid positions");
-                string positionError1 = LocalizationManager.Instance.GetText("positionError");
-                NotificationManager.Instance.ErrorNotification(positionError1);
+                NotificationManager.Instance.ErrorNotification(BattleManager.Instance.PositionDrawer.PositionErrorMessage);
                 BattleManager.Instance.SetCursorMode(CursorMode.Free);
                 return;
             }

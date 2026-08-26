@@ -28,6 +28,7 @@ partial struct SquadRanOutOfAmmoSystem : ISystem
         {
             entityCommandBuffer.RemoveComponent<RanOutOfAmmoTag>(squad.ValueRO.SelfEntity);
             entityCommandBuffer.RemoveComponent<RangedSquad>(squad.ValueRO.SelfEntity);
+            entityCommandBuffer.RemoveComponent<SquadAmmunition>(squad.ValueRO.SelfEntity);
             entityCommandBuffer.AddComponent<MeleeSquad>(squad.ValueRO.SelfEntity);
 
             if(entityManager.HasComponent<RangedSquadSkirmishTag>(squad.ValueRO.SelfEntity)) {
@@ -58,6 +59,38 @@ partial struct SquadRanOutOfAmmoSystem : ISystem
                 }
             }
         }
+
+        #region Mage
+
+        // A spent mage converts to a melee body the same way a spent archer does, but deliberately
+        // NOT through the loop above. A mage has no ShootAttack to strip and no RangedMeleeConverter
+        // to trip - it never swapped a weapon, its MeleeAttack was there the whole time. And its
+        // QueuedOrder buffer holds the player's attack orders, which it should keep following on
+        // foot rather than have silently cleared out from under them.
+        foreach (var (squad, entityBuffer) in SystemAPI.Query<
+            RefRO<SquadEntity>,
+            DynamicBuffer<EntityReferenceBufferElement>>().WithAll<MageSquad>().WithPresent<RanOutOfAmmoTag>())
+        {
+            entityCommandBuffer.RemoveComponent<RanOutOfAmmoTag>(squad.ValueRO.SelfEntity);
+            entityCommandBuffer.RemoveComponent<MageSquad>(squad.ValueRO.SelfEntity);
+            entityCommandBuffer.RemoveComponent<SquadAmmunition>(squad.ValueRO.SelfEntity);
+            entityCommandBuffer.AddComponent<MeleeSquad>(squad.ValueRO.SelfEntity);
+
+            // Removing MageCast is what actually stops the casting: MageCastSystem reads its Timer
+            // off the first unit in the buffer, so without this the squad would keep queueing casts
+            // against a pool that no longer exists. One-way, like the archer conversion.
+            for (int i = 0; i < entityBuffer.Length; i++)
+            {
+                Entity entity = entityBuffer[i].Entity;
+
+                if (entityManager.HasComponent<MageCast>(entity))
+                {
+                    entityCommandBuffer.RemoveComponent<MageCast>(entity);
+                }
+            }
+        }
+
+        #endregion
     }
 }
 

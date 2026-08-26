@@ -343,7 +343,10 @@ public class SquadManager : MonoBehaviour
         int currentHealth = _entities.Count * squadStats.HitPointsPerUnit;
         // Debug.Log($"Registering squad {squadId} with {initialSquadSize} entities and {maxHealth} max health");
         float leadership = squadStats.Leadership;
-        if (squadStats.unitType == UnitType.Melee || squadStats.unitType == UnitType.Hybrid || TabletopTavernConstants.UsesMeleePrestige(squadStats.unitName)) {
+        // Mages take Leadership prestige alongside melee units: a one-model squad breaks easily,
+        // and Leadership plus Range is the whole of what prestige buys a caster.
+        if (TabletopTavernConstants.FightsInMelee(squadStats.unitType)
+            || TabletopTavernConstants.Casts(squadStats.unitType)) {
             leadership += _spawnPrestige * TabletopTavernConstants.PRESTIGE_BONUS;
         }
         var ecb = ecbSystem.CreateCommandBuffer();
@@ -1175,6 +1178,12 @@ public class SquadManager : MonoBehaviour
             raceFlagBaseMaterial
         );
         int ammunition = squadStats.Ammunition;
+        // Prestige charges are folded in for mages only, so the bar's max matches what EntityWatcher
+        // actually put in SquadAmmunition. Deliberately not extended to archers and artillery: their
+        // bars have always been authored off the base value, and a mage's pool is small enough
+        // (3 charges, +1 per prestige level) that the same discrepancy would be a third of the bar.
+        if (TabletopTavernConstants.Casts(squadStats.unitType))
+            ammunition += TabletopTavernConstants.PRESTIGE_AMMO_BONUS_MAGE * GetSquadPrestige(_squadId);
         // Hero-granted ammunition bonuses (e.g. Bertha/14 Supply Lines) now come from
         // HeroBonusManager's rule data, same source as EntityWatcher's real Ammunition value.
         if (HeroBonusManager.Instance.ActiveHeroID != -1)

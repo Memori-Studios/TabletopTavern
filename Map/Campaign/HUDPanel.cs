@@ -150,7 +150,7 @@ namespace TJ.Map
             disbandSquadButtonCancel.onClick.AddListener(() => HideDisbandSquadConfirmation());
             renameSquadButtonConfirm.onClick.AddListener(() => RenameSquad());
             renameSquadButtonCancel.onClick.AddListener(() => { renameSquadConfirmationPopup.CGDisable(); mapSceneUIManager.MapSceneManager.SetMapInput(true); });
-            // testAquireConsumableButton.onClick.AddListener(() => CampaignManager.Instance.CampaignSaveManager.AquireConsumable(ConsumableData.GetRandomConsumable()));
+            // testAquireConsumableButton.onClick.AddListener(() => CampaignManager.Instance.CampaignSaveManager.AquireConsumable(ConsumableData.GetRandomConsumable(campaignSaveManager.GetCampaignRandom())));
 
             campaignSaveManager.OnChapterCompleted += UpdateChapterText;
             CampaignManager.Instance.GoldManager.OnGoldAmountChanged += OnGoldChanged;
@@ -226,8 +226,8 @@ namespace TJ.Map
             heroNameText.text = heroNameLocalized;
             heroRaceText.text = heroRaceLocalized;
 
-            string heroBonusText1string = LocalizationManager.Instance.GetText(hero.HeroBonusDescription[0].Replace("heroBonusDescription", "heroBonusTitle")) + ": " + LocalizationManager.Instance.GetText(hero.HeroBonusDescription[0]);
-            string heroBonusText2string = LocalizationManager.Instance.GetText(hero.HeroBonusDescription[1].Replace("heroBonusDescription", "heroBonusTitle")) + ": " + LocalizationManager.Instance.GetText(hero.HeroBonusDescription[1]);
+            string heroBonusText1string = HeroBonusText.Get(hero, 0);
+            string heroBonusText2string = HeroBonusText.Get(hero, 1);
             string raceBonusTextstring = LocalizationManager.Instance.GetText(hero.Race+ "BonusDescription");
             ColorData.XMLTagColorApplicator(ref heroBonusText1string);
             ColorData.XMLTagColorApplicator(ref heroBonusText2string);

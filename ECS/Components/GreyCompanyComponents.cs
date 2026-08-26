@@ -30,12 +30,22 @@ public struct ShieldedStanceUnitComponent : IComponentData { public ShieldedStan
 public struct DefensiveStanceTag : IComponentData, IEnableableComponent { }
 
 public struct MeleeSquad : IComponentData { }
-public struct RangedSquad : IComponentData, IEnableableComponent 
-{ 
-    public float AttackRange; 
-    public int Ammunition; 
+public struct RangedSquad : IComponentData, IEnableableComponent
+{
+    public float AttackRange;
 }
 public struct ArtillerySquad : IComponentData { }
+
+/// <summary>
+/// The squad's remaining shots, lifted out of RangedSquad so a mage's cast charges can run through
+/// the same spend-and-deplete pipeline (RangedSquadRemoveAmmunitionSystem -> SquadRanOutOfAmmoSystem)
+/// without a mage having to carry RangedSquad - that component is what pulls a squad into archer
+/// targeting, skirmishing and fire modes, none of which apply to a caster.
+///
+/// Added by EntityWatcher for shooters, artillery and mages alike. Removed by SquadRanOutOfAmmoSystem
+/// on depletion, which is what stops the deplete check re-firing forever on an already-converted squad.
+/// </summary>
+public struct SquadAmmunition : IComponentData { public int Value; }
 public struct AmmuntionSpent : IComponentData { public int squadId; }
 public struct RanOutOfAmmoTag : IComponentData { }
 public enum RangedToMeleeSwitchType { Melee, Ranged }
@@ -100,6 +110,12 @@ public struct ThrowUnit : IComponentData {
 }
 #endregion
 public struct RemoveChargeBonusTag : IComponentData { }
+/// <summary>
+/// Rally the Banners. On a squad, adds BonusImpact to the charge bonus SquadChargeBonusApplicationSystem
+/// grants, and exempts that squad from the forest/swamp/rain suppression that otherwise cancels it outright.
+/// Added and removed by BattlefieldBonusSystem, so the aura's radius and duration govern its lifetime.
+/// </summary>
+public struct ChargeEmpoweredTag : IComponentData { public float BonusImpact; }
 public struct StartChargeTag : IComponentData { }
 public struct PreviousSquadCommandComponent : IComponentData { public SquadCommand Command; }
 public struct SquadCommandChangedTag : IComponentData { public SquadCommand OldCommand; public SquadCommand NewCommand; }
@@ -178,6 +194,8 @@ public struct AntiInfantryTag : IComponentData { }
 public struct AntiLargeTag : IComponentData { }
 public struct BracedTag : IComponentData, IEnableableComponent { }
 public struct BackStabbersTag : IComponentData { }
+/// <summary> Steady Aim: waives the Fire-at-Will accuracy penalty in RangedUnitAttackSystem. </summary>
+public struct SteadyAimTag : IComponentData { }
 
 public struct Shield : IComponentData { public Entity shieldEntity; public float ShieldBlockChance; }
 public struct Cavalry : IComponentData { public Entity riderEntity; public UnitName unitName; }

@@ -12,7 +12,7 @@ namespace TJ
     {
         [SerializeField] private SquadNavObject squadMovementPrefab;
         Dictionary<Entity, SquadNavObject> squadNavObjects = new ();
-        bool battleHasStarted = false; 
+        bool battleHasStarted = false;
         bool battleHasEnded = false;
 
         private void Update()
@@ -162,16 +162,14 @@ namespace TJ
         {
             // Debug.Log($"EnteringSwamp: {entity}");
 
-            // Lookup must come before the null test - indexing a missing key throws, which made the
-            // ContainsKey guard below it unreachable. A squad can legitimately be absent here while
-            // its nav object is still being set up (see HandleSquadMovement).
-            if(!squadNavObjects.TryGetValue(entity, out SquadNavObject navObject) || navObject == null)
-            {
-                Debug.LogError($"SquadNavObject not found for entity: {entity}");
-                return;
-            }
-
             EntityManager entityManager = World.DefaultGameObjectInjectionWorld.EntityManager;
+
+            // The old guard here bailed out when the squad had no SquadNavObject yet, but nothing in
+            // this method uses the nav object (the locomotion writes that did are commented out below).
+            // All it did was skip the speed math for squads still finishing setup, leaving the *= and
+            // the /= unpaired so the slow never came off. Only the buffer needs checking.
+            if (!entityManager.HasBuffer<EntityReferenceBufferElement>(entity)) return;
+
             var entityBuffer = entityManager.GetBuffer<EntityReferenceBufferElement>(entity);
 
             //AgentAuthoring agent = squadNavObjects[entity].GetComponent<AgentAuthoring>();                

@@ -97,6 +97,15 @@ namespace TJ.Shop
 
             shopCanvasGroup.FadeInAsync();
 
+            // Built before SpawnInItems runs: its shopSeed is what makes the consumable stock repeatable.
+            shopSaveData = new ShopSaveData()
+            {
+                shopSeed = campaignSaveManager.GetSeededRandom(),
+                packPurchasedCount = 0,
+                shopConsumables = new List<ConsumableEnum>(),
+                shopConsumablesPurchased = new List<ConsumableEnum>()
+            };
+
             async Task SpawnInItems()
             {
                 int gearPackDiscount = 0;
@@ -147,12 +156,16 @@ namespace TJ.Shop
                 }
 
                 shopConsumables.Clear();
+                // Drawn from the campaign seed rather than UnityEngine.Random, so exiting to the main menu
+                // and re-entering the shop restocks the same two consumables instead of rerolling them.
+                // MixSeed is what keeps consecutive shops from landing on the same pair - see its comment.
+                System.Random consumableRandom = new System.Random(MathUtilities.MixSeed(shopSaveData.shopSeed));
                 for (int i = 0; i < 2; i++)
                 {
-                    ConsumableEnum consumable = ConsumableData.GetRandomConsumable();
+                    ConsumableEnum consumable = ConsumableData.GetRandomConsumable(consumableRandom);
                     while (shopSaveData.shopConsumables.Contains(consumable))
                     {
-                        consumable = ConsumableData.GetRandomConsumable();
+                        consumable = ConsumableData.GetRandomConsumable(consumableRandom);
                     }
                     shopSaveData.shopConsumables.Add(consumable);
 
@@ -164,14 +177,6 @@ namespace TJ.Shop
                 }
                 outlines = GetComponentsInChildren<Outline>();
             }
-
-            shopSaveData = new ShopSaveData()
-            {
-                shopSeed = campaignSaveManager.GetSeededRandom(),
-                packPurchasedCount = 0,
-                shopConsumables = new List<ConsumableEnum>(),
-                shopConsumablesPurchased = new List<ConsumableEnum>()
-            };
 
             IAudioRequester.Instance.PlaySFX(SFXData.OpenUI);
 

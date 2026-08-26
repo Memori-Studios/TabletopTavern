@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using TJ.Spells;
 using UnityEngine;
 
 namespace TJ
@@ -16,6 +17,9 @@ namespace TJ
         public int HeroID;
         public Race Race;
         public UnitName SignatureUnit;
+        // Pinned to spell slot 0 for this hero, and added to the shared cross-hero pool once the
+        // hero has completed a run. See SpellLoadout.
+        public Spell SignatureSpell;
         public UnitName[] StartingArmyUnits;
     }
 

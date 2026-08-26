@@ -19,6 +19,11 @@ namespace TJ
         Vector3 mousePosition;
         int unitCount;
         List<UnitPrefabPoint> unitPoints = new();
+        // How many pooled points the current preview both activated AND positioned. Points past this
+        // index can still be active while holding a stale world position, so nothing may validate or
+        // consume them.
+        private int activePointCount;
+        public int ActivePointCount => activePointCount;
         [SerializeField] private Transform positionsParent;
         [SerializeField] private Transform positionsGrandParent;
         public Transform PositionsParent => positionsParent;
@@ -55,7 +60,7 @@ namespace TJ
         [SerializeField] private Polyline secondaryEnemyDeploymentZoneLine;
         [SerializeField] private Color validColor, invalidColor;
         [SerializeField] private LayerMask layerMask;
-        private string positionError1, positionError2, positionError3;
+        private string positionError1, positionError2, positionError3, positionErrorBattle;
         private BattleLayoutType _layoutType;
         private SpawnBox _secondaryPlayerDeploymentZone;
         private SpawnBox _secondaryEnemyDeploymentZone;
@@ -76,7 +81,15 @@ namespace TJ
             positionError1 = LocalizationManager.Instance.GetText("positionError");
             positionError2 = LocalizationManager.Instance.GetText("positionError2");
             positionError3 = LocalizationManager.Instance.GetText("positionError3");
+            positionErrorBattle = LocalizationManager.Instance.GetText("positionErrorBattle");
         }
+
+        /// <summary>
+        /// Phase-appropriate copy for a rejected placement. The deployment wording talks about
+        /// deployment zones and outriders, which is misleading once the battle has started.
+        /// </summary>
+        public string PositionErrorMessage =>
+            BattleManager.Instance.GamePhase == GamePhase.Deployment ? positionError1 : positionErrorBattle;
 
         public void SetBattleLayout(BattleLayoutType layoutType)
         {
@@ -374,6 +387,7 @@ namespace TJ
         public void TurnOff()
         {
             // Debug.Log($"Turning off position drawer");
+            activePointCount = 0;
             foreach (UnitPrefabPoint point in unitPoints)
             {
                 point.gameObject.SetActive(false);
@@ -390,14 +404,22 @@ namespace TJ
             MakePool();
             formation.CalculateUnitDepthAndWidthForSpawn(unitCount, _spread);
         }
-        public void PreviewMoveFormation(Vector3 _position, Dictionary<int, int> selectedSquadEntityAndEntitiesCountDict, List<SetDestination> _positions)
+        public void PreviewMoveFormation(Vector3 _position, List<SetDestination> _positions)
         {
-            SetMousePosition(_position);
-            unitCount = 0;
-            foreach (KeyValuePair<int, int> pair in selectedSquadEntityAndEntitiesCountDict)
+            //nothing left alive to preview - showing the previous layout would just validate stale points
+            if (_positions == null || _positions.Count == 0)
             {
-                unitCount += pair.Value;
+                TurnOff();
+                return;
             }
+
+            SetMousePosition(_position);
+
+            // Size the pool off the live destination list, never off the cached selection counts.
+            // Battlefield casualties shrink the live list but not the cache, and any point activated
+            // without being positioned keeps a stale world position that then fails the zone check
+            // and silently kills the whole order.
+            unitCount = _positions.Count;
 
             positionsParent.SetPositionAndRotation(mousePosition, positionsParent.rotation);
 
@@ -412,6 +434,7 @@ namespace TJ
                 unitPoints[i].transform.position = pos.destinationPosition;
                 i++;
             }
+            activePointCount = i;
         }
         public void MovePositionToMouse(Vector3 _position, bool overrideRotation = false)
         {
@@ -445,6 +468,7 @@ namespace TJ
                 unitPoints[i].transform.localPosition = mousePosition + pos - positionsParent.localPosition;
                 i++;
             }
+            activePointCount = i;
         }
         public void MakePoolOnSpawn()
         {
@@ -460,6 +484,7 @@ namespace TJ
         }
         private void MakePool()
         {
+            activePointCount = unitCount;
             foreach (UnitPrefabPoint point in unitPoints)
             {
                 point.gameObject.SetActive(false);
@@ -483,8 +508,10 @@ namespace TJ
 
             if (preBattleOutrider || garrisonBattlePhase)
             {
-                foreach (UnitPrefabPoint point in unitPoints)
+                // Only points this preview actually positioned are meaningful - see activePointCount.
+                for (int i = 0; i < activePointCount && i < unitPoints.Count; i++)
                 {
+                    UnitPrefabPoint point = unitPoints[i];
                     if (!point.gameObject.activeSelf) continue;
 
                     Vector3 pos = point.transform.position;
@@ -535,8 +562,10 @@ namespace TJ
             //allow movement in enemy deployment zone during battle phase
             box = BattleManager.Instance.GamePhase == GamePhase.Deployment ? box : battleZone;
 
-            foreach (UnitPrefabPoint point in unitPoints)
+            // Only points this preview actually positioned are meaningful - see activePointCount.
+            for (int i = 0; i < activePointCount && i < unitPoints.Count; i++)
             {
+                UnitPrefabPoint point = unitPoints[i];
                 if (point.gameObject.activeSelf)
                 {
                     bool inPrimary = IsPositionInsideBox(point.transform.position, box);
@@ -550,7 +579,8 @@ namespace TJ
                         {
                             ColorPoints(invalidColor);
                             validPositions = false;
-                            BattleManager.Instance.UIManager.ShowPositionError(true, positionError1);
+                            BattleManager.Instance.UIManager.ShowPositionError(true, PositionErrorMessage);
+                            Debug.Log($"Order rejected - point {i} of {activePointCount} at {point.transform.position} is outside the allowed area during {BattleManager.Instance.GamePhase}");
                         }
                         return;
                     }

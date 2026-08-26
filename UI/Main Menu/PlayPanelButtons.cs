@@ -15,16 +15,16 @@ namespace TJ.MainMenu
         [SerializeField] private Button button;
         public Button Button => button;
         [SerializeField] private bool scaleOnHover = true;
-        PlayPanel _playPanel;
         GameObject _sectionPanel;
         private void Awake()
         {
             if (highlightImage != null) highlightImage.enabled = false;
             if (particleEffect != null) particleEffect.SetActive(false);
         }
-        public void SetUp(PlayPanel playPanel, GameObject sectionPanel)
+        // Run setup no longer opens sections on hover - the warband screen's loadout blocks are
+        // clicked instead - so this is now just a hover-styled button. sectionPanel is optional.
+        public void SetUp(GameObject sectionPanel = null)
         {
-            _playPanel = playPanel;
             _sectionPanel = sectionPanel;
         }
         public void OnPointerEnter(PointerEventData eventData)
@@ -35,12 +35,11 @@ namespace TJ.MainMenu
             if (iconToScale != null) MemoriUI.BloomItemScaleTemp(iconToScale.transform, 1.1f, 0.1f);
             if (highlightImage != null) highlightImage.enabled = true;
             if (particleEffect != null) particleEffect.SetActive(true);
-            if (_sectionPanel != null) _playPanel.OnPlayPanelButtonHover(this);
         }
 
         public void OnPointerExit(PointerEventData eventData)
         {
-            if (_sectionPanel == null) ShutDown();
+            ShutDown();
         }
         public void ShutDown()
         {

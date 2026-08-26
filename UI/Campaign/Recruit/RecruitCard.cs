@@ -22,8 +22,8 @@ namespace TJ.Recruit
     {
         [SerializeField] private Image iconHighlight, tierGradient, tierGradientBack1, tierGradientBack2;
         [SerializeField] private ParticleSystem _tierParticleSystem1, _tierParticleSystem2, _tierParticleSystem3, _tierParticleSystem4;
-        [SerializeField] private TMP_Text recruitNameText, goldCostText, unitCountText;
-        [SerializeField] private MemoriTooltipTrigger unitCountTooltip;
+        [SerializeField] private TMP_Text recruitNameText, goldCostText, unitCountText, maxHealthText;
+        [SerializeField] private MemoriTooltipTrigger unitCountTooltip, maxHealthTooltip;
         [SerializeField] private GameObject purceasedGO, cardBackGO, canCombineGO;//costGO
         [SerializeField] private Transform cardParentTransform;
         [SerializeField] private Image recruitUnitTypeImage1, recruitUnitTypeImage2;
@@ -73,6 +73,8 @@ namespace TJ.Recruit
             recruitNameText.text = LocalizationManager.Instance.GetText(squadStats.unitName.ToString());
             unitCountText.text = squadStats.baseUnitCount.ToString();
             unitCountTooltip.SetUpToolTip(_description: LocalizationManager.Instance.GetText("Unit Count"));
+            maxHealthText.text = (squadStats.baseUnitCount * squadStats.HitPointsPerUnit).ToString();
+            maxHealthTooltip.SetUpToolTip(_description: LocalizationManager.Instance.GetText("HitPoints"));
             recruitImageRaw.texture = _recruitImage;
 
             unitAttributesUIContainer = GetComponent<UnitAttributesUIContainer>();

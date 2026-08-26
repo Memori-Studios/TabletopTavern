@@ -38,6 +38,11 @@ namespace TJ.Event
             eventRewards.Clear();
             eventAquireRewardButtons.Clear();
 
+            // Campaign-seeded, so re-entering the event (exiting to the main menu and back) offers the same
+            // rewards instead of rerolling them. One stream for the whole outcome, so an outcome carrying
+            // two consumable or unit drops still gets independent draws for each.
+            System.Random rewardRandom = CampaignManager.Instance.CampaignSaveManager.GetCampaignRandom();
+
             foreach (EventOutcomeModifier eventOutcomeModifier in _eventReward.EventOutcome.EventOutcomeModifiers)
             {
                 IAudioRequester.Instance.PlaySFX(SFXData.CollectItem);
@@ -75,7 +80,7 @@ namespace TJ.Event
                     case EventOutcomeModifierEnum.NewUnit:
                         {
                             //gets a new, likely low tier unit
-                            UnitName[] unitNames = TabletopTavernData.Instance.GetSquadsToRecruitBasedOnReputation(0, 1, UnityEngine.Random.Range(0, 100), CampaignManager.Instance.CampaignSaveManager.GetHeroID());
+                            UnitName[] unitNames = TabletopTavernData.Instance.GetSquadsToRecruitBasedOnReputation(0, 1, rewardRandom.Next(), CampaignManager.Instance.CampaignSaveManager.GetHeroID());
                             EventAquireRewardButton aquireUnitButton = Instantiate(aquireRewardButtonPrefab, rewardParent);
                             string RecruitUnitLocalized = LocalizationManager.Instance.GetText("Recruit Unit");
                             void recruitUnitAction()
@@ -114,7 +119,7 @@ namespace TJ.Event
                         {
                             EventAquireRewardButton acquireConsumableButton = Instantiate(aquireRewardButtonPrefab, rewardParent);
 
-                            ConsumableEnum consumable = ConsumableData.GetRandomConsumable();
+                            ConsumableEnum consumable = ConsumableData.GetRandomConsumable(rewardRandom);
                             Consumable consumableData = ConsumableData.GetConsumable(consumable);
 
                             string consumableNameLocalized = LocalizationManager.Instance.GetText(consumableData.ConsumableEnum.ToString() + "Name");

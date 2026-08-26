@@ -24,14 +24,16 @@ public class SquadGroup
         [SerializeField] private Transform groupUIParent;
 
         [Header("Squad Display")]
-        [SerializeField] private Transform squadDisplayParent;
-        private List<SquadDisplayCardBattle> squadDisplays = new ();
         [SerializeField] private int groupHovered;
         public int GroupHovered => groupHovered;
         [SerializeField] private List<Color> colors;
-        public Action<SquadGroup[]> OnSquadGroupsChanged;
+        private List<SquadDisplayCardBattle> squadDisplays = new ();
         public SquadGroup[] SquadGroups => squadGroups;
         private List<SavedSquadGroup> _pendingSavedGroups;
+
+        // Locked group formations are code-complete but parked (see ToggleLockGroup), so the
+        // lock button stays hidden rather than toggling with no effect. Flip to true to surface it.
+        private const bool LOCK_FEATURE_ENABLED = false;
 
         public void Load()
         {
@@ -70,6 +72,8 @@ public class SquadGroup
         }
         private void SelectAllSquads()
         {
+            if (BattleManager.Instance.GamePhase == GamePhase.SetUp) return;
+
             BattleManager.Instance.UnitSelectionManager.SelectAllPlayerSquads();
         }
         private void SelectGroup1()
@@ -164,6 +168,10 @@ public class SquadGroup
             List<int> selectedSquadIds = new List<int>(BattleManager.Instance.UnitSelectionManager.SelectedSquadIds);
             // Debug.Log($"Selected squads for grouping: {string.Join(", ", selectedSquadIds)}");
 
+            // An empty selection matches any empty slot, so it normally no-ops. With every slot
+            // full it would fall through and overwrite the requested group with an empty one.
+            if (selectedSquadIds.Count == 0) return;
+
             if (SelectedSquadsPerfectlyMatchAGroup(selectedSquadIds))
             {
                 RemoveSelectedSquadsFromExistingGroups(selectedSquadIds);
@@ -191,12 +199,16 @@ public class SquadGroup
                 BattleManager.Instance.SquadOrderManager.ArrangeGroupsInOrder(squadGroups);
             }
 
-            OnSquadGroupsChanged?.Invoke(squadGroups);
             RefreshGroupUIs();
         }
         private void RefreshGroupUIs()
         {
             // Debug.Log($"Refreshing Group UIs...");
+            // Unity never sends OnPointerExit to a destroyed object, so a bracket torn down while
+            // hovered would leave groupHovered latched and block every squad card from being
+            // hovered or clicked. The EventSystem re-raycasts each frame, so the replacement
+            // bracket under the cursor still fires its own OnPointerEnter.
+            UnhoverGroup();
             foreach (GroupUI groupUI in groupUIs) {
                 Destroy(groupUI.gameObject);
             }
@@ -234,14 +246,21 @@ public class SquadGroup
                 }
 
                 GroupUI groupUI = Instantiate(groupUIPrefab, groupUIPosition);
-                groupUI.SetUpGroupUI(i+1, squadGroup.squadIds.Count, this, colors[i % colors.Count], squadGroup.IsLocked);
+                groupUI.SetUpGroupUI(i+1, squadGroup.squadIds.Count, this, colors[i % colors.Count], squadGroup.IsLocked, LOCK_FEATURE_ENABLED);
                 groupUIs.Add(groupUI);
                 groupUI.transform.SetParent(groupUIParent);
             }
+
+            // SetUpGroupUI always starts deselected, so re-apply the live selection or a group that
+            // was selected when a card was added or removed renders dim until the next selection change.
+            OnSelectedSquadsChanged(BattleManager.Instance.UnitSelectionManager.SelectedSquadIds);
         }
         public void TryToSelectGroup(int _groupNumber)
         {
             if (SettingsManager.Instance.SettingsPanelOpen) return;
+            // SelectGroup writes selectedSquadIds directly, so it would otherwise sidestep the
+            // GamePhase.SetUp guard that AttemptSquadSelect applies to every other selection route.
+            if (BattleManager.Instance.GamePhase == GamePhase.SetUp) return;
 
             // Debug.Log($"Trying to select Group {_groupNumber}...");
             if(InputHandler.Instance.ControlInput)
@@ -276,13 +295,6 @@ public class SquadGroup
         {
             groupHovered = 0;
         }
-        public bool IsSquadInGroup(int _squadId)
-        {
-            foreach (SquadGroup squadGroup in squadGroups) {
-                if (squadGroup.squadIds.Contains(_squadId)) return true;
-            }
-            return false;
-        }
         // Returns 1-6 if the squad is in a group, -1 if not.
         public int GetGroupNumberForSquad(int _squadId)
         {
@@ -291,13 +303,6 @@ public class SquadGroup
                 if (squadGroups[i].squadIds.Contains(_squadId)) return i + 1;
             }
             return -1;
-        }
-        public bool CheckIfSquadAtIndexIsInGroup(int _index)
-        {
-            if(_index >= squadDisplays.Count) return false;
-            if(_index < 0) return false;
-            SquadDisplayCardBattle squadDisplay = squadDisplays[_index];
-            return IsSquadInGroup(squadDisplay.SquadId);
         }
         // Returns the group number (1-6) of the card at the given display index, or -1 if ungrouped/out of range.
         public int GetGroupNumberForSquadAtIndex(int _index)
@@ -376,7 +381,6 @@ public class SquadGroup
                     Debug.Log($"Removed squad {_squadId} from its group.");
                 }
             }
-            OnSquadGroupsChanged?.Invoke(squadGroups);
             // Don't call RefreshGroupUIs here — UIManager hasn't removed the card yet so
             // squadDisplays still contains the dead card with stale sibling indices.
             // RefreshGroupUIs will be called correctly via OnSquadDisplaysChanged once
@@ -385,23 +389,31 @@ public class SquadGroup
         public void SetPendingGroups(List<SavedSquadGroup> savedGroups)
         {
             _pendingSavedGroups = savedGroups;
+            // Campaign battles spawn every squad into the staging rows before the dice roll, so all
+            // cards already exist by the time LoadBothArmies gets here and no further
+            // OnSquadDisplaysChanged is guaranteed. Apply straight away when the cards are ready.
+            TryApplyPendingGroups();
+        }
+        // True once the pending groups have been consumed.
+        private bool TryApplyPendingGroups()
+        {
+            if (_pendingSavedGroups == null) return false;
+            if (squadDisplays.Count == 0) return false;
+            if (squadDisplays.Count < BattleManager.Instance.BattleSaveManager.PlayerSquadsToSpawn) return false;
+
+            List<SavedSquadGroup> groups = _pendingSavedGroups;
+            _pendingSavedGroups = null;
+            LoadGroupsFromSave(groups);
+            return true;
         }
         public void OnSquadDisplaysChanged(List<SquadDisplayCardBattle> _squadDisplays)
         {
             // Debug.Log($"Updating OnSquadDisplaysChanged...");
             squadDisplays = _squadDisplays;
 
-            if (_pendingSavedGroups != null &&
-                squadDisplays.Count >= BattleManager.Instance.BattleSaveManager.PlayerSquadsToSpawn)
-            {
-                var groups = _pendingSavedGroups;
-                _pendingSavedGroups = null;
-                LoadGroupsFromSave(groups);
-            }
-            else
-            {
-                RefreshGroupUIs();
-            }
+            if (TryApplyPendingGroups()) return;
+
+            RefreshGroupUIs();
         }
         public void LoadGroupsFromSave(List<SavedSquadGroup> savedGroups)
         {
@@ -418,7 +430,10 @@ public class SquadGroup
                         squadGroups[saved.slotIndex].squadIds.Add(squadId);
                 }
             }
-            OnSquadGroupsChanged?.Invoke(squadGroups);
+            // A GroupUI is one bracket anchored on the group's leftmost card and sized by member
+            // count, so members have to be adjacent. CreateGroup guarantees that; a loaded save does
+            // not, because casualties and new recruits can reshuffle playerArmy between battles.
+            BattleManager.Instance.SquadOrderManager.ArrangeGroupsInOrder(squadGroups);
             RefreshGroupUIs();
         }
         private void OnSelectedSquadsChanged(List<int> selectedSquadIds)
@@ -437,6 +452,8 @@ public class SquadGroup
         public void ResetAllGroups()
         {
             // Debug.Log("Resetting all groups...");
+            _pendingSavedGroups = null;
+            groupHovered = 0;
             foreach (var group in squadGroups)
             {
                 group.squadIds.Clear();

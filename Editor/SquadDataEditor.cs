@@ -108,6 +108,14 @@ public class SquadDataEditor : Editor
             EditorGUILayout.PropertyField(assetsProp.FindPropertyRelative("ArtilleryCrewPrefab"),
                                          new GUIContent("Artillery Crew Prefab"));
         }
+        if (currentType == UnitType.Mage)
+        {
+            // Required for a mage. EntityWatcher logs an error at spawn if this is empty, because a
+            // mage with no spell has no attack at all. Note that for a Mage the "Rate of Fire" field
+            // above is its cast cooldown, and "Ammunition" is its charge count.
+            EditorGUILayout.PropertyField(assetsProp.FindPropertyRelative("mageSpell"),
+                                         new GUIContent("Mage Spell"));
+        }
 
         EditorGUI.indentLevel--;   // end of Assets
 

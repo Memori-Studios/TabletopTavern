@@ -293,9 +293,19 @@ namespace TJ.Map
             surpriseGameObject.SetActive(false);
             UpdateIcon();
         }
+        // A Town hosts its garrison battle on this same node, so it rolls the same weather a Skirmish
+        // or Horde does and gets the same readout before the player commits to fighting.
+        private static bool NodeLeadsToBattle(NodeType type) =>
+            type == NodeType.Skirmish || type == NodeType.Horde || type == NodeType.Town;
+        private void HoverWeatherFlag(bool _hover)
+        {
+            if (_weather == Weather.ClearSkies) return;
+            if (_hover) { mouseOffWeatherMMF_Player.StopFeedbacks(); mouseOverWeatherMMF_Player.PlayFeedbacks(); }
+            else        { mouseOverWeatherMMF_Player.StopFeedbacks(); mouseOffWeatherMMF_Player.PlayFeedbacks(); }
+        }
         public void HoverNode(bool _hover)
         {
-            if(!surprise && (_mapNodeData.type == NodeType.Skirmish || _mapNodeData.type == NodeType.Horde)) {
+            if(!surprise && NodeLeadsToBattle(_mapNodeData.type)) {
                 CampaignManager.Instance.MapSceneUIManager.HUDPanel.ShowWeatherHover(_weather, _hover);
             }
             if(completed) return;
@@ -320,14 +330,12 @@ namespace TJ.Map
                     mouseOverTownMMF_Player.StopFeedbacks();
                     mouseOffTownMMF_Player.PlayFeedbacks();
                 }
+                // No biome flag: a garrison battle forces Biome.Plains regardless of the node roll.
+                HoverWeatherFlag(_hover);
                 return;
             }
 
-            if (_weather != Weather.ClearSkies)
-            {
-                if (_hover) { mouseOffWeatherMMF_Player.StopFeedbacks(); mouseOverWeatherMMF_Player.PlayFeedbacks(); }
-                else        { mouseOverWeatherMMF_Player.StopFeedbacks(); mouseOffWeatherMMF_Player.PlayFeedbacks(); }
-            }
+            HoverWeatherFlag(_hover);
             if (_biome != Biome.Plains)
             {
                 if (_hover) { mouseOffBiomeMMF_Player.StopFeedbacks(); mouseOverBiomeMMF_Player.PlayFeedbacks(); }

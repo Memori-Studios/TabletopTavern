@@ -60,7 +60,7 @@ namespace TJ
             SquadStats squadStats = ApplyUnitAttributeBonuesToSquadStats(TabletopTavernData.Instance.GetSquadStats(_requestingUnit));
 
             if(activeGearItems.Contains(GearID.ArmingSwords)) {
-                if(_unitStat == UnitStat.MeleeAttack && TabletopTavernData.Instance.GetUnitTypeFromUnitName(_requestingUnit) == UnitType.Melee) {
+                if(_unitStat == UnitStat.MeleeAttack && TabletopTavernConstants.FightsInMelee(squadStats.unitType)) {
                     string gearNameLocalized = LocalizationManager.Instance.GetText(GearID.ArmingSwords.ToString()+"Name");
                     unitStatBonuses.Add(new UnitStatBonus(_unitStat, gearNameLocalized, GearData.GetGear(GearID.ArmingSwords).GearModifierValue));
                 }
@@ -72,7 +72,7 @@ namespace TJ
                 }
             }
             if(activeGearItems.Contains(GearID.Longbows)) {
-                if(_unitStat == UnitStat.Range && TabletopTavernData.Instance.GetUnitTypeFromUnitName(_requestingUnit) == UnitType.Ranged) {
+                if(_unitStat == UnitStat.Range && squadStats.unitType == UnitType.Ranged) {
                     string gearNameLocalized = LocalizationManager.Instance.GetText(GearID.Longbows.ToString()+"Name");
                     unitStatBonuses.Add(new UnitStatBonus(_unitStat, gearNameLocalized, GearData.GetGear(GearID.Longbows).GearModifierValue));
                 }
@@ -93,7 +93,7 @@ namespace TJ
                 }
             }
             if(activeGearItems.Contains(GearID.TexanBBQ)) {
-                if(_unitStat == UnitStat.WeaponStrength && TabletopTavernData.Instance.GetUnitTypeFromUnitName(_requestingUnit) == UnitType.Melee) {
+                if(_unitStat == UnitStat.WeaponStrength && TabletopTavernConstants.FightsInMelee(squadStats.unitType)) {
                     string gearNameLocalized = LocalizationManager.Instance.GetText(GearID.TexanBBQ.ToString()+"Name");
                     unitStatBonuses.Add(new UnitStatBonus(_unitStat, gearNameLocalized, GearData.GetGear(GearID.TexanBBQ).GearModifierValue));
                 }

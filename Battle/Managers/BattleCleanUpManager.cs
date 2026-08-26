@@ -153,7 +153,7 @@ namespace TJ
             battleManager.EntityWatcher.SetUp();
             battleManager.EnemyGeneral.SetUp();            
             battleManager.EnemyGeneral.SetRiverCrossing(isRiverCrossing);      
-#if UNITY_EDITOR || SPELLS
+#if SPELLS
             battleManager.SpellManager.LoadSpellManager(); 
 #endif     
         }

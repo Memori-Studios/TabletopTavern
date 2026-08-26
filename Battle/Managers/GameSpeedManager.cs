@@ -86,6 +86,8 @@ namespace TJ
         }
         public void OnDestroy()
         {
+            // Only writer of a non-1 timeScale, so release it on teardown.
+            Time.timeScale = 1f;
             InputHandler.Instance.PauseButtonPressed -= PauseGame;
             InputHandler.Instance.OnSpeedUp -= IncreaseSpeed;
             InputHandler.Instance.OnSpeedDown -= DecreaseSpeed;

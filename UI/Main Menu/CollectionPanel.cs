@@ -185,7 +185,11 @@ namespace TJ.MainMenu
         private void LoadGear()
         {
             gearCards = gearCardParent.GetComponentsInChildren<CollectionGearCard>();
-            GearID[] allGear = GearData.GetGearIDs();
+            // Rare first, then Uncommon, then Common. GearRarity ascends Common -> Rare, so sort descending.
+            // OrderByDescending is stable, so gear keeps its GearID order within a rarity.
+            GearID[] allGear = GearData.GetGearIDs()
+                .OrderByDescending(g => GearData.GetGear(g).GearRarity)
+                .ToArray();
             List<int> gearIdsAsInts = SaveDataHandler.GetGearIDsCollected();
             List<int> gearIdsAcknowledged = SaveDataHandler.GetGearIDsAcknowledged();
 
@@ -198,10 +202,7 @@ namespace TJ.MainMenu
             int collectedCount = allGear.Count(g => gearIdsAsInts.Contains((int)g));
             gearCountText.text = $"{collectedCount}/{allGear.Length}";
 
-            if (gearIdsAsInts.Count == allGear.Length)
-            {
-                SteamAchievements.Unlock(AchievementId.CollectionGear);
-            }
+            SaveDataHandler.EvaluateGearCollection();
         }
 
         private void LoadPotions()
@@ -217,12 +218,10 @@ namespace TJ.MainMenu
                 bool acknowledged = potionsIdsAcknowledged.Contains((int)consumables[i]);
                 potionsCards[i].LoadConsumableCard(consumables[i], isCollected, acknowledged, this);
             }
-            potionsCountText.text = $"{potionsIdsAsInts.Count}/{consumables.Length}";
+            int collectedCount = consumables.Count(c => potionsIdsAsInts.Contains((int)c));
+            potionsCountText.text = $"{collectedCount}/{consumables.Length}";
 
-            if (potionsIdsAsInts.Count == consumables.Length)
-            {
-                SteamAchievements.Unlock(AchievementId.CollectionConsumables);
-            }
+            SaveDataHandler.EvaluateConsumableCollection();
         }
 
         private void LoadAllRaces()
@@ -233,18 +232,7 @@ namespace TJ.MainMenu
             foreach (var config in raceConfigs)
             {
                 LoadRace(config, unitsRecruitedIdsAsInts, troopsIdsAcknowledged);
-
-                //Steam achievements
-                if(config.raceType == Race.IronLegion)
-                {
-                    UnitName[] ironLegion = TabletopTavernData.Instance.GetUnitsOfRace(Race.IronLegion);
-                    int ironLegionCollectedCount = unitsRecruitedIdsAsInts.Count(u => Array.Exists(ironLegion, unit => unit == u));
-                    
-                    if (ironLegionCollectedCount >= ironLegion.Length)
-                    {
-                        SteamAchievements.Unlock(AchievementId.IronLegionCollection);
-                    }
-                }
+                SaveDataHandler.EvaluateRaceCollection(config.raceType);
             }
         }
 
@@ -299,21 +287,7 @@ namespace TJ.MainMenu
 
             totalCollectionText.text = $"{totalCollected}/{totalAvailable}";
 
-            // Steam achievements
-            foreach (var config in raceConfigs)
-            {
-                UnitName[] units = TabletopTavernData.Instance.GetUnitsOfRace(config.raceType);
-                List<UnitName> unitsRecruited = SaveDataHandler.GetTroopsIDsCollected();
-                if (unitsRecruited.Count(u => Array.Exists(units, unit => unit == u)) == units.Length)
-                {
-                    // Unlock race collection achievement (adjust as needed)
-                }
-            }
-
-            if (potionsIdsAsInts.Count == consumables.Length)
-                SteamAchievements.Unlock(AchievementId.CollectionConsumables);
-            if (gearIdsAsInts.Count == allGear.Length)
-                SteamAchievements.Unlock(AchievementId.CollectionGear);
+            // Achievements are evaluated in LoadGear / LoadPotions / LoadAllRaces, which all run just above.
         }
 
         private void SetupRotationButtons()

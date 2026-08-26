@@ -82,6 +82,19 @@ namespace TJ
                 SquadStatsDictionary[allSOs[i].stats.unitName] = allSOs[i].stats;
                 SquadAssetsDictionary[allSOs[i].stats.unitName] = allSOs[i].assets;
 
+#if !SPELLS
+                // Mages belong to the spell system and are not shipped yet, so withhold them from the
+                // race roster: recruit lists, the collection panel, race collection achievements and
+                // enemy army generation all read UnitsOfRaceDictionary, and dropping out of it is what
+                // makes a unit invisible.
+                //
+                // They deliberately STAY in the stat and asset dictionaries. The stats blob is indexed
+                // by UnitName ordinal (LoadAndInjectData sizes it by SquadStatsDictionary.Count and
+                // GetStats reads Stats[(int)unitName]), so removing an entry there shifts Count and can
+                // leave a live unit reading past the end of the blob.
+                if (allSOs[i].stats.unitType == UnitType.Mage) continue;
+#endif
+
                 // Populate UnitsOfRaceDictionary
                 if (!UnitsOfRaceDictionary.ContainsKey(allSOs[i].assets.race))
                 {
@@ -280,13 +293,20 @@ namespace TJ
         }
         public async Task<GameObject> LoadHeroPrefabAsync(int heroID, bool persistent = false)
         {
-            return await AddressablesManager.Instance.LoadAsync<GameObject>(_heroAssetsData.GetByID(heroID).Prefab, persistent);
+            HeroAssetEntry entry = _heroAssetsData.GetByID(heroID);
+            if (entry == null)
+            {
+                Debug.LogError($"[TabletopTavernData] No hero asset entry for hero {heroID}");
+                return null;
+            }
+            return await AddressablesManager.Instance.LoadAsync<GameObject>(entry.Prefab, persistent);
         }
 
         /// <summary>Addressable key for a hero prefab, so a persistent owner can release it explicitly.</summary>
         public string GetHeroPrefabKey(int heroID)
         {
-            return _heroAssetsData.GetByID(heroID).Prefab.AssetGUID;
+            HeroAssetEntry entry = _heroAssetsData.GetByID(heroID);
+            return entry != null ? entry.Prefab.AssetGUID : null;
         }
         public async Task<GameObject> LoadRecruitmentPrefabAsync(UnitName _unitName)
         {
@@ -590,6 +610,12 @@ namespace TJ
             if (squadStats.SquadAttributes.ThickScales) unitAttributes.Add(UnitAttribute.ThickScales);
             if( squadStats.SquadAttributes.BackStabbers) unitAttributes.Add(UnitAttribute.BackStabbers);
             if( squadStats.SquadAttributes.DragonsHoard) unitAttributes.Add(UnitAttribute.DragonsHoard);
+            if (squadStats.SquadAttributes.ShotDiscipline) unitAttributes.Add(UnitAttribute.ShotDiscipline);
+            if (squadStats.SquadAttributes.Overdraw) unitAttributes.Add(UnitAttribute.Overdraw);
+            if (squadStats.SquadAttributes.SteadyAim) unitAttributes.Add(UnitAttribute.SteadyAim);
+            if (squadStats.SquadAttributes.Demolisher) unitAttributes.Add(UnitAttribute.Demolisher);
+            if (squadStats.SquadAttributes.PowderReserves) unitAttributes.Add(UnitAttribute.PowderReserves);
+            if (squadStats.SquadAttributes.DeepQuivers) unitAttributes.Add(UnitAttribute.DeepQuivers);
             return unitAttributes;
         }
 
@@ -609,7 +635,15 @@ namespace TJ
             unitStats.Add(new UnitStatValue(UnitStat.ChargeBonus, squadStats.ChargeBonus));
             if (squadStats.ChargeImactDamage > 0) unitStats.Add(new UnitStatValue(UnitStat.ChargeImpactDamage, squadStats.ChargeImactDamage));
             
-            if (squadStats.unitType != UnitType.Melee)
+            if (TabletopTavernConstants.Casts(squadStats.unitType))
+            {
+                // Range and charges only. A mage's spell is placed rather than aimed and fires no
+                // projectile, so Accuracy and MissileStrength would render as numbers on the card
+                // that nothing reads. Ammunition is the charge count.
+                unitStats.Add(new UnitStatValue(UnitStat.Range, squadStats.BaseRange));
+                unitStats.Add(new UnitStatValue(UnitStat.Ammunition, squadStats.Ammunition));
+            }
+            else if (squadStats.unitType != UnitType.Melee)
             {
                 unitStats.Add(new UnitStatValue(UnitStat.Range, squadStats.BaseRange));
                 unitStats.Add(new UnitStatValue(UnitStat.Accuracy, squadStats.attackAccuracy));
@@ -658,18 +692,38 @@ namespace TJ
             }
 
             if(allRaces.Contains(activeRace)) allRaces.Remove(activeRace);
- 
+
+            if (allRaces.Count == 0)
+            {
+                Debug.LogError($"GenerateRaceForMap: no enemy races left for bookNumber {bookNumber}, returning {activeRace}");
+                return activeRace;
+            }
+
+            // Seeding is scoped: this is a pure query, so it restores the global
+            // UnityEngine.Random state instead of leaving it seeded for whatever draws next.
+            UnityEngine.Random.State priorState = UnityEngine.Random.state;
             UnityEngine.Random.InitState(seed);
             int randomIndex = UnityEngine.Random.Range(0, allRaces.Count);
+            UnityEngine.Random.state = priorState;
             return allRaces[randomIndex];
         }
         private Hero GetHeroForRace(Race race, int seed)
         {
-            UnityEngine.Random.InitState(seed);
-
-            //get random int of 0 or 1
-            int randomIndex = UnityEngine.Random.Range(0, 2);
+            // Count-driven rather than the hardcoded 2 this used to assume: the hero list is
+            // mod-extensible, so a race can have any number of heroes. Identical draw to the
+            // old Range(0, 2) for the shipped two-heroes-per-race roster, so existing campaign
+            // seeds keep the same enemy general.
             List<Hero> heroes = HeroData.GetHeroesByRace(race);
+            if (heroes.Count == 0)
+            {
+                Debug.LogError($"GetHeroForRace: no heroes found for race {race}, falling back to the default hero");
+                return HeroData.GetHeroByID(HeroData.DefaultHeroID);
+            }
+
+            UnityEngine.Random.State priorState = UnityEngine.Random.state;
+            UnityEngine.Random.InitState(seed);
+            int randomIndex = UnityEngine.Random.Range(0, heroes.Count);
+            UnityEngine.Random.state = priorState;
             return heroes[randomIndex];
         }
         public Hero GetEnemyHeroForCampaign(int heroID, int bookNumber, int seed, bool justGetRandomHero = false)
@@ -728,12 +782,17 @@ namespace TJ
                     var value = field.GetValue(kvp.Value);
                     if (value == null)
                     {
-                        //if fire projectile and not a ranged unit, skip
-                        if (field.Name == "fireProjectileSFX" && GetUnitTypeFromUnitName(unitName) != UnitType.Ranged)
+                        //if fire projectile and the unit does not shoot, skip
+                        if (field.Name == "fireProjectileSFX" && !TabletopTavernConstants.FightsAtRange(GetUnitTypeFromUnitName(unitName)))
                         {
                             continue;
                         }
                         if (field.Name == "ArtilleryCrewPrefab" && GetUnitTypeFromUnitName(unitName) != UnitType.Artillery)
+                        {
+                            continue;
+                        }
+                        //the spell a mage casts, so every other unit type leaves it empty
+                        if (field.Name == "mageSpell" && !TabletopTavernConstants.Casts(GetUnitTypeFromUnitName(unitName)))
                         {
                             continue;
                         }

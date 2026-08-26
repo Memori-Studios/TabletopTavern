@@ -18,11 +18,15 @@ namespace TJ
 
         public void Load(SpellData[] spellData)
         {
-            quickCastSlot1.SetUp(spellData[0], () => QueueSlot(0), () => UnqueueSlot(0));
-            quickCastSlot2.SetUp(spellData[1], () => QueueSlot(1), () => UnqueueSlot(1));
-            quickCastSlot3.SetUp(spellData[2], () => QueueSlot(2), () => UnqueueSlot(2));
-            quickCastSlot4.SetUp(spellData[3], () => QueueSlot(3), () => UnqueueSlot(3));
+            quickCastSlot1.SetUp(GetSpell(spellData, 0), () => QueueSlot(0), () => UnqueueSlot(0));
+            quickCastSlot2.SetUp(GetSpell(spellData, 1), () => QueueSlot(1), () => UnqueueSlot(1));
+            quickCastSlot3.SetUp(GetSpell(spellData, 2), () => QueueSlot(2), () => UnqueueSlot(2));
+            quickCastSlot4.SetUp(GetSpell(spellData, 3), () => QueueSlot(3), () => UnqueueSlot(3));
         }
+
+        // The loadout can be shorter than these four fixed slots; the extras load empty.
+        private static SpellData GetSpell(SpellData[] spellData, int index)
+            => (spellData != null && index < spellData.Length) ? spellData[index] : null;
 
         private void QueueSlot(int slotIndex) => queuedSlotIndex = slotIndex;
         private void UnqueueSlot(int slotIndex)

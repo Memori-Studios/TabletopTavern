@@ -8,6 +8,31 @@ using Random = Unity.Mathematics.Random;
 
 public static class MathUtilities
 {
+    // Scrambles an integer seed before it is handed to System.Random.
+    //
+    // System.Random's first output is very nearly a linear function of its seed, so seeds that differ by
+    // a small amount produce the same first draw. The campaign seed (CampaignSaveManager.GetSeededRandom)
+    // steps by seed * (bookNumber + 1) per map layer, which for a small run seed is small enough that a
+    // whole act's worth of layers collapsed onto one result when picking from a short list. Passing the
+    // seed through this finalizer first spreads adjacent seeds across the full 32-bit range.
+    //
+    // Not needed for UnityEngine.Random.InitState, which diffuses its seed properly on its own.
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public static int MixSeed(int seed)
+    {
+        unchecked
+        {
+            uint x = (uint)seed;
+            x ^= x >> 16;
+            x *= 0x7feb352du;
+            x ^= x >> 15;
+            x *= 0x846ca68bu;
+            x ^= x >> 16;
+            // Masked non-negative: System.Random special-cases int.MinValue and keys off Math.Abs(seed).
+            return (int)(x & 0x7fffffff);
+        }
+    }
+
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static float3 ProjectOnPlane(float3 vector, float3 onPlaneNormal)
     {

@@ -4,6 +4,7 @@ using System.Threading.Tasks;
 using System.Collections.Generic;
 using System.Diagnostics;
 using TJ;
+using TJ.Spells;
 using System;
 using Memori.Steamworks;
 using Memori.Metaprogression;
@@ -50,16 +51,28 @@ namespace Memori.SaveData
         public TT_Difficulty difficultyLevel;
         public bool snapShot;
         public bool blank;
+        // Armed by drinking a Fateshine Elixir; guarantees the best result on the next dice roll of any
+        // type (event, gamble, or battle initiative). Persisted here so it survives main-menu exit and
+        // battle entry - see ConsumableManager / EventPanel / GamesPanel / BattleDiceRollPanel.
+        public bool fateshineElixirArmed;
         public int signatureUnitPacksPurchased;
         public int townsSacked;
         public bool archerUsedInBattle;
+        // The four spells chosen at run setup, in slot order. Slot 0 is always the hero's signature
+        // spell. Only the enum values are stored; SpellRegistry resolves them back to assets, and
+        // SpellLoadout.Sanitize re-validates on read so a save that predates a spell change or a mod
+        // removing a spell cannot produce an illegal loadout. See SpellLoadout.
+        public Spell[] selectedSpells = Array.Empty<Spell>();
         public Guid runUUID;
 
-        public CampaignSaveData(int _seed, int _hero, int _startingGold, SquadToLoad[] _playerArmy, TT_Difficulty _difficulty, GearID _startingGear, Guid _runUUID)
+        // _selectedSpells is optional: the blank/recovery saves constructed elsewhere in this file
+        // pass nothing and get the hero's default loadout, which Sanitize produces from null.
+        public CampaignSaveData(int _seed, int _hero, int _startingGold, SquadToLoad[] _playerArmy, TT_Difficulty _difficulty, GearID _startingGear, Guid _runUUID, Spell[] _selectedSpells = null)
         {
             runUUID = _runUUID;
             seed = _seed;
             heroID = _hero;
+            selectedSpells = SpellLoadout.Sanitize(_selectedSpells, _hero);
             goldAmount = _startingGold;
             playerArmy = _playerArmy;
             activeMapLayer = -1;
@@ -121,6 +134,7 @@ namespace Memori.SaveData
         public bool heldDuplicateUnit;// true once the army ever held two units of the same name (OneOfAKind)
         public bool consumableUsed;   // true once a consumable was used this run (BareEssentials)
         public bool pauseUsed;        // true once the pause button was used this run (UhPause)
+        public bool gainedUnitOutsideRaiseDead; // true once a unit was gained by any means but Raise Dead (DeadShallServe)
     }
     public struct RenownAward
     {
@@ -217,6 +231,11 @@ namespace Memori.SaveData
         // in SaveSquadsPostBattle so it rides the same file-based bridge as archerUsedInBattle into
         // RunStats. The in-memory CampaignSaveManager is not available in the battle scene. ("Uh, pause...")
         public static bool PauseUsedThisBattle;
+
+        // Set from the battle scene (UIManager) the first time the player's army drops below 25% of its
+        // starting health. Consumed at battle end for "Against All Odds" - a win from that state.
+        // Same battle-scene bridge as PauseUsedThisBattle; auto-resolved battles never set it.
+        public static bool ArmyLossesSufferedThisBattle;
 
         // In-memory authoritative copy of playerSaveData.json. SaveDataHandler is the sole gateway
         // to that file, so every read returns this cached instance and every write refreshes it.
@@ -500,14 +519,19 @@ namespace Memori.SaveData
                     foreach (SquadLossesStored loss in _squadIdLossCounter) totalUnitsLost += loss.Losses;
                 }
                 if (totalUnitsLost == 0) SteamAchievements.Unlock(AchievementId.FlawlessVictory);
+
+                // "Against All Odds" - won after the army fell below 25% health.
+                if (ArmyLossesSufferedThisBattle) SteamAchievements.Unlock(AchievementId.AgainstAllOdds);
             }
+            ArmyLossesSufferedThisBattle = false;
 
             //achievement tracking - archer used in battle
             for (int i = 0; i < 10; i++)
             {
                 if (saveData.playerArmy[i].UnitIndex == -1) continue;
 
-                if (TabletopTavernData.Instance.GetSquadStats(saveData.playerArmy[i].UnitName).unitType == UnitType.Ranged)
+                // Hybrids shoot, so they disqualify the No Archers run just like a dedicated shooter.
+                if (TabletopTavernConstants.FightsAtRange(TabletopTavernData.Instance.GetSquadStats(saveData.playerArmy[i].UnitName).unitType))
                 {
                     saveData.archerUsedInBattle = true;
                     break;
@@ -760,6 +784,29 @@ namespace Memori.SaveData
         {
             return Load().heroID;
         }
+        /// <summary>
+        /// The run's four spells as assets, ready for SpellManager. Re-sanitized on every read so a
+        /// save written before a spell's enum value changed, or before a mod removed a spell, still
+        /// yields a legal four-slot loadout instead of null entries. See SpellLoadout.
+        /// </summary>
+        public static SpellData[] GetCampaignSpells()
+        {
+            CampaignSaveData campaignSaveData = Load();
+            Spell[] sanitized = SpellLoadout.Sanitize(campaignSaveData.selectedSpells, campaignSaveData.heroID);
+            return SpellRegistry.Resolve(sanitized);
+        }
+        /// <summary>
+        /// The spell mana budget for one battle. Static because the battle scene has no
+        /// CampaignSaveManager - the same reason GetCampaignSpells lives here.
+        ///
+        /// Account-level, not per-run, so custom battles get the same pool as campaign ones.
+        /// The pool is granted whole at the start of every battle and does not regenerate or
+        /// carry over, so this is the only place its size is decided.
+        /// </summary>
+        public static int GetSpellManaPool()
+        {
+            return TabletopTavernConstants.SPELL_MANA_POOL_BASE + SpellLoadout.GetManaBonus();
+        }
         public static Race GetEnemyRace()
         {
             CampaignSaveData save = Load();
@@ -779,15 +826,15 @@ namespace Memori.SaveData
                 UnityEngine.Debug.LogWarning($"Directory not found: {path}");
             }
         }
-        public static void CreateCampaign(Hero hero, ArmySaveData armySaveData, TT_Difficulty _difficultyLevelSelected, GearID _startingGear, Guid _runUUID, int startingGold)
+        public static void CreateCampaign(Hero hero, ArmySaveData armySaveData, TT_Difficulty _difficultyLevelSelected, GearID _startingGear, Guid _runUUID, int startingGold, Spell[] _selectedSpells = null)
         {
             SquadToLoad[] squadsToLoad = new SquadToLoad[armySaveData.SquadsInArmy.Length];
             for(int i = 0; i < armySaveData.SquadsInArmy.Length; i++) {
                 squadsToLoad[i] = new SquadToLoad(armySaveData.SquadsInArmy[i], 0, i);
             }
-            CreateCampaign(hero, squadsToLoad, _difficultyLevelSelected, _startingGear, _runUUID, startingGold);
+            CreateCampaign(hero, squadsToLoad, _difficultyLevelSelected, _startingGear, _runUUID, startingGold, _selectedSpells);
         }
-        public static void CreateCampaign(Hero hero, SquadToLoad[] squadsToLoad, TT_Difficulty _difficultyLevelSelected, GearID _startingGear, Guid _runUUID, int startingGold)
+        public static void CreateCampaign(Hero hero, SquadToLoad[] squadsToLoad, TT_Difficulty _difficultyLevelSelected, GearID _startingGear, Guid _runUUID, int startingGold, Spell[] _selectedSpells = null)
         {
             // UnityEngine.Debug.Log($"Creating campaign with hero: {hero.HeroID} and difficulty: {_difficultyLevelSelected}");
             SquadToLoad[] playerArmy = new SquadToLoad[13];
@@ -819,7 +866,7 @@ namespace Memori.SaveData
             AquiredTroops(recruitedUnitNames);
 
             int seed = UnityEngine.Random.Range(0, 1000000);
-            CampaignSaveData campaignSaveData = new (seed, hero.HeroID, startingGold, playerArmy, _difficultyLevelSelected, _startingGear, _runUUID);
+            CampaignSaveData campaignSaveData = new (seed, hero.HeroID, startingGold, playerArmy, _difficultyLevelSelected, _startingGear, _runUUID, _selectedSpells);
             
             SaveCampaign(campaignSaveData);
             SaveCampaignSnapshot(campaignSaveData);
@@ -840,6 +887,7 @@ namespace Memori.SaveData
                 changed = true;
             }
             if (changed) SavePlayerSaveData(saveData);
+            EvaluateGearCollection();
         }
         public static List<int> GetGearIDsAcknowledged()
         {
@@ -868,6 +916,7 @@ namespace Memori.SaveData
             if(saveData.troopsRecruited.Contains(_unitName)) return;
             saveData.troopsRecruited.Add(_unitName);
             SavePlayerSaveData(saveData);
+            EvaluateRaceCollection(TabletopTavernData.Instance.GetRaceFromUnitName(_unitName));
         }
         // Batch variant: records several recruited troops with a single save, so callers adding a
         // whole army (e.g. CreateCampaign) don't pay one whole-file write per unit.
@@ -875,13 +924,18 @@ namespace Memori.SaveData
         {
             PlayerSaveData saveData = LoadPlayerSaveData();
             bool changed = false;
+            HashSet<Race> racesAdded = new();
             foreach (UnitName unitName in _unitNames)
             {
                 if (saveData.troopsRecruited.Contains(unitName)) continue;
                 saveData.troopsRecruited.Add(unitName);
+                racesAdded.Add(TabletopTavernData.Instance.GetRaceFromUnitName(unitName));
                 changed = true;
             }
-            if (changed) SavePlayerSaveData(saveData);
+            if (!changed) return;
+
+            SavePlayerSaveData(saveData);
+            foreach (Race race in racesAdded) EvaluateRaceCollection(race);
         }
         public static List<UnitName> GetTroopsIDsAcknowledged()
         {
@@ -904,6 +958,7 @@ namespace Memori.SaveData
             if(saveData.consumablesAquired.Contains((int)_consumable)) return;
             saveData.consumablesAquired.Add((int)_consumable);
             SavePlayerSaveData(saveData);
+            EvaluateConsumableCollection();
         }
         public static List<int> GetPotionsIDsAcknowledged()
         {
@@ -916,6 +971,73 @@ namespace Memori.SaveData
             saveData.consumablesAcknowledged.Add((int)_consumable);
             SavePlayerSaveData(saveData);
         }
+
+        #region Collection achievements
+        // Evaluated both on acquisition and when CollectionPanel opens, so the pop lands at the moment
+        // the set is completed rather than waiting for the player to visit the collection screen.
+        // Race.Special is deliberately absent: it holds structures, not a collectable roster.
+        private static readonly Dictionary<Race, AchievementId> RaceCollectionAchievements = new()
+        {
+            { Race.IronLegion,      AchievementId.IronLegionCollection },
+            { Race.Gruntkin,        AchievementId.GruntkinCollection },
+            { Race.RavenHost,       AchievementId.RavenHostCollection },
+            { Race.TaelindorForest, AchievementId.TaelindorForestCollection },
+            { Race.SanguineCourt,   AchievementId.SanguineCourtCollection },
+            { Race.SakuraDynasty,   AchievementId.SakuraDynastyCollection },
+            { Race.DeepstoneHold,   AchievementId.DeepstoneHoldCollection },
+            { Race.DrakosaurBrood,  AchievementId.DrakosaurBroodCollection },
+        };
+
+        public static void EvaluateRaceCollection(Race _race)
+        {
+            if (!RaceCollectionAchievements.TryGetValue(_race, out AchievementId achievementId)) return;
+
+            UnitName[] roster = TabletopTavernData.Instance.GetUnitsOfRace(_race);
+            // A mod can empty a roster via unit_overrides.json; without this, 0 >= 0 would auto-unlock.
+            if (roster.Length == 0) return;
+
+            List<UnitName> recruited = GetTroopsIDsCollected();
+            int collectedCount = 0;
+            for (int i = 0; i < roster.Length; i++)
+            {
+                if (recruited.Contains(roster[i])) collectedCount++;
+            }
+
+            if (collectedCount >= roster.Length) SteamAchievements.Unlock(achievementId);
+        }
+
+        public static void EvaluateGearCollection()
+        {
+            GearID[] allGear = GearData.GetGearIDs();
+            if (allGear.Length == 0) return;
+
+            // Counts only ids that are actually in the roster. The raw list length is not safe:
+            // it has historically held stale ids (see the legacy 0 placeholder stripped in AquiredGear).
+            List<int> collected = GetGearIDsCollected();
+            int collectedCount = 0;
+            for (int i = 0; i < allGear.Length; i++)
+            {
+                if (collected.Contains((int)allGear[i])) collectedCount++;
+            }
+
+            if (collectedCount >= allGear.Length) SteamAchievements.Unlock(AchievementId.CollectionGear);
+        }
+
+        public static void EvaluateConsumableCollection()
+        {
+            ConsumableEnum[] allConsumables = ConsumableData.GetAllConsumableEnums();
+            if (allConsumables.Length == 0) return;
+
+            List<int> collected = GetPotionsIDsCollected();
+            int collectedCount = 0;
+            for (int i = 0; i < allConsumables.Length; i++)
+            {
+                if (collected.Contains((int)allConsumables[i])) collectedCount++;
+            }
+
+            if (collectedCount >= allConsumables.Length) SteamAchievements.Unlock(AchievementId.CollectionConsumables);
+        }
+        #endregion
         // Placeholder tuning values - adjust to taste.
         private const int RENOWN_PER_CHAPTER = 1;
         private const int RENOWN_PER_ACT_COMPLETED = 50;
@@ -1045,10 +1167,13 @@ namespace Memori.SaveData
 
             return LoadPlayerSaveData().unlockConditionsCompleted.Contains(_unlockCondition);
         }
-        public static async Task<GameObject> GetPlayerHeroPrefabAsync()
+        /// <summary>
+        /// The hero the campaign save is being played with, or the default hero when there is
+        /// no campaign. Callers load the prefab themselves so they own its Addressable handle.
+        /// </summary>
+        public static int GetPlayerHeroID()
         {
-            int heroID = CampaignSaveExists() ? Load().heroID : HeroData.EdricValeward.HeroID;
-            return await TabletopTavernData.Instance.LoadHeroPrefabAsync(heroID);
+            return CampaignSaveExists() ? Load().heroID : HeroData.DefaultHeroID;
         }
         // Legacy deposited-gold system, disabled in favor of Renown. Kept commented out in case
         // this system is restored.
@@ -1104,7 +1229,7 @@ namespace Memori.SaveData
         {
             PlayerSaveData saveData = LoadPlayerSaveData();
             bool conditionUnlocked = saveData.metaprogressionNodesUnlocked.Contains(_node.NodeId);
-            // UnityEngine.Debug.Log($"IsMetaprogressionNodeUnlocked {_node.NodeName}: {conditionUnlocked}");
+            // UnityEngine.Debug.Log($"IsMetaprogressionNodeUnlocked {_node.name}: {conditionUnlocked}");
             return conditionUnlocked;
         }
         #if UNITY_EDITOR

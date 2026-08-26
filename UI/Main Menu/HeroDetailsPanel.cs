@@ -35,8 +35,8 @@ namespace TJ.MainMenu
             string heroNameLocalized = LocalizationManager.Instance.GetText(_hero.HeroName);
             heroNameText.text = $"<color {ColorData.Secondary}>{leaderLocalized}:</color> <color {ColorData.Primary}>{heroNameLocalized}</color>";
             
-            string heroBonusText1string = LocalizationManager.Instance.GetText(_hero.HeroBonusDescription[0].Replace("heroBonusDescription", "heroBonusTitle")) + ": " + LocalizationManager.Instance.GetText(_hero.HeroBonusDescription[0]);
-            string heroBonusText2string = LocalizationManager.Instance.GetText(_hero.HeroBonusDescription[1].Replace("heroBonusDescription", "heroBonusTitle")) + ": " + LocalizationManager.Instance.GetText(_hero.HeroBonusDescription[1]);
+            string heroBonusText1string = HeroBonusText.Get(_hero, 0);
+            string heroBonusText2string = HeroBonusText.Get(_hero, 1);
             string raceBonusTextstring = LocalizationManager.Instance.GetText(_hero.Race+ "BonusDescription");
             ColorData.XMLTagColorApplicator(ref heroBonusText1string);
             ColorData.XMLTagColorApplicator(ref heroBonusText2string);

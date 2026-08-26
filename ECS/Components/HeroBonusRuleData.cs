@@ -79,6 +79,8 @@ public static class HeroBonusRuleData
         // Hero 14 - Bertha Barrelstorm
         new() { HeroID = 14, LocalizationKey = "heroBonusTitle27", Stat = UnitStat.Accuracy, Condition = Types(UnitType.Artillery), MagnitudeKind = BonusMagnitudeKind.Flat, Value = 10 },
         new() { HeroID = 14, LocalizationKey = "heroBonusTitle27", Stat = UnitStat.Range, Condition = Types(UnitType.Artillery), MagnitudeKind = BonusMagnitudeKind.Flat, Value = 10 },
+        // Hybrids are deliberately excluded, consistent with every other ammunition bonus they are
+        // denied (prestige ammo, Deep Quivers): their pools are token throwing weapons, not a quiver.
         new() { HeroID = 14, LocalizationKey = "heroBonusTitle28", Stat = UnitStat.Ammunition, Condition = Types(UnitType.Ranged, UnitType.Artillery), MagnitudeKind = BonusMagnitudeKind.PercentOfCurrentValue, Value = 0.5f },
 
         // Hero 15 - Skrix the Swarmcaller

@@ -62,8 +62,10 @@ namespace TJ
         [SerializeField] private MonitoredDataSlider cameraMovementSpeedSlider;
 
         MemoriCanvasGroup activeCanvasGroup;
-        bool inBattle;
         float cachedTimeValue;
+
+        // Live read, not cached: CurrentGameState flips the instant a transition starts, so this never goes stale.
+        bool InBattle => SceneHandler.Instance.CurrentGameState == GameStateEnum.Battle;
 
         public bool SettingsPanelOpen => settingsCanvasGroup.canvasGroup.alpha == 1;
         private void Start()
@@ -147,7 +149,7 @@ namespace TJ
             // disbandConfirmationToggle.OverrideToggleFromSettings();
             settingsCanvasGroup.CGEnable();
             IAudioRequester.Instance.PlaySFX(SFXData.OpenUI);
-            if(inBattle) {
+            if(InBattle) {
                 cachedTimeValue = Time.timeScale;
                 Time.timeScale = 0;
             }
@@ -159,7 +161,7 @@ namespace TJ
             settingsCanvasGroup.CGDisable();
             infoCanvasGroup.gameObject.SetActive(false);
             IAudioRequester.Instance.PlaySFX(SFXData.CloseUI);
-            if (inBattle)
+            if (InBattle)
             {
                 Time.timeScale = cachedTimeValue;
             }
@@ -260,7 +262,6 @@ namespace TJ
                 exitToMenuButton.gameObject.SetActive(false);
                 concedeDefeatButton.gameObject.SetActive(true);
             }
-            inBattle = gameStateEnum.Equals(GameStateEnum.Battle);
         }
         private void ResetTutorial()
         {

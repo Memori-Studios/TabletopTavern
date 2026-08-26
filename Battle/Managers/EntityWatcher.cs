@@ -33,6 +33,7 @@ namespace TJ
         private EntityQuery _bloodQuery;
         private EntityQuery _dustCloudQuery;
         private EntityQuery _battlefieldBonusAppliedQuery;
+        private EntityQuery _mageCastRequestQuery;
         private EntityQuery _archerRangeUpdatedQuery;
         private EntityQuery _queryOnFormationsCollide;
         private EntityQuery _queryOnExplosionShake;
@@ -45,6 +46,10 @@ namespace TJ
         private Entity _balanceEntity; // cache for fast access
         private readonly Dictionary<int, SquadSFXManager> _squadSFXManagers = new();
         private readonly Dictionary<int, int> _barkCounts = new(); // per-frame accumulator, avoids allocation
+
+        // Squads whose rejected-command log has already been written. A player who keeps clicking
+        // a broken squad would otherwise flood the log with one line per click.
+        private readonly HashSet<int> _brokenCommandLogged = new();
 
         public delegate void OnArtilleryRemoved(int _squadId);
         public event OnArtilleryRemoved OnArtilleryRemovedEvent;
@@ -78,6 +83,7 @@ namespace TJ
             _bloodQuery = _entityManager.CreateEntityQuery(ComponentType.ReadOnly<BloodBufferElement>());
             _dustCloudQuery = _entityManager.CreateEntityQuery(ComponentType.ReadOnly<DustCloudBufferElement>());
             _battlefieldBonusAppliedQuery = _entityManager.CreateEntityQuery(ComponentType.ReadOnly<BattlefieldBonusAppliedBufferElement>());
+            _mageCastRequestQuery = _entityManager.CreateEntityQuery(ComponentType.ReadOnly<MageCastRequestBufferElement>());
             _archerRangeUpdatedQuery = _entityManager.CreateEntityQuery(ComponentType.ReadOnly<ArcherRangeUpdated>());
             _queryOnFormationsCollide = _entityManager.CreateEntityQuery(ComponentType.ReadOnly<OnFormationsCollide>());
             _queryOnExplosionShake = _entityManager.CreateEntityQuery(ComponentType.ReadOnly<OnExplosionShake>());
@@ -126,6 +132,7 @@ namespace TJ
             BattleManager.Instance.OnGateDestroyed -= OnGateDestroyed;
             _squadSFXManagers.Clear();
             _barkCounts.Clear();
+            _brokenCommandLogged.Clear();
             if (SFXManager.Instance != null) SFXManager.Instance.StopAll();
             setup = false;
             Debug.Log($"EntityWatcher torn down.");
@@ -213,14 +220,27 @@ namespace TJ
                 if (sfxManager != null) _squadSFXManagers[squadEntity.SquadId] = sfxManager;
                 SquadStats squadStats = TabletopTavernData.Instance.GetSquadStats(squadEntity.UnitName);
 
+                // GetSquadStats returns the raw authored blob, so a prestige-granted trait has to be
+                // merged in here the same way UnitSetUpSystem does it for the per-unit path -
+                // otherwise anything below that reads SquadAttributes silently ignores the grant.
+                UnitAttribute grantedTrait = BattleManager.Instance.SquadManager.GetSquadPrestigeTrait(squadEntity.SquadId);
+                if (grantedTrait != UnitAttribute.None)
+                    TabletopTavernConstants.SetAttribute(ref squadStats.SquadAttributes, grantedTrait);
+
                 //Create Range Drawer for the squad
-                if (unitType == UnitType.Ranged)
+                if (TabletopTavernConstants.FightsAtRange(unitType))
                 {
                     int ammunition = squadStats.Ammunition;
-                    //only increase ammo here if not one of the special cases
-                    if(!TabletopTavernConstants.UsesMeleePrestige(squadEntity.UnitName))
+                    // Prestige ammo (and Deep Quivers) only applies to dedicated shooters. Hybrids
+                    // carry a token handful of throwing weapons, so a flat +100/level or +500 would
+                    // dwarf the whole pool - see IsTraitEligibleForUnitType.
+                    if(unitType == UnitType.Ranged)
                     {
                         ammunition += TabletopTavernConstants.PRESTIGE_AMMO_BONUS_RANGED * BattleManager.Instance.SquadManager.GetSquadPrestige(squadEntity.SquadId);
+                        // Deep Quivers sits inside this same guard so the throwing-weapon units are
+                        // excluded by the one rule, even if a mod sets the attribute on them.
+                        if (squadStats.SquadAttributes.DeepQuivers)
+                            ammunition += TabletopTavernConstants.DEEP_QUIVERS_AMMO_BONUS;
                     }
 
                     // Hero-granted ammunition bonuses (e.g. Bertha/14 Supply Lines) now come from
@@ -233,14 +253,16 @@ namespace TJ
                     ecb.AddComponent(entity, new RangedSquad()
                     {
                         // AttackRange = squadStats.BaseRange,
-                        Ammunition = ammunition
                     });
+                    ecb.AddComponent(entity, new SquadAmmunition() { Value = ammunition });
 
                     ecb.AddComponent(entity, new RangedFireModeSquadComponent() { FireMode = RangedFireMode.Volley, SwitchRequested = false });
                     BattleManager.Instance.SquadManager.CreateArcherRangeDrawer(squadEntity);
 
-                    //enemy archers receive skirmish tag
-                    if (squadEntity.SquadId < 0  && squadEntity.UnitName != UnitName.Gate && !BattleManager.Instance.BattleSaveManager.IsGarrisonBattle)
+                    // Enemy archers receive skirmish tag. Hybrids are excluded: they are meant to
+                    // close and fight, and RangedSquadSkirmishSystem would retreat them at
+                    // ARCHER_FLEE_DISTANCE before their melee stats ever mattered.
+                    if (unitType == UnitType.Ranged && squadEntity.SquadId < 0  && squadEntity.UnitName != UnitName.Gate && !BattleManager.Instance.BattleSaveManager.IsGarrisonBattle)
                     {
                         ecb.AddComponent(entity, new RangedSquadSkirmishTag() { });
                     }
@@ -248,6 +270,8 @@ namespace TJ
                 else if (unitType == UnitType.Artillery)
                 {
                     int ammunition = squadStats.Ammunition + TabletopTavernConstants.PRESTIGE_AMMO_BONUS_ARTILLERY * BattleManager.Instance.SquadManager.GetSquadPrestige(squadEntity.SquadId);
+                    if (squadStats.SquadAttributes.PowderReserves)
+                        ammunition = (int)(ammunition * TabletopTavernConstants.POWDER_RESERVES_AMMO_MULTIPLIER);
                     // Hero-granted ammunition bonuses (e.g. Bertha/14 Supply Lines) now come from
                     // HeroBonusManager's rule data instead of a hardcoded hero check.
                     if (HeroBonusManager.Instance.ActiveHeroID != -1)
@@ -255,9 +279,39 @@ namespace TJ
                         foreach (var bonus in HeroBonusManager.GetHeroStatBonus(UnitStat.Ammunition, squadEntity.UnitName, HeroBonusManager.Instance.ActiveHeroID, ammunition))
                             ammunition += (int)bonus.Value;
                     }
-                    ecb.AddComponent(entity, new RangedSquad() { Ammunition = ammunition });
+                    ecb.AddComponent(entity, new RangedSquad() { });
+                    ecb.AddComponent(entity, new SquadAmmunition() { Value = ammunition });
                     BattleManager.Instance.SquadManager.CreateArcherRangeDrawer(squadEntity);
                     ecb.AddComponent<ArtillerySquad>(entity);
+                }
+                else if (TabletopTavernConstants.Casts(unitType))
+                {
+                    // Mage. Deliberately NOT given RangedSquad: that component is what pulls a squad
+                    // into archer targeting, skirmishing and fire modes, none of which apply here.
+                    // This branch has to sit above the else, which is exactly where Hybrid silently
+                    // ended up before it was fixed.
+                    TJ.Spells.SpellData mageSpell = TabletopTavernData.Instance.SquadAssetsDictionary[squadEntity.UnitName].mageSpell;
+                    if (mageSpell == null)
+                    {
+                        Debug.LogError($"EntityWatcher: {squadEntity.UnitName} is UnitType.Mage but its SquadData has no mageSpell assigned - it will never cast.");
+                    }
+
+                    ecb.AddComponent(entity, new MageSquad()
+                    {
+                        // Seeded here and then kept in sync with the unit's MageCast.Range by
+                        // MageSquadRangeSystem, so prestige Range reaches squad-level targeting.
+                        AttackRange = squadStats.BaseRange,
+                        TargetPriority = mageSpell != null ? mageSpell.MageTargetPriority : MageTargetPriority.NearestEnemy,
+                    });
+
+                    // Charges, spent one per cast through the same SquadAmmunition pipeline archers
+                    // use. The prestige constant is 1 per level rather than the ranged 100 or the
+                    // artillery 6, because a mage carries a handful of charges and a single extra
+                    // cast is already a large swing.
+                    int charges = squadStats.Ammunition + TabletopTavernConstants.PRESTIGE_AMMO_BONUS_MAGE * BattleManager.Instance.SquadManager.GetSquadPrestige(squadEntity.SquadId);
+                    ecb.AddComponent(entity, new SquadAmmunition() { Value = charges });
+
+                    BattleManager.Instance.SquadManager.CreateArcherRangeDrawer(squadEntity);
                 }
                 else
                 {
@@ -395,7 +449,12 @@ namespace TJ
                     ecb.RemoveComponent<IssueSquadCommand>(entity);
                     BattleManager.Instance.PositionDrawer.TurnOff();
 
-                    // Debug.Log($"broken squad {squadEntity.SquadId} cannot be commanded");
+                    // Logged once per squad: this branch swallows the command before the
+                    // issueSquadCommand log below, so without it a player's orders to a broken
+                    // squad leave no trace at all and the report reads as unresponsive input.
+                    if (_brokenCommandLogged.Add(squadEntity.SquadId))
+                        Debug.Log($"[Morale] Command {overrideSquadCommandTag.SquadCommand} rejected - squad {squadEntity.SquadId} ({squadEntity.UnitName}) is broken and cannot be commanded");
+
                     continue;
                 }
 
@@ -614,6 +673,32 @@ namespace TJ
                     BattleManager.Instance.SquadManager.RaiseBattlefieldBonusApplied(element.SquadId, element.BonusEnum, element.UnitStat, element.Value);
                 }
                 appliedBuffer.Clear();
+            }
+            #endregion
+
+            #region Mage cast requests
+            // MageCastSystem can decide a mage should cast but cannot build the effect: a SpellData is
+            // a managed ScriptableObject and ActiveSpell is a MonoBehaviour prefab. It appends here and
+            // this drains once per frame, same idiom as the battlefield-bonus stream above.
+            //
+            // The buffer singleton is only created when spells are enabled (see BattleManager.StartBattle),
+            // so in a build without the SPELLS define this query stays empty and MageCastSystem early-outs
+            // rather than filling a buffer nothing ever drains.
+            _entityManager.CompleteAllTrackedJobs();
+            if (!_mageCastRequestQuery.IsEmptyIgnoreFilter)
+            {
+                DynamicBuffer<MageCastRequestBufferElement> mageCastBuffer = _mageCastRequestQuery.GetSingletonBuffer<MageCastRequestBufferElement>();
+                foreach (var request in mageCastBuffer)
+                {
+                    TJ.Spells.SpellData spellData = TabletopTavernData.Instance.SquadAssetsDictionary[request.UnitName].mageSpell;
+                    BattleManager.Instance.SpellManager.CastUnitSpell(
+                        spellData,
+                        new Vector3(request.Position.x, request.Position.y, request.Position.z),
+                        request.TeamOfSource,
+                        request.SquadId,
+                        request.TargetSquadEntity);
+                }
+                mageCastBuffer.Clear();
             }
             #endregion
 

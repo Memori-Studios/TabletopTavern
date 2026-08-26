@@ -45,6 +45,11 @@ namespace TJ.Town
         [SerializeField] MemoriCanvasGroup recruitmentButtonCanvasGroup;
         [SerializeField] GameObject recruitmentAvailableObject, recruitmentUnavailableObject;
 
+        [Header("Battlefield")]
+        [SerializeField] TMP_Text weatherText;
+        [SerializeField] MemoriTooltipTrigger weatherTooltipTrigger;
+        [SerializeField] TMP_Text biomeText;
+
         [Header("Faction Effects")]
         [SerializeField] TMP_Text imperialEdictText;
         [SerializeField] GameObject sackAndSlaughterText;
@@ -63,6 +68,7 @@ namespace TJ.Town
         ShopPanel shopPanel;
         GoldManager goldManager;
         int recruitmentCost;
+        int selectedNodeIndex;
         bool hasRecruitedMaxUnits = false;
         bool imperialEdictActive = false;
 
@@ -98,6 +104,7 @@ namespace TJ.Town
             goldManager.OnGoldAmountChanged -= UpdateAffordability;
             goldManager.OnGoldAmountChanged += UpdateAffordability;
             StartCoroutine(CampaignManager.Instance.MapCamera.LerpFocusedOnNodeVolume(0.5f, 0.25f));
+            selectedNodeIndex = _selectedNodeIndex;
             if (!campaignSaveManager.SaveData.nodeGenerated) {
                 Debug.Log($"generating town for node {_selectedNodeIndex}");
                 campaignSaveManager.GenerateTown(_selectedNodeIndex, level);
@@ -177,6 +184,44 @@ namespace TJ.Town
             enterTownTooltipTrigger.SetUpToolTip(enterTownTitleLocalized, enterTownDescriptionLocalized, enterTownFlavorLocalized);
             sackTownTooltipTrigger.SetUpToolTip(sackTownTitleLocalized, sackTownDescriptionLocalized, sackTownFlavorLocalized);
             recruitmentDetailsNumberTooltip.SetUpToolTip(recruitmentButtonTooltipTitleLocalized, recruitmentButtonTooltipDescLocalized);
+
+            SetUpBattlefieldInfo();
+        }
+        // Mirrors the engagement panel's weather/biome pair so the garrison fight is legible before the
+        // player commits. Like there, these write only the value - the labels are static scene text.
+        private void SetUpBattlefieldInfo()
+        {
+            SetUpWeatherInfo();
+            SetUpBiomeInfo();
+        }
+        // The garrison battle is fought on this node, so this is the same seeded roll the map node and
+        // EngagementPanel.GenerateBattlefield read.
+        private void SetUpWeatherInfo()
+        {
+            if (weatherText == null) return;
+
+            MapRegion mapRegion = MapThemeManager.Instance.GetMapRegion(mapSceneUIManager.MapSceneManager.MapRace);
+            Weather weather = CampaignSaveManager.GenerateNodeWeather(
+                selectedNodeIndex,
+                campaignSaveManager.SaveData.seed,
+                campaignSaveManager.SaveData.bookNumber,
+                mapRegion);
+
+            string weatherNameLocalized = LocalizationManager.Instance.GetText(weather.ToString());
+            weatherText.text = weatherNameLocalized;
+
+            if (weatherTooltipTrigger == null) return;
+            string weatherDescriptionLocalized = LocalizationManager.Instance.GetText(weather.ToString() + "Desc");
+            weatherTooltipTrigger.SetUpToolTip(weatherNameLocalized, weatherDescriptionLocalized);
+        }
+        // Deliberately not the node's biome roll. Sacking a town is always a garrison fight, and both
+        // EngagementPanel.GenerateBattlefield and GreyCompanyBattlefield force Biome.Plains for one, so
+        // what the player actually gets is the walled garrison rather than any of the four biomes.
+        private void SetUpBiomeInfo()
+        {
+            if (biomeText == null) return;
+
+            biomeText.text = LocalizationManager.Instance.GetText("Garrison");
         }
         private void DisplayTownOptions()
         {

@@ -68,7 +68,8 @@ namespace TJ
 
                 if (entry.heroName != null) hero.HeroName = entry.heroName;
                 if (entry.heroDescription != null) hero.HeroDescription = entry.heroDescription;
-                if (entry.heroBonusDescription != null) hero.HeroBonusDescription = entry.heroBonusDescription;
+                if (entry.heroBonusDescription != null && ValidateBonusDescriptions(entry.heroBonusDescription, context))
+                    hero.HeroBonusDescription = entry.heroBonusDescription;
                 if (entry.heroPrefabName != null) hero.HeroPrefabName = entry.heroPrefabName;
                 if (ModOverrideValidation.TryParseEnumOrWarn(entry.unlockCondition, "unlockCondition", context, out UnlockCondition uc)) hero.UnlockCondition = uc;
                 if (ModOverrideValidation.TryParseEnumOrWarn(entry.demoUnlockCondition, "demoUnlockCondition", context, out UnlockCondition duc)) hero.DemoUnlockCondition = duc;
@@ -91,6 +92,32 @@ namespace TJ
             }
 
             Debug.Log($"[ModOverride] HeroData ({modLabel}): applied overrides for {applied} hero(es).");
+        }
+
+        // Every consumer reads exactly two bonus lines (see HeroBonusText), so a short array or an
+        // empty key would surface as a blank bonus line rather than the mod's intent. Rejecting the
+        // whole field keeps the hero's original keys, matching the warn-and-skip contract the rest
+        // of the loaders use for bad values.
+        private const int RequiredBonusDescriptionCount = 2;
+
+        private static bool ValidateBonusDescriptions(string[] descriptions, string context)
+        {
+            if (descriptions.Length != RequiredBonusDescriptionCount)
+            {
+                Debug.LogWarning($"[ModOverride] {context}: heroBonusDescription must have exactly {RequiredBonusDescriptionCount} entries (found {descriptions.Length}), ignoring that field.");
+                return false;
+            }
+
+            for (int i = 0; i < descriptions.Length; i++)
+            {
+                if (string.IsNullOrEmpty(descriptions[i]))
+                {
+                    Debug.LogWarning($"[ModOverride] {context}: heroBonusDescription entry {i} is empty, ignoring that field.");
+                    return false;
+                }
+            }
+
+            return true;
         }
 
         public static string ExportTemplate(Dictionary<int, Hero> heroesByID)

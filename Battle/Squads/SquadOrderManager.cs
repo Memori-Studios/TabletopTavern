@@ -85,33 +85,6 @@ namespace TJ.Battle
         }
 
         /// <summary>
-        /// Moves all squads in the group to the front of the list,
-        /// preserving their relative order among themselves.
-        /// </summary>
-        public void BringGroupToFront(List<int> groupSquadIds)
-        {
-            if (groupSquadIds == null || groupSquadIds.Count == 0) return;
-
-            // Collect the group IDs in the order they currently appear in _squadOrder
-            List<int> orderedGroupIds = new();
-            foreach (int id in _squadOrder)
-            {
-                if (groupSquadIds.Contains(id))
-                    orderedGroupIds.Add(id);
-            }
-
-            // Remove them from their current positions
-            foreach (int id in orderedGroupIds)
-                _squadOrder.Remove(id);
-
-            // Insert at the front in original relative order
-            for (int i = orderedGroupIds.Count - 1; i >= 0; i--)
-                _squadOrder.Insert(0, orderedGroupIds[i]);
-
-            OnSquadOrderChanged?.Invoke(_squadOrder.AsReadOnly());
-        }
-
-        /// <summary>
         /// Reorders all squads so groups appear in numerical order (group 1 leftmost, then 2, etc.),
         /// followed by ungrouped squads in their current relative positions.
         /// </summary>

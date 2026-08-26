@@ -60,6 +60,12 @@ namespace TJ
         public string dragonsHoard;
         public string backStabbers;
         public string thickScales;
+        public string shotDiscipline;
+        public string overdraw;
+        public string steadyAim;
+        public string demolisher;
+        public string powderReserves;
+        public string deepQuivers;
     }
 
     [Serializable]
@@ -161,6 +167,12 @@ namespace TJ
                 if (ModOverrideValidation.TryParseBoolOrWarn(entry.dragonsHoard, "dragonsHoard", context, out bool dragonsHoard)) stats.SquadAttributes.DragonsHoard = dragonsHoard;
                 if (ModOverrideValidation.TryParseBoolOrWarn(entry.backStabbers, "backStabbers", context, out bool backStabbers)) stats.SquadAttributes.BackStabbers = backStabbers;
                 if (ModOverrideValidation.TryParseBoolOrWarn(entry.thickScales, "thickScales", context, out bool thickScales)) stats.SquadAttributes.ThickScales = thickScales;
+                if (ModOverrideValidation.TryParseBoolOrWarn(entry.shotDiscipline, "shotDiscipline", context, out bool shotDiscipline)) stats.SquadAttributes.ShotDiscipline = shotDiscipline;
+                if (ModOverrideValidation.TryParseBoolOrWarn(entry.overdraw, "overdraw", context, out bool overdraw)) stats.SquadAttributes.Overdraw = overdraw;
+                if (ModOverrideValidation.TryParseBoolOrWarn(entry.steadyAim, "steadyAim", context, out bool steadyAim)) stats.SquadAttributes.SteadyAim = steadyAim;
+                if (ModOverrideValidation.TryParseBoolOrWarn(entry.demolisher, "demolisher", context, out bool demolisher)) stats.SquadAttributes.Demolisher = demolisher;
+                if (ModOverrideValidation.TryParseBoolOrWarn(entry.powderReserves, "powderReserves", context, out bool powderReserves)) stats.SquadAttributes.PowderReserves = powderReserves;
+                if (ModOverrideValidation.TryParseBoolOrWarn(entry.deepQuivers, "deepQuivers", context, out bool deepQuivers)) stats.SquadAttributes.DeepQuivers = deepQuivers;
 
                 squadStatsDictionary[unitName] = stats;
 
@@ -261,6 +273,12 @@ namespace TJ
                     dragonsHoard = a.DragonsHoard.ToString(),
                     backStabbers = a.BackStabbers.ToString(),
                     thickScales = a.ThickScales.ToString(),
+                    shotDiscipline = a.ShotDiscipline.ToString(),
+                    overdraw = a.Overdraw.ToString(),
+                    steadyAim = a.SteadyAim.ToString(),
+                    demolisher = a.Demolisher.ToString(),
+                    powderReserves = a.PowderReserves.ToString(),
+                    deepQuivers = a.DeepQuivers.ToString(),
                 });
             }
 

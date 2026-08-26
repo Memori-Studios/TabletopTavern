@@ -39,13 +39,16 @@ partial struct RangedUnitAttackSystem : ISystem
             if (entityManager.HasComponent<InCombat>(archerEntity) && !entityManager.HasComponent<GarrisonGateUnit>(archerEntity))
                 continue;
 
-            //timing — tick first; only reset after a shot actually fires so the target scanner can trigger
+            // Timing: tick first. The reset below is skipped while the unit has no target, so an
+            // idle shooter's timer sits at or below zero and it fires the moment it acquires one.
             shootAttack.ValueRW.timer -= SystemAPI.Time.DeltaTime;
 
-            // Play animation shootAnimationDelay seconds before the shot fires
+            // Play animation shootAnimationDelay seconds before the shot fires. The flag is latched
+            // only once the animation actually plays - setting it unconditionally would consume it
+            // while the unit sits idle without a target, and the first shot after acquiring one
+            // would then spawn an arrow with no draw animation.
             if (!shootAttack.ValueRO.animationTriggered && shootAttack.ValueRO.timer <= shootAttack.ValueRO.shootAnimationDelay)
             {
-                shootAttack.ValueRW.animationTriggered = true;
                 if (entityManager.HasComponent<LocalTransform>(unitsTarget.ValueRO.targetEntity) &&
                     entityManager.HasComponent<Unit>(unitsTarget.ValueRO.targetEntity))
                 {
@@ -57,6 +60,7 @@ partial struct RangedUnitAttackSystem : ISystem
                         animAimDir = math.normalize(animAimDir);
                         localTransform.ValueRW.Rotation = quaternion.LookRotation(animAimDir, math.up());
                         float3 animSpawnPos = localTransform.ValueRO.Position + math.mul(localTransform.ValueRO.Rotation, new float3(0, 2.5f, 1.75f));
+                        shootAttack.ValueRW.animationTriggered = true;
                         shootAttack.ValueRW.onShoot.isTriggered = true;
                         shootAttack.ValueRW.onShoot.shootFromPosition = animSpawnPos;
                     }
@@ -67,7 +71,12 @@ partial struct RangedUnitAttackSystem : ISystem
 
             if (!entityManager.Exists(unitsTarget.ValueRO.targetEntity))
             {
-                if (entityManager.HasComponent<GarrisonGateUnit>(archerEntity))
+                // With no target, hold the reload at zero rather than resetting it, so the unit
+                // fires the instant one is acquired instead of waiting out a cycle it was already
+                // partway through. Artillery is exempt and keeps cycling, which is what gives it a
+                // wind-up before its opening shot. Gates are covered here too (they are not
+                // ArtilleryUnit), preserving the immediate fire they already had.
+                if (!entityManager.HasComponent<ArtilleryUnit>(archerEntity))
                     continue;
             }
 
@@ -168,8 +177,9 @@ partial struct RangedUnitAttackSystem : ISystem
 
             int accuracy = shootAttack.ValueRO.Accuracy;
 
-            //fire mode affects accuracy
-            if(rangedFireModeUnit.ValueRO.FireMode == RangedFireMode.FireAtWill) {
+            //fire mode affects accuracy - Steady Aim units shoot just as true in either mode
+            if(rangedFireModeUnit.ValueRO.FireMode == RangedFireMode.FireAtWill &&
+               !entityManager.HasComponent<SteadyAimTag>(archerEntity)) {
                 accuracy -= TabletopTavernConstants.FIRE_AT_WILL_ACCURACY_PENALTY;
             }
 

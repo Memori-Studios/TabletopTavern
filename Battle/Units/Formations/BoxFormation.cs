@@ -300,12 +300,18 @@ public class BoxFormation : MonoBehaviour
     {
         SE_SquadCenterXDict = squadCenterXDict;
     }
+    // Hybrid gets its own rank between the melee line and the archers.
+    // Mage shares the artillery rank rather than taking one behind it: its cast range is only
+    // archer-equivalent, so a rank further back would leave it out of range exactly when the
+    // archers are in range, and it would walk itself forward out of the back line. If mage range
+    // is ever pushed above an archer's, moving it to 4 becomes the correct call.
     private static int GetTypePriority(UnitType t) => t switch
     {
         UnitType.Melee     => 0,
         UnitType.Hybrid    => 1,
         UnitType.Ranged    => 2,
         UnitType.Artillery => 3,
+        UnitType.Mage      => 3,
         _                  => 0,
     };
     public int2 GetWidthAndDepth(int id)

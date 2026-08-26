@@ -59,10 +59,38 @@ namespace TJ
             string description = LocalizationManager.Instance.GetText(unitStat.ToString()+"Desc");
             description += $"\n\n<color {ColorData.Green}>{baseValueLocalized}: {amount}</color>";
             
+            UnitType unitType = TabletopTavernData.Instance.GetUnitTypeFromUnitName(_unitName);
+
             if(_prestige > 0)
             {
-                UnitType unitType = TabletopTavernData.Instance.GetUnitTypeFromUnitName(_unitName);
-                if(TabletopTavernConstants.UsesMeleePrestige(_unitName) || (unitType != UnitType.Ranged && unitType != UnitType.Artillery))
+                // Mages take Range, Leadership and charges. This has to come first: the melee test
+                // below is negative-form, so a mage would satisfy it and the card would credit it
+                // MeleeAttack and MeleeDefense that UnitPrestigeSystemSetUpSystem never grants -
+                // the display drifting from the live math is exactly what the hero-bonus rules
+                // were rebuilt to stop.
+                if(TabletopTavernConstants.Casts(unitType))
+                {
+                    static string PrestigeRomanNumeral(int _prestige) {
+                        return _prestige switch {
+                            0 => "I",
+                            1 => "II",
+                            2 => "III",
+                            _ => "",
+                        };
+                    }
+                    if(UnitStat.Range == unitStat || UnitStat.Leadership == unitStat)
+                    {
+                        totalBonus += TabletopTavernConstants.PRESTIGE_BONUS * _prestige;
+                        description += $"\n<color {ColorData.Green}>{PrestigeLocalised} {PrestigeRomanNumeral(_prestige)}: +{TabletopTavernConstants.PRESTIGE_BONUS * _prestige}</color>";
+                    }
+                    else if(UnitStat.Ammunition == unitStat)
+                    {
+                        totalBonus += TabletopTavernConstants.PRESTIGE_AMMO_BONUS_MAGE * _prestige;
+                        description += $"\n<color {ColorData.Green}>{PrestigeLocalised} {PrestigeRomanNumeral(_prestige)}: +{TabletopTavernConstants.PRESTIGE_AMMO_BONUS_MAGE * _prestige}</color>";
+                    }
+                }
+                // Hybrids take the melee prestige stats, so only pure shooters fall to the else.
+                else if(unitType != UnitType.Ranged && unitType != UnitType.Artillery)
                 {
                     if(UnitStat.MeleeAttack == unitStat || UnitStat.MeleeDefense == unitStat || UnitStat.Leadership == unitStat)
                     {
@@ -107,6 +135,48 @@ namespace TJ
                         totalBonus += ammoBonusPerLevel * _prestige;
                         description += $"\n<color {ColorData.Green}>{PrestigeLocalised} {PrestigeRomanNumeral(_prestige)}: +{ammoBonusPerLevel * _prestige}</color>";
                     }
+                }
+            }
+
+            // Innate attributes plus any prestige-granted one. Drives both the Overdraw / Powder
+            // Reserves bonuses immediately below and the Steady Aim check on the Fire-at-Will
+            // penalty further down, so it's merged once here rather than at each use.
+            SquadAttributes traitAttributes = TabletopTavernData.Instance.GetSquadStats(_unitName).SquadAttributes;
+            if (_prestigeTrait != UnitAttribute.None)
+                TabletopTavernConstants.SetAttribute(ref traitAttributes, _prestigeTrait);
+
+            // Overdraw and Powder Reserves scale a displayed stat instead of adding a flat amount,
+            // so their contribution is derived here rather than coming from a bonus list. Shot
+            // Discipline and Demolisher have no stat row of their own and are conveyed by their
+            // attribute chip; Steady Aim shows up as the absence of a penalty line below.
+            {
+                int traitBonus = 0;
+                UnitAttribute sourceTrait = UnitAttribute.None;
+
+                // Range is multiplied before the prestige bonus is added at runtime, ammunition
+                // after it (UnitSetUpSystem / EntityWatcher), so they read off different bases.
+                if (traitAttributes.Overdraw && unitStat == UnitStat.Range)
+                {
+                    traitBonus = (int)(amount * (TabletopTavernConstants.OVERDRAW_RANGE_MULTIPLIER - 1f));
+                    sourceTrait = UnitAttribute.Overdraw;
+                }
+                else if (traitAttributes.PowderReserves && unitStat == UnitStat.Ammunition)
+                {
+                    traitBonus = (int)((amount + totalBonus) * (TabletopTavernConstants.POWDER_RESERVES_AMMO_MULTIPLIER - 1f));
+                    sourceTrait = UnitAttribute.PowderReserves;
+                }
+                else if (traitAttributes.DeepQuivers && unitStat == UnitStat.Ammunition
+                         && unitType == UnitType.Ranged)
+                {
+                    traitBonus = TabletopTavernConstants.DEEP_QUIVERS_AMMO_BONUS;
+                    sourceTrait = UnitAttribute.DeepQuivers;
+                }
+
+                if (traitBonus > 0)
+                {
+                    totalBonus += traitBonus;
+                    string traitName = LocalizationManager.Instance.GetText(sourceTrait.ToString());
+                    description += $"\n<color {ColorData.Green}>{traitName}: +{traitBonus}</color>";
                 }
             }
 
@@ -250,17 +320,19 @@ namespace TJ
                     if(unitStat == UnitStat.Accuracy && entityManager.HasComponent<RangedFireModeSquadComponent>(squadEntity.SelfEntity))
                     {
                         RangedFireModeSquadComponent rangedFireModeSquadComponent = entityManager.GetComponentData<RangedFireModeSquadComponent>(squadEntity.SelfEntity);
-                        if(rangedFireModeSquadComponent.FireMode == RangedFireMode.FireAtWill)
+                        // Steady Aim units take no penalty in this mode (RangedUnitAttackSystem
+                        // skips it), so the card must not show one either.
+                        if(rangedFireModeSquadComponent.FireMode == RangedFireMode.FireAtWill && !traitAttributes.SteadyAim)
                         {
                             totalBonus -= (int)(amount * 0.2);
                             string fireAtWillLocalised = LocalizationManager.Instance.GetText("FireAtWillTitle");
                             description += $"\n<color {ColorData.Error}>{fireAtWillLocalised}: -20% </color>";
                         }
                     }
-                    if(unitStat == UnitStat.Ammunition && entityManager.HasComponent<RangedSquad>(squadEntity.SelfEntity))
+                    if(unitStat == UnitStat.Ammunition && entityManager.HasComponent<SquadAmmunition>(squadEntity.SelfEntity))
                     {
-                        RangedSquad rangedSquadComponent = entityManager.GetComponentData<RangedSquad>(squadEntity.SelfEntity);
-                        int ammunitionLost = (int)(amount + totalBonus - rangedSquadComponent.Ammunition);
+                        SquadAmmunition squadAmmunition = entityManager.GetComponentData<SquadAmmunition>(squadEntity.SelfEntity);
+                        int ammunitionLost = (int)(amount + totalBonus - squadAmmunition.Value);
                         if(ammunitionLost > 0)
                         {
                             totalBonus -= ammunitionLost;

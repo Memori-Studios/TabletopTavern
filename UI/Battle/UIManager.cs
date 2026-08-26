@@ -17,6 +17,7 @@ using System.Threading.Tasks;
 using TJ.Battle;
 using Unity.Entities;
 using Memori.Notifications;
+using Memori.SaveData;
 
 namespace TJ
 {
@@ -102,7 +103,7 @@ namespace TJ
 
         private bool _isLoaded;
 
-        bool allSelectedUnitsInGuardMode, selectedSquadsContainRangedUnits, selectedSquadsContainArtilleryUnits, selectedSquadsContainShieldedUnits,
+        bool allSelectedUnitsInGuardMode, selectedSquadsContainRangedUnits, selectedSquadsContainArtilleryUnits, selectedSquadsContainMageUnits, selectedSquadsContainShieldedUnits,
         allSelectedSquadsAutoRetarget, allSelectedSquadsMeleeMode, allSelectedSquadsVolleyFire, allSelectedSquadsFireAtWill, allSelectedSquadBalancedStance, allSelectedSquadsDefensiveStance,
         allSelectedSquadsCeaseFire;
         string recentPositionErrorMessage = "";
@@ -169,6 +170,7 @@ namespace TJ
             InputHandler.Instance.OnDefensiveStanceToggle += SetDefensiveStance;
             InputHandler.Instance.OnCeaseFireToggled += SetCeaseFireMode;
             balanceOfPowerDisplay.ArmyLossesTriggered += ArmyLossesTriggered;
+            SaveDataHandler.ArmyLossesSufferedThisBattle = false; // fresh per battle; consumed at battle end
 
             endBattlePanel.SetActive(false);
             UpdateBattleButtons(false);
@@ -535,6 +537,7 @@ namespace TJ
             selectedSquadsContainRangedUnits = false;
             selectedSquadsContainShieldedUnits = false;
             selectedSquadsContainArtilleryUnits = false;
+            selectedSquadsContainMageUnits = false;
 
             allSelectedUnitsInGuardMode = true;
             allSelectedSquadsAutoRetarget = true;
@@ -558,8 +561,9 @@ namespace TJ
                     allSelectedUnitsInGuardMode = false;
                 }
 
-                if(squad.UnitType == UnitType.Ranged)
+                if(TabletopTavernConstants.FightsAtRange(squad.UnitType))
                 {
+                    selectedSquadsContainRangedUnits = true;
 
                     if (!squad.AutoTarget)
                     {
@@ -569,18 +573,13 @@ namespace TJ
                     {
                         allSelectedSquadsMeleeMode = false;
                     }
-
-                    if(squad.UnitType != UnitType.Artillery)
+                    if (squad.FireMode != RangedFireMode.Volley)
                     {
-                        selectedSquadsContainRangedUnits = true;
-                        if (squad.FireMode != RangedFireMode.Volley)
-                        {
-                            allSelectedSquadsVolleyFire = false;
-                        }
-                        if (squad.FireMode != RangedFireMode.FireAtWill)
-                        {
-                            allSelectedSquadsFireAtWill = false;
-                        }
+                        allSelectedSquadsVolleyFire = false;
+                    }
+                    if (squad.FireMode != RangedFireMode.FireAtWill)
+                    {
+                        allSelectedSquadsFireAtWill = false;
                     }
                 }
 
@@ -589,7 +588,14 @@ namespace TJ
                     selectedSquadsContainArtilleryUnits = true;
                 }
 
-                if(squad.UnitType == UnitType.Ranged || squad.UnitType == UnitType.Artillery)
+                // Mages get Cease Fire and nothing else from this block. They have no fire mode, no
+                // melee toggle and no auto-retarget, so they must not set selectedSquadsContainRangedUnits.
+                if(TabletopTavernConstants.Casts(squad.UnitType))
+                {
+                    selectedSquadsContainMageUnits = true;
+                }
+
+                if(TabletopTavernConstants.FightsAtRange(squad.UnitType) || squad.UnitType == UnitType.Artillery || TabletopTavernConstants.Casts(squad.UnitType))
                 {
                     if (!squad.CeaseFire)
                     {
@@ -857,8 +863,13 @@ namespace TJ
                 volleyFireButton.gameObject.SetActive(false);
             }
 
-            ceaseFireButton.gameObject.SetActive(selectedSquadsContainArtilleryUnits || selectedSquadsContainRangedUnits);
-            if (selectedSquadsContainArtilleryUnits || selectedSquadsContainRangedUnits)
+            // Mages are included: MageCastSystem and MageSquadFindTargetSystem both already respect
+            // CeaseFireTag, and RegisterSquad adds the tag to every squad regardless of type, so this
+            // is the only thing that was gating the command off for them. The button still reads
+            // "Cease Fire" on a mage.
+            bool anySelectedSquadCanHoldFire = selectedSquadsContainArtilleryUnits || selectedSquadsContainRangedUnits || selectedSquadsContainMageUnits;
+            ceaseFireButton.gameObject.SetActive(anySelectedSquadCanHoldFire);
+            if (anySelectedSquadCanHoldFire)
             {
                 ceaseFireButton.SetOnOrOff(allSelectedSquadsCeaseFire);
             }
@@ -1087,7 +1098,7 @@ namespace TJ
                 if (card != null)
                     card.transform.SetSiblingIndex(i);
             }
-            // Keep the list in sibling-index order so that GroupManager.CheckIfSquadAtIndexIsInGroup
+            // Keep the list in sibling-index order so that GroupManager.GetGroupNumberForSquadAtIndex
             // can use list indices interchangeably with sibling indices during drag.
             squadDisplays.Sort((a, b) => a.transform.GetSiblingIndex().CompareTo(b.transform.GetSiblingIndex()));
             // Force layout so GroupManager can read settled card positions synchronously.
@@ -1121,7 +1132,7 @@ namespace TJ
         }
         private void ShowSpellQuickCastMenu()
         {
-#if !UNITY_EDITOR && !SPELLS
+#if !SPELLS
             return;
 #endif
             if (_spellQuickCast == null || isOverUI) return;
@@ -1153,6 +1164,9 @@ namespace TJ
             if(teamThatSufferedLosses == Team.Player)
             {
                 entityManager.CreateEntity(typeof(ArmyLossesTriggeredPlayer));
+                // Recorded into the run save at battle end ("Against All Odds"); the battle scene has
+                // no CampaignSaveManager, so this rides the same static bridge as PauseUsedThisBattle.
+                SaveDataHandler.ArmyLossesSufferedThisBattle = true;
             }
             else
             {

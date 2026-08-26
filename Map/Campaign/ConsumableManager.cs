@@ -107,8 +107,9 @@ namespace TJ.Map
                 }
                 case ConsumableEnum.FateshineElixir:
                 {
-                    CampaignManager.Instance.MapSceneUIManager.EventPanel.Guarentee20();
-                    CampaignManager.Instance.MapSceneUIManager.GamesPanel.Guarentee20();
+                    // Arm a persisted guarantee for the next dice roll of any type. Lives in save data so it
+                    // survives main-menu exit and battle entry (the old transient panel flags did not).
+                    CampaignManager.Instance.CampaignSaveManager.ArmFateshineElixir();
                     break;
                 }
                 case ConsumableEnum.Alchemist:
