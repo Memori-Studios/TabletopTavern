@@ -26,6 +26,10 @@ namespace TJ
         [SerializeField] private Polyline movementLine;
         [SerializeField] private Polyline archerAttackArc;
         [SerializeField] private ShapeRenderer pointTriangle;
+        // The footprint a mage's spell will actually cover, drawn at the far end of the arrow.
+        // Optional only in the sense that a missing reference is reported rather than thrown;
+        // every caster needs it.
+        [SerializeField] private Disc blastRadiusRing;
 
         [Header("Settings")]
         [SerializeField] private Color attackColor, movementColor;
@@ -41,6 +45,12 @@ namespace TJ
         private List<Vector3> _destinationPoints = new List<Vector3>();
         private bool isInRangedFire = false;
         private bool _hasValidPath = false;
+        private ShapesBloom blastRingBloom;
+        private bool _isCaster = false;
+        private bool _hasBlastRing = false;
+        // Lifts the blast ring clear of the ground it is drawn on. Matches the 0.5 the Archer
+        // Range Drawer prefab authors on its own ground discs.
+        private const float BLAST_RING_GROUND_OFFSET = 0.5f;
 
 
         private void Start()
@@ -115,16 +125,102 @@ namespace TJ
                 return;
             }
 
-            isRanged = TabletopTavernData.Instance.GetUnitTypeFromUnitName(squadEntity.UnitName) != UnitType.Melee;
+            UnitType unitType = TabletopTavernData.Instance.GetUnitTypeFromUnitName(squadEntity.UnitName);
+            isRanged = unitType != UnitType.Melee;
+            _isCaster = TabletopTavernConstants.Casts(unitType);
             movementLineBloom = movementLine.GetComponent<ShapesBloom>();
             triangleBloom = pointTriangle.GetComponent<ShapesBloom>();
             archerRangeBloom = archerAttackArc.GetComponent<ShapesBloom>();
             gameObject.name = $"AttackArrow_{squadEntity.SquadId}_{squadEntity.UnitName}";
 
+            SetUpBlastRadiusRing();
+
             SetArrowState(ArrowState.Off);
             SetArrowToggleState(ArrowToggleState.ToggledOff);
             TurnOffRangedFire();
         }
+
+        #region Caster
+
+        // SpellRadius applies at the target, not at the caster, which is why this is drawn at the
+        // arrow's far end rather than as a second ring around the mage - a ring on the caster would
+        // read as a minimum range or a self-aura. ArcherRangeDrawer.ApplyCasterShape declines to
+        // draw it there for exactly that reason.
+        private void SetUpBlastRadiusRing()
+        {
+            if (blastRadiusRing == null)
+            {
+                if (_isCaster)
+                    Debug.LogError($"AttackArrowDrawer: {squadEntity.UnitName} is a caster but the Attack Arrow prefab has no blastRadiusRing assigned - its spell footprint will not be drawn.");
+                return;
+            }
+
+            if (!_isCaster)
+            {
+                blastRadiusRing.gameObject.SetActive(false);
+                return;
+            }
+
+            TJ.Spells.SpellData mageSpell = TabletopTavernData.Instance.SquadAssetsDictionary[squadEntity.UnitName].mageSpell;
+            float blastRadius = mageSpell == null ? 0f : mageSpell.SpellRadius;
+
+            // A single-target spell, or a caster whose SquadData has no mageSpell at all (which
+            // EntityWatcher already logs), has no footprint worth drawing - a zero-radius ring would
+            // just be a dot sitting on the target.
+            _hasBlastRing = blastRadius > 0f;
+            if (_hasBlastRing)
+            {
+                blastRadiusRing.Radius = blastRadius;
+                blastRingBloom = blastRadiusRing.GetComponent<ShapesBloom>();
+            }
+
+            blastRadiusRing.gameObject.SetActive(false);
+        }
+
+        // A mage never receives FormationEngagedInRangedCombat: MageSquadChargeSystem deliberately
+        // withholds it, because SquadEngageInCombatSystem consumes that tag by nulling
+        // TargetSquadEntity - right for an archer, which re-acquires every volley, and wrong for a
+        // mage, which would drop the target it just crossed the field for. So the casting state is
+        // derived here instead, from the same conditions MageCastSystem gates a real cast on, minus
+        // its cooldown timer, which would strobe the arc on and off once per cast.
+        private bool TryGetCastTargetCenter(out Vector3 targetCenter)
+        {
+            targetCenter = Vector3.zero;
+            Entity self = squadEntity.SelfEntity;
+
+            // SquadRanOutOfAmmoSystem strips MageSquad when the last charge is spent and converts
+            // the squad to a melee body, so its presence is also the "still a caster" test.
+            if (!EntityManager.HasComponent<MageSquad>(self)) return false;
+            if (EntityManager.HasComponent<InCombat>(self)) return false;
+            if (EntityManager.HasComponent<CeaseFireTag>(self) && EntityManager.IsComponentEnabled<CeaseFireTag>(self)) return false;
+
+            // Read live rather than off the cached squadEntity copy, which was snapshotted at SetUp
+            // and never carries a target.
+            Entity target = EntityManager.GetComponentData<SquadEntity>(self).TargetSquadEntity;
+            if (!EntityManager.Exists(target)) return false;
+            if (EntityManager.HasComponent<BrokenSquadTag>(target)) return false;
+            if (!EntityManager.HasComponent<SquadMovementComponent>(target)) return false;
+
+            // The target's centre is exactly the Position MageCastSystem puts in its cast request, so
+            // the ring lands where the spell will. Taken from the target rather than from the arrow's
+            // own end point, which is the last queued order's goal and may be a Move the player
+            // stacked after the attack.
+            float3 center = EntityManager.GetComponentData<SquadMovementComponent>(target).SquadCenter;
+            float3 selfCenter = EntityManager.GetComponentData<SquadMovementComponent>(self).SquadCenter;
+            if (math.distance(selfCenter, center) > EntityManager.GetComponentData<MageSquad>(self).AttackRange) return false;
+
+            targetCenter = center;
+            return true;
+        }
+
+        // Position only - the prefab authors the flat 90 degree rotation, and Arrow Parent sits at
+        // identity, so local and world agree.
+        private void PositionBlastRadiusRing(Vector3 impactPoint)
+        {
+            blastRadiusRing.transform.position = impactPoint + Vector3.up * BLAST_RING_GROUND_OFFSET;
+        }
+
+        #endregion
 
         private void Update()
         {
@@ -167,6 +263,7 @@ namespace TJ
                 }
                 _hasValidPath = false;
                 pointTriangle.gameObject.SetActive(false);
+                if (_hasBlastRing) blastRadiusRing.gameObject.SetActive(false);
                 return;
             }
             if (_arrowToggleState == ArrowToggleState.ToggledOn)
@@ -219,6 +316,17 @@ namespace TJ
                 return;
             }
 
+            // Resolved ahead of the draw, unlike the archer branch further down, so the arc and
+            // the blast ring are both right on the frame casting starts instead of a frame later.
+            if (_isCaster)
+            {
+                bool isCasting = TryGetCastTargetCenter(out Vector3 castTargetCenter);
+                if (isCasting && _hasBlastRing) PositionBlastRadiusRing(castTargetCenter);
+
+                if (isCasting && !isInRangedFire) TurnOnRangedFire();
+                else if (!isCasting && isInRangedFire) TurnOffRangedFire();
+            }
+
             SetArrowColor();
             RecalculateArrowPath();
 
@@ -238,7 +346,9 @@ namespace TJ
                 // Debug.Log($"[AttackArrow] Squad {squadEntity.SquadId}: Arrow state changed to {desiredState}");
             }
 
-            if(isRanged)
+            // A caster drives its own firing state above; it can never hold this tag, but keeping
+            // it out of this branch means a future change to who gets the tag cannot double-drive it.
+            if(isRanged && !_isCaster)
             {
                 if(!isInRangedFire && EntityManager.HasComponent<FormationEngagedInRangedCombat>(squadEntity.SelfEntity))
                 {
@@ -252,6 +362,13 @@ namespace TJ
         }
         public void SwitchToMelee(bool _toMelee)
         {
+            // A caster has no melee mode. SquadManager.SetMeleeMode skips only UnitType.Melee, so
+            // a mage caught in a mixed selection would have its firing state latched off here and
+            // stop drawing its cast arc for the rest of the battle. The out-of-charges call from
+            // SquadFlagGameObject is covered for free: TryGetCastTargetCenter reads MageSquad live,
+            // and SquadRanOutOfAmmoSystem has already stripped it by then.
+            if (_isCaster) return;
+
             isRanged = !_toMelee;
             if (_toMelee && isInRangedFire)
             {
@@ -283,6 +400,7 @@ namespace TJ
             movementLine.gameObject.SetActive(false);
             archerAttackArc.gameObject.SetActive(true);
             pointTriangle.gameObject.SetActive(_hasValidPath);
+            if (_hasBlastRing) blastRadiusRing.gameObject.SetActive(_hasValidPath);
         }
         private void TurnOffRangedFire()
         {
@@ -290,6 +408,7 @@ namespace TJ
             movementLine.gameObject.SetActive(true);
             archerAttackArc.gameObject.SetActive(false);
             pointTriangle.gameObject.SetActive(_hasValidPath);
+            if (_hasBlastRing) blastRadiusRing.gameObject.SetActive(false);
         }
         private void RecalculateArrowPath()
         {
@@ -310,6 +429,7 @@ namespace TJ
             // pointTriangle.transform.Rotate(0, 180, 0);
             _hasValidPath = true;
             pointTriangle.gameObject.SetActive(true);
+            if (_hasBlastRing) blastRadiusRing.gameObject.SetActive(isInRangedFire);
 
             if (isInRangedFire)
             {
@@ -344,6 +464,12 @@ namespace TJ
             movementLineBloom.Bloom();
             triangleBloom.Bloom();
             archerRangeBloom.Bloom();
+
+            if (_hasBlastRing)
+            {
+                blastRingBloom.SetColor(color);
+                blastRingBloom.Bloom();
+            }
         }
         private void OnDestroy()
         {

@@ -238,17 +238,21 @@ namespace TJ
                                     string localisedBonusName = LocalizationManager.Instance.GetText(bonus.Value.BattlefieldBonusEnum.ToString());
                                     description += $"\n<color {(bonus.Value.Value > 0 ? ColorData.Green : ColorData.Error)}>{localisedBonusName}: {(bonus.Value.Value > 0 ? "+" : "")}{roundedArmorPenalty} </color>";
                                 }
-                                else if (unitStat == UnitStat.Speed && bonus.Value.BattlefieldBonusEnum == BattlefieldBonusEnum.Swamp)
+                                else if (unitStat == UnitStat.Speed && (bonus.Value.BattlefieldBonusEnum == BattlefieldBonusEnum.Swamp || bonus.Value.BattlefieldBonusEnum == BattlefieldBonusEnum.Rain))
                                 {
-                                    if (TabletopTavernData.Instance.IgnoresSwamp(_unitName))
+                                    bool isSwamp = bonus.Value.BattlefieldBonusEnum == BattlefieldBonusEnum.Swamp;
+                                    if (isSwamp && TabletopTavernData.Instance.IgnoresSwamp(_unitName))
                                     {
                                         continue;
                                     }
-                                    // Swamp's speed penalty is a fraction of remaining speed (e.g. 0.5 = half) and compounds multiplicatively,
-                                    // so stack it as a running multiplier instead of subtracting from the base amount
-                                    speedMultiplier *= bonus.Value.Value;
+                                    // Swamp and Rain both scale remaining speed by a fraction (e.g. 0.5 = half) and compound multiplicatively,
+                                    // so stack them as a running multiplier instead of subtracting from the base amount.
+                                    // Rain reads the constant BattlefieldBonusSystem actually multiplies AgentLocomotion.Speed by rather than
+                                    // the authored bonus value, which that branch never touches (only large units carry the buffer element).
+                                    float speedFraction = isSwamp ? bonus.Value.Value : TabletopTavernConstants.RAIN_SPEED_MODIFIER;
+                                    speedMultiplier *= speedFraction;
                                     string localisedBonusName = LocalizationManager.Instance.GetText(bonus.Value.BattlefieldBonusEnum.ToString());
-                                    description += $"\n<color {ColorData.Error}>{localisedBonusName}: -{Mathf.RoundToInt((1f - bonus.Value.Value) * 100f)}% </color>";
+                                    description += $"\n<color {ColorData.Error}>{localisedBonusName}: -{Mathf.RoundToInt((1f - speedFraction) * 100f)}% </color>";
                                 }
                                 else if (unitStat == UnitStat.Speed)
                                 {

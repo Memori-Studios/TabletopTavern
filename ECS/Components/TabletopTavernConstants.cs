@@ -112,6 +112,12 @@ public static class TabletopTavernConstants
     // Smite is the only mage spell but wants revisiting if a second one lands with a different one.
     public const int MAGE_AOE_MODELS_HIT = 18;
 
+    // Hysteresis on a mage dropping a target that has walked out of casting range. The drop check
+    // only runs while the mage is halted (its find-target query excludes ChargeSquad), but without a
+    // buffer a target loitering exactly on the range boundary would make it drop and re-acquire on
+    // alternating ticks. 1.1 means the target has to be a clear 10% beyond range before it is let go.
+    public const float MAGE_TARGET_DROP_RANGE_MULTIPLIER = 1.1f;
+
     // Shooter trait magnitudes (Shot Discipline / Overdraw / Demolisher / Powder Reserves).
     // Steady Aim has no magnitude - it simply waives FIRE_AT_WILL_ACCURACY_PENALTY.
     public const float SHOT_DISCIPLINE_RELOAD_MULTIPLIER = 0.8f;    // 20% faster reload

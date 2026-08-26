@@ -46,13 +46,47 @@ partial struct MageSquadFindTargetSystem : ISystem
             if (!squadOverrides.AutoTarget && !entityManager.Exists(squad.ValueRO.TargetSquadEntity))
                 continue;
 
-            // An existing target is kept until it dies or breaks. Unlike archers there is nothing to
-            // re-acquire per shot - the cast system reads TargetSquadEntity when its timer fires.
+            // An existing target is kept until it dies, breaks, or walks out of casting range. Unlike
+            // archers there is nothing to re-acquire per shot - the cast system reads
+            // TargetSquadEntity when its timer fires.
             if (entityManager.Exists(squad.ValueRO.TargetSquadEntity))
             {
                 if (entityManager.HasComponent<BrokenSquadTag>(squad.ValueRO.TargetSquadEntity))
+                {
                     squad.ValueRW.TargetSquadEntity = Entity.Null;
-                continue;
+                    continue;
+                }
+
+                // Out-of-range drop. Reaching casting range ends the charge (SquadHaltCommandSystem
+                // strips ChargeSquad on the halt), so a mage whose target then walks away used to sit
+                // there holding a target it could never cast at, for the rest of the battle.
+                //
+                // Dropping the target here lets the search below re-acquire on this same tick, which
+                // also fixes re-approach for free: if that squad is still the best candidate it is
+                // simply chosen again, and the fresh Attack order re-charges the mage toward it.
+                //
+                // Two things make this safe rather than thrashy. This query excludes ChargeSquad, so
+                // it can only fire while the mage is stationary, never mid-approach. And the stale
+                // order has to be cleared as well - it is left InProgress by the completed charge, and
+                // the guard further down would otherwise refuse to issue the replacement, leaving the
+                // mage with no target at all.
+                //
+                // AutoTarget gates it: a player who right-clicked a specific squad gets to keep that
+                // order, and clearing the buffer would throw away orders they queued by hand.
+                bool targetOutOfRange = false;
+                if (squadOverrides.AutoTarget)
+                {
+                    float3 targetCenter = entityManager
+                        .GetComponentData<SquadMovementComponent>(squad.ValueRO.TargetSquadEntity).SquadCenter;
+                    float targetDistance = math.distance(squadMovementComponent.ValueRO.SquadCenter, targetCenter);
+                    targetOutOfRange = targetDistance >
+                        mageSquad.ValueRO.AttackRange * TabletopTavernConstants.MAGE_TARGET_DROP_RANGE_MULTIPLIER;
+                }
+
+                if (!targetOutOfRange) continue;
+
+                squad.ValueRW.TargetSquadEntity = Entity.Null;
+                queuedOrders.Clear();
             }
 
             float3 selfCenter = squadMovementComponent.ValueRO.SquadCenter;

@@ -1,4 +1,4 @@
-using Memori.SaveData;
+﻿using Memori.SaveData;
 using TMPro;
 using UnityEngine;
 using UnityEngine.UI;
@@ -93,6 +93,10 @@ namespace TJ.MainMenu
         [SerializeField] private MetaprogressionModel _startingArmyUnlockMetaprogressionModel;
         [SerializeField] private GameObject startingGearLockedNotice;
         [SerializeField] private TMP_Text armyCustomisationGateText;
+        // Full-column overlay over the warband screen's army source list, and the only thing
+        // that stops a unit being added while the hero is gated - RemoveTroop re-checks the
+        // same flag for the loadout side. Left unassigned, army customisation is silently open.
+        [SerializeField] private LockedButton startingArmyLockedBlocker;
 
         [Header("Camera Scene")]
         [SerializeField] private Camera _mainMenuCamera;
@@ -118,6 +122,8 @@ namespace TJ.MainMenu
         string _loadedHeroPrefabKey;
         bool heroIsUnlocked;
         bool startingArmyLockedForHero;
+        bool warbandScreenShown;
+        string startingArmyGateReason = string.Empty;
         int _heroPrefabLoadVersion;
         int _maxDifficultyCompletedOverall = 0;
         UnlockCondition _unlockCondition;
@@ -206,6 +212,9 @@ namespace TJ.MainMenu
         #region Screen switching
         public void ShowCommanderScreen()
         {
+            warbandScreenShown = false;
+            RefreshStartingArmyBlocker();
+
             commanderScreen.CGEnable();
             warbandScreen.CGDisable();
             TurnHeroCameraTo(commanderCameraRotation);
@@ -227,10 +236,33 @@ namespace TJ.MainMenu
             // Filled before the screen is shown, so it is never seen holding the last hero's loadout.
             warbandPanel.LoadForHero(hero);
 
+            warbandScreenShown = true;
+            RefreshStartingArmyBlocker();
+
             warbandScreen.CGEnable();
             commanderScreen.CGDisable();
             TurnHeroCameraTo(warbandCameraRotation);
             IAudioRequester.Instance.PlaySFX(SFXData.ButtonHover);
+        }
+
+        /// <summary>
+        /// The blocker is a full-column overlay parented under the warband screen, and
+        /// <c>LoadHeroes</c> raises it on every hero switch - which happens while the COMMANDER
+        /// screen is up. That only looked safe because the warband screen is hidden by
+        /// <c>CGDisable()</c>, which fades the CanvasGroup and never deactivates it. The scene
+        /// instance carries its own Canvas, so the fade does not reach it and the blocker paints
+        /// over the commander screen while the player is still picking a hero.
+        ///
+        /// So its visibility is gated on the warband screen actually being shown rather than on
+        /// the fade. That holds whatever that Canvas is doing and needs no change to the
+        /// authored hierarchy. It costs nothing on the gate itself: the army source list can
+        /// only be reached from the warband screen, and <c>RemoveTroop</c> re-checks
+        /// <c>StartingArmyLockedForHero</c> independently for the loadout side.
+        /// </summary>
+        private void RefreshStartingArmyBlocker()
+        {
+            startingArmyLockedBlocker.SetLockedState(
+                warbandScreenShown && startingArmyLockedForHero, startingArmyGateReason);
         }
         #endregion
 
@@ -330,9 +362,12 @@ namespace TJ.MainMenu
             // Army customisation needs one completed run with this hero. Stated up front on the
             // commander screen rather than surfacing as an error after a click on the next screen.
             startingArmyLockedForHero = !heroIsUnlocked || maxDifficultyComletedOnHero.Count == 0;
+            string armyGateReason = LocalizationManager.Instance.GetText("OneCompletionRequired");
             armyCustomisationGateText.text = startingArmyLockedForHero
-                ? LocalizationManager.Instance.GetText("OneCompletionRequired")
+                ? armyGateReason
                 : LocalizationManager.Instance.GetText("ArmyCustomisationUnlocked");
+            startingArmyGateReason = armyGateReason;
+            RefreshStartingArmyBlocker();
 
             if (_unlockCondition == UnlockCondition.DiscordExclusive && !heroIsUnlocked)
             {

@@ -594,21 +594,26 @@ namespace TJ
         {
             List<GearID> newGearList = new();
             //get random piece of gear without repeating
-            int fails = 0;
+            GearID[] allGear = Enum.GetValues(typeof(GearID)) as GearID[];
+
+            // One Random for the whole draw, and retries pull the NEXT sample from it. Re-seeding
+            // per retry (_seed + fails) used to walk the retries along the same seed line the
+            // caller's reroll counter advances by 1, so a draw that skipped k>=1 excluded
+            // candidates landed on exactly the seed the next draw would start walking from. The
+            // shop then handed out the same item twice in a row whenever the player didn't take it
+            // (the only thing that shifts the walk is the drawn item joining the exclusion list) -
+            // guaranteed with full gear slots, since claiming is impossible there.
+            Random random = new(Seed: _seed + (_bookNumver * 13));
+
             for (int i = 0; i < _amount; i++) {
-                //get gear IDs
-                GearID[] allGear = Enum.GetValues(typeof(GearID)) as GearID[];
-                Random random = new(Seed: _seed + fails + (_bookNumver * 13));
                 GearID gearID = allGear[random.Next(1, allGear.Length)];
                 Gear gear = GetGear(gearID);
 
                 if (newGearList.Contains(gearID) || _aquiredGearList.Contains(gearID)) {
                     i--;
-                    fails++;
                     continue;
                 } else if(_isShop && gear.BanFromShop){
                     i--;
-                    fails++;
                     continue;
                 } else {
                     newGearList.Add(gearID);
