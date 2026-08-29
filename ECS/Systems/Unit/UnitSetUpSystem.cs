@@ -33,6 +33,9 @@ partial struct UnitSetUpSystem : ISystem
         EntitiesReferences entitiesReferences = SystemAPI.GetSingleton<EntitiesReferences>();
         var statsData = SystemAPI.GetSingleton<SquadStatsData>();
         ref var statsBlob = ref statsData.StatsBlob.Value; 
+        // Read once per update rather than per unit. Safe to call here: this system is deliberately
+        // not Burst-compiled (see the note above OnUpdate).
+        RangedFireMode playerDefaultFireMode = TabletopTavernConstants.GetPlayerDefaultFireMode();
 
         foreach (var ( 
             unit,
@@ -227,7 +230,14 @@ partial struct UnitSetUpSystem : ISystem
                 // RangedUnitAttackSystem's query requires this component, so anything meant to fire
                 // must have it. Structures get theirs from ArmySpawnManager instead.
                 if(TabletopTavernConstants.FightsAtRange(squadStats.unitType) || squadStats.unitType == UnitType.Artillery) {
-                    entityCommandBuffer.AddComponent(entity, new RangedFireModeUnitComponent { FireMode = RangedFireMode.Volley });
+                    // The player's default only reaches FightsAtRange units, because those are the
+                    // only ones the Volley / Fire at Will buttons are offered for. RangedUnitAttackSystem
+                    // honours FireAtWill on anything carrying this component, so an artillery piece
+                    // started in it could never be switched back out.
+                    RangedFireMode fireMode = team == Team.Player && TabletopTavernConstants.FightsAtRange(squadStats.unitType)
+                        ? playerDefaultFireMode
+                        : RangedFireMode.Volley;
+                    entityCommandBuffer.AddComponent(entity, new RangedFireModeUnitComponent { FireMode = fireMode });
                 }
 
             } else {

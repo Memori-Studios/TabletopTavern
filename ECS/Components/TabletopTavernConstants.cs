@@ -230,6 +230,33 @@ public static class TabletopTavernConstants
     // mage never picks up ammo UI, fire modes, skirmishing or archer targeting by inheritance.
     public static bool Casts(UnitType unitType) =>
         unitType == UnitType.Mage;
+
+    // Has something to withhold, so the Cease Fire stance is meaningful. Melee is absent on
+    // purpose: MeleeSquadFindTargetSquadSystem does not exclude CeaseFireTag, so a melee squad
+    // carrying the stance would keep fighting while its card showed a cease-fire icon.
+    public static bool HoldsFire(UnitType unitType) =>
+        FightsAtRange(unitType) || unitType == UnitType.Artillery || Casts(unitType);
+
+    // Acts on a cycle slow enough that the wait is worth showing the player. Ranged and Hybrid are
+    // absent on purpose: they hold a ShootAttack timer too, but reload fast enough that a readout
+    // would only flicker, and their ammo bar already carries the state worth watching.
+    public static bool HasVisibleCooldown(UnitType unitType) =>
+        unitType == UnitType.Artillery || Casts(unitType);
+    #endregion
+
+    #region Player battle defaults
+    // Settings-screen defaults, applied at spawn so a player squad is born in the stance that was
+    // asked for rather than switched into it a frame later. The keys match the Settings Toggle v2
+    // rows under Game Settings in Core.unity. Enemy squads never read these.
+    public const string PREF_DEFAULT_CEASE_FIRE = "defaultSquadCeaseFire";
+    public const string PREF_DEFAULT_FIRE_MODE = "defaultSquadFireMode";
+
+    public static bool GetPlayerDefaultCeaseFire() =>
+        PlayerPrefs.GetInt(PREF_DEFAULT_CEASE_FIRE, 0) == 1;
+
+    // Off (0) is Volley, matching the hardcoded value every spawn path used before this existed.
+    public static RangedFireMode GetPlayerDefaultFireMode() =>
+        PlayerPrefs.GetInt(PREF_DEFAULT_FIRE_MODE, 0) == 1 ? RangedFireMode.FireAtWill : RangedFireMode.Volley;
     #endregion
 
     public static bool IsAGoblinUnit(UnitName unitName) =>

@@ -282,10 +282,10 @@ namespace TJ
                 mainCanvasGroup.CGEnable();
             }
         }
-        public HealthBar LoadHealthbar(Transform _squadPosition, Team _faction, int id, int ammunition, bool isGate)
+        public HealthBar LoadHealthbar(Transform _squadPosition, Team _faction, int id, int ammunition, bool isGate, bool hasCooldown)
         {
             HealthBar healthBar = Instantiate(healthBarPrefab, healthBarParent);
-            healthBar.SetUp(_faction, _squadPosition, ammunition, isGate);
+            healthBar.SetUp(_faction, _squadPosition, ammunition, isGate, hasCooldown);
 
             if (healthBars.ContainsKey(id))
             {
@@ -595,7 +595,7 @@ namespace TJ
                     selectedSquadsContainMageUnits = true;
                 }
 
-                if(TabletopTavernConstants.FightsAtRange(squad.UnitType) || squad.UnitType == UnitType.Artillery || TabletopTavernConstants.Casts(squad.UnitType))
+                if(TabletopTavernConstants.HoldsFire(squad.UnitType))
                 {
                     if (!squad.CeaseFire)
                     {

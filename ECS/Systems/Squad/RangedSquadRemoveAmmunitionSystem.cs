@@ -38,7 +38,7 @@ partial struct RangedSquadRemoveAmmunitionSystem : ISystem
             // A shooter spends a whole volley at once, so where exactly the pool crosses empty is
             // noise and the original < 0 is preserved byte for byte. A mage is one model spending
             // one charge per cast, so that same rule would hand it one cast more than its authored
-            // charge count - a third again as many on a 3-charge Bishop. Hence the separate boundary.
+            // charge count - a third again as many on a 3-charge mage. Hence the separate boundary.
             int depletedAt = entityManager.HasComponent<MageSquad>(squad.ValueRO.SelfEntity) ? 0 : -1;
             //update healthbar ammo count
             if (ammunition.ValueRO.Value <= depletedAt)

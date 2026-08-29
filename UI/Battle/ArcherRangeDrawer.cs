@@ -12,6 +12,18 @@ public class ArcherRangeDrawer : MonoBehaviour
     [SerializeField] private Line leftLine, rightLine;
     [SerializeField] private Disc arc, arc2;
     [SerializeField] private Color playerColor, enemyColor;
+    // A caster's ring is a different shape from an archer's cone (see ApplyCasterShape), and reusing
+    // the archer's gold made the two read as the same kind of threat. Blue says "spell range" at a
+    // glance. Still split by team, so an enemy caster does not borrow the player's hue - the drawer
+    // is created for enemy squads too, unlike AttackArrowDrawer which destroys itself for them.
+    [SerializeField] private Color casterPlayerColor = new Color(0.235f, 0.647f, 0.960f, 1f);
+    [SerializeField] private Color casterEnemyColor = new Color(0.612f, 0.325f, 0.941f, 1f);
+    // arc2 is the wide soft band sitting inside the ring, and unlike everything else here it is not
+    // team-tinted - the prefab authors one pale yellow that both the player's gold arc and the
+    // enemy's red arc glow against. Against a blue caster ring that yellow reads as a different
+    // effect altogether. This is the same treatment the pale yellow gets from the gold arc, applied
+    // to the caster blue: each channel lifted toward white by the same amount, hue kept.
+    [SerializeField] private Color casterArc2Color = new Color(0.494f, 0.878f, 1f, 1f);
     [SerializeField] private float _fadeDuration = 0.11f;
 
     float range;
@@ -71,11 +83,23 @@ public class ArcherRangeDrawer : MonoBehaviour
     {
         cachedEntity = _squadEntity.SelfEntity;
         squadId = _squadEntity.SquadId;
-        Color teamColor = squadId > 0 ? playerColor : enemyColor;
+
+        // Resolved from the unit type rather than from MageSquad, which is what Recalculate reads.
+        // Two reasons: Recalculate runs after the colour is chosen just below, and
+        // SquadRanOutOfAmmoSystem strips MageSquad once the last charge is spent, so the component
+        // is not a durable answer to "is this a caster" while the type is.
+        _isCaster = TabletopTavernConstants.Casts(TJ.TabletopTavernData.Instance.GetUnitTypeFromUnitName(_squadEntity.UnitName));
+
+        Color teamColor = _isCaster
+            ? (squadId > 0 ? casterPlayerColor : casterEnemyColor)
+            : (squadId > 0 ? playerColor : enemyColor);
         leftLineBloom.SetColor(teamColor);
         rightLineBloom.SetColor(teamColor);
         arcBloom.SetColor(teamColor);
-        // arc2Bloom.SetColor(teamColor);
+
+        // Only casters override arc2, so the archer band stays exactly the pale yellow the prefab
+        // authors for both teams. Bloom() below is what pushes this onto the Disc.
+        if (_isCaster) arc2Bloom.SetColor(casterArc2Color);
 
         Recalculate();
 
@@ -121,11 +145,9 @@ public class ArcherRangeDrawer : MonoBehaviour
         // A mage carries MageSquad instead of RangedSquad, so without this its ring stayed at the
         // field default of 0 and drew nothing. MageSquadRangeSystem keeps AttackRange in sync with
         // the unit's MageCast.Range, exactly as RangedSquadRangeSystem does for archers.
+        // _isCaster is deliberately not set here - SetUp resolves it before this ever runs.
         else if (entityManager.HasComponent<MageSquad>(cachedEntity))
-        {
             range = entityManager.GetComponentData<MageSquad>(cachedEntity).AttackRange;
-            _isCaster = true;
-        }
 
         arc.Radius     = range;
         arc2.Radius    = range - 3.75f;

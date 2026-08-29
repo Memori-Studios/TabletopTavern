@@ -79,7 +79,11 @@ public enum UnitName
     // Append only, and never without its SquadData asset in the same change: the stats blob is
     // sized by SquadStatsDictionary.Count but indexed by this ordinal, so a name with no asset
     // reads past the end of the BlobArray inside Burst rather than logging anything.
-    BishopOfIron,
+    //
+    // ASCII on purpose. The display name carries an umlaut, but that lives in the localization
+    // value alone, so mod JSON and the override loaders never have to deal with encoding, and this
+    // file stays pure ASCII.
+    HexenjagerMage,
 }
 [System.Serializable] public struct SquadSpawnData {
     public int squadId;

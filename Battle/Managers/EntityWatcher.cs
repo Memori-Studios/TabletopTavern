@@ -256,7 +256,13 @@ namespace TJ
                     });
                     ecb.AddComponent(entity, new SquadAmmunition() { Value = ammunition });
 
-                    ecb.AddComponent(entity, new RangedFireModeSquadComponent() { FireMode = RangedFireMode.Volley, SwitchRequested = false });
+                    // SwitchRequested stays false: UnitSetUpSystem already gave each unit this same
+                    // mode, and RangedFireModeSwitchJob would overwrite their freshly-seeded
+                    // ShootAttack timers on top of doing nothing else useful.
+                    RangedFireMode squadFireMode = squadEntity.SquadId > 0
+                        ? TabletopTavernConstants.GetPlayerDefaultFireMode()
+                        : RangedFireMode.Volley;
+                    ecb.AddComponent(entity, new RangedFireModeSquadComponent() { FireMode = squadFireMode, SwitchRequested = false });
                     BattleManager.Instance.SquadManager.CreateArcherRangeDrawer(squadEntity);
 
                     // Enemy archers receive skirmish tag. Hybrids are excluded: they are meant to
@@ -312,6 +318,21 @@ namespace TJ
                     ecb.AddComponent(entity, new SquadAmmunition() { Value = charges });
 
                     BattleManager.Instance.SquadManager.CreateArcherRangeDrawer(squadEntity);
+
+                    // The drawer is created immediately but MageSquad is added through the ECB, so
+                    // the Recalculate inside SetUp finds no MageSquad and leaves the ring at radius
+                    // zero - invisible for the whole battle.
+                    //
+                    // An archer survives the same race by accident: RangedSquad is seeded with
+                    // AttackRange 0, so RangedSquadRangeSystem always has a correction to make and
+                    // raises ArcherRangeUpdated as a side effect, which redraws the ring. MageSquad
+                    // above is seeded with the right range already, so MageSquadRangeSystem hits its
+                    // "range == mageSquad.AttackRange" early-out and never raises anything.
+                    //
+                    // Requesting the redraw explicitly is what closes that gap. It rides the same
+                    // ECB, so the component and the request land together and the drain re-runs
+                    // Recalculate once MageSquad actually exists.
+                    ecb.AddComponent(entity, new ArcherRangeUpdated());
                 }
                 else
                 {

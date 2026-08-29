@@ -93,7 +93,9 @@ public class SquadManager : MonoBehaviour
 
         bool autoCharge = PlayerPrefs.GetInt("autoCharge", 0) == 1;
         bool guardMode = PlayerPrefs.GetInt("defaultSquadGuardMode", 1) == 1;
-        Debug.Log($"AutoCharge : [{autoCharge}], GuardMode : [{guardMode}]");
+        bool ceaseFire = TabletopTavernConstants.GetPlayerDefaultCeaseFire();
+        RangedFireMode fireMode = TabletopTavernConstants.GetPlayerDefaultFireMode();
+        Debug.Log($"AutoCharge : [{autoCharge}], GuardMode : [{guardMode}], CeaseFire : [{ceaseFire}], FireMode : [{fireMode}]");
     }
     public int GetSquadUnitCount(int _squadId)
     {
@@ -308,6 +310,8 @@ public class SquadManager : MonoBehaviour
 
         int squadId = 0;
         bool guardMode = false;
+        bool ceaseFire = false;
+        RangedFireMode fireMode = RangedFireMode.Volley;
         if(_enemyData.Team == Team.Player) 
         {
             if(BattleManager.Instance.BattleSaveManager.IsCustomBattle)
@@ -320,6 +324,15 @@ public class SquadManager : MonoBehaviour
             }
             playerSquadsRegistered++;
             guardMode = PlayerPrefs.GetInt("defaultSquadGuardMode", 1) == 1;
+            // Only squads the Cease Fire button is offered for. A melee squad would carry the
+            // stance without any system honouring it, and its battle card would show a cease-fire
+            // icon while it kept fighting.
+            ceaseFire = TabletopTavernConstants.HoldsFire(squadStats.unitType)
+                     && TabletopTavernConstants.GetPlayerDefaultCeaseFire();
+            // Mirrors what EntityWatcher and UnitSetUpSystem give this squad, so the fire-mode
+            // buttons and the battle card read the real stance on the very first selection.
+            if (TabletopTavernConstants.FightsAtRange(squadStats.unitType))
+                fireMode = TabletopTavernConstants.GetPlayerDefaultFireMode();
         } else {
             squadId = (enemySquadsRegistered + 1) * -1;
             enemySquadsRegistered++;
@@ -396,6 +409,8 @@ public class SquadManager : MonoBehaviour
             ShieldedStance = isShielded ? ShieldedStance.Balanced : ShieldedStance.None,
             AutoTarget = true,
             MeleeMode = false,
+            CeaseFire = ceaseFire,
+            FireMode = fireMode,
         });
 
         ecb.AddComponent(squadEntity, new LocalTransform { 
@@ -684,7 +699,10 @@ public class SquadManager : MonoBehaviour
         ecb.SetComponentEnabled<CompleteQueuedOrderTag>(squadEntity, false);
 
         ecb.AddComponent<CeaseFireTag>(squadEntity);
-        ecb.SetComponentEnabled<CeaseFireTag>(squadEntity, false);
+        // Set directly rather than through CeaseFireRequestedTag: a squad being registered has no
+        // target yet, so the only thing CeaseFireSystem would add here is a redundant frame of
+        // target-nulling.
+        ecb.SetComponentEnabled<CeaseFireTag>(squadEntity, ceaseFire);
 
         ecb.AddComponent<CeaseFireRequestedTag>(squadEntity);
         ecb.SetComponentEnabled<CeaseFireRequestedTag>(squadEntity, false);

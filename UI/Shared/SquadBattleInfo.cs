@@ -22,6 +22,12 @@ namespace TJ
 
         [Header("Health Bar")]
         [SerializeField] private TMP_Text healthbarText;
+
+        // Optional. Only artillery and casters ever populate this, and the run-setup copies of this
+        // panel have no live squad to read a timer from, so both are null-guarded throughout.
+        [SerializeField] private GameObject cooldownGroup;
+        [SerializeField] private TMP_Text cooldownText;
+        [SerializeField] private MemoriTooltipTrigger cooldownTooltipTrigger;
         [SerializeField] private Color friendlyColor;
         [SerializeField] private Color enemyColor;
         [SerializeField] protected Slider healthBarSlider;
@@ -51,6 +57,11 @@ namespace TJ
         UnitAttribute prestigeTrait;
         const float AMMO_REFRESH_INTERVAL = 0.5f;
         float ammoRefreshTimer;
+
+        // A countdown wants a finer cadence than the ammo readout: at 0.5s a seconds figure visibly
+        // jumps, and this is the one surface whose whole job is the precise number.
+        const float COOLDOWN_REFRESH_INTERVAL = 0.1f;
+        float cooldownRefreshTimer;
         SquadToLoad squadToLoad;
         SquadEntity squadEntity;
         public SquadEntity SquadEntity => squadEntity;
@@ -264,6 +275,13 @@ namespace TJ
                 }
             }
 
+            cooldownRefreshTimer += Time.deltaTime;
+            if (cooldownRefreshTimer >= COOLDOWN_REFRESH_INTERVAL)
+            {
+                cooldownRefreshTimer = 0f;
+                RefreshCooldown(entityManager);
+            }
+
             //ranged/artillery ammo and mage charges only need to be checked a couple times a second, not every frame
             ammoRefreshTimer += Time.deltaTime;
             if (ammoRefreshTimer >= AMMO_REFRESH_INTERVAL)
@@ -288,8 +306,44 @@ namespace TJ
                 healthbarText.text = $"{health}";
             }
         }
+        // The precise counterpart to the squad flag's cooldown bar: the bar answers "roughly how
+        // soon", this answers "how many seconds". Both go through SquadCooldown, so the two readouts
+        // cannot drift apart or disagree about which unit is the representative.
+        private void RefreshCooldown(EntityManager entityManager)
+        {
+            if (cooldownGroup == null) return;
+
+            // TryGet reports false for anything without a cooldown worth showing, and for a spent
+            // mage whose MageCast was stripped by SquadRanOutOfAmmoSystem, so the row retires itself
+            // rather than freezing on its last value.
+            if (!SquadCooldown.TryGet(entityManager, squadEntity.SelfEntity, squadStats.unitType,
+                out _, out float secondsRemaining))
+            {
+                if (cooldownGroup.activeSelf) cooldownGroup.SetActive(false);
+                return;
+            }
+
+            if (!cooldownGroup.activeSelf) cooldownGroup.SetActive(true);
+            if (cooldownText == null) return;
+
+            cooldownText.text = secondsRemaining <= 0f
+                ? LocalizationManager.Instance.GetText("CooldownReady")
+                : string.Format(LocalizationManager.Instance.GetText("CooldownSeconds"), secondsRemaining.ToString("F1"));
+        }
         private void Load()
         {
+            // Hidden up front so a squad with no cooldown never inherits the previously hovered
+            // squad's value for the frames before RefreshCooldown next ticks.
+            if (cooldownGroup != null) cooldownGroup.SetActive(false);
+
+            // MemoriTooltipTrigger stores raw display strings rather than localization keys - the
+            // neighbouring Unit Kills cell has literal English baked into the scene - so the text is
+            // pushed in from here instead of authored, keeping it out of the binary scene.
+            if (cooldownTooltipTrigger != null)
+                cooldownTooltipTrigger.SetUpToolTip(
+                    LocalizationManager.Instance.GetText("CooldownTitle"),
+                    LocalizationManager.Instance.GetText("CooldownDesc"));
+
             // Debug.Log($"Loading SquadBattleInfo for {applyGearBonuses} applying gear bonuses.");
             unitAttributesUIContainer = GetComponent<UnitAttributesUIContainer>();
             unitAttributesUIContainer.Load(squadStats.unitName, applyGearBonuses, prestigeTrait);

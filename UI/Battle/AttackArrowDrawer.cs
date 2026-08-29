@@ -48,6 +48,10 @@ namespace TJ
         private ShapesBloom blastRingBloom;
         private bool _isCaster = false;
         private bool _hasBlastRing = false;
+        // Resolving a squad id to its entity is not free (see TryGetHoverPreviewCenter), so the last
+        // hovered squad is cached. 0 is "no squad hovered" in UIManager and no real squad carries it.
+        private int _previewHoveredSquadId = 0;
+        private Entity _previewHoveredEntity = Entity.Null;
         // Lifts the blast ring clear of the ground it is drawn on. Matches the 0.5 the Archer
         // Range Drawer prefab authors on its own ground discs.
         private const float BLAST_RING_GROUND_OFFSET = 0.5f;
@@ -213,11 +217,68 @@ namespace TJ
             return true;
         }
 
-        // Position only - the prefab authors the flat 90 degree rotation, and Arrow Parent sits at
-        // identity, so local and world agree.
+        // Position only - the prefab authors the flat 90 degree rotation and every parent up to the
+        // root sits at identity, so local and world agree.
         private void PositionBlastRadiusRing(Vector3 impactPoint)
         {
             blastRadiusRing.transform.position = impactPoint + Vector3.up * BLAST_RING_GROUND_OFFSET;
+        }
+
+        // The single owner of the blast ring's visibility, position and colour. Nothing else may
+        // touch it: TurnOnRangedFire / TurnOffRangedFire / RecalculateArrowPath all used to, and any
+        // one of them would clobber a preview shown while the arrow itself is off.
+        //
+        // The ring is parented to the prefab root rather than to Arrow Parent for the same reason -
+        // Arrow Parent is deactivated wholesale whenever the arrow is hidden.
+        private void UpdateBlastRadiusRing(bool isCasting, Vector3 castTargetCenter)
+        {
+            if (!_hasBlastRing) return;
+
+            // A live cast outranks a preview: where the spell is actually going matters more than
+            // where one would go.
+            Vector3 impactPoint = castTargetCenter;
+            bool show = isCasting || TryGetHoverPreviewCenter(out impactPoint);
+
+            blastRadiusRing.gameObject.SetActive(show);
+            if (!show) return;
+
+            PositionBlastRadiusRing(impactPoint);
+            blastRingBloom.SetColor(attackColor);
+            blastRingBloom.Bloom();
+        }
+
+        // The footprint is also worth seeing BEFORE an order exists: a player deciding which squad
+        // to send a mage at wants to know what a cast would cover. Shown on the hovered enemy
+        // whenever this caster is selected.
+        private bool TryGetHoverPreviewCenter(out Vector3 center)
+        {
+            center = Vector3.zero;
+
+            if (!BattleManager.Instance.UnitSelectionManager.SelectedSquadIds.Contains(squadEntity.SquadId)) return false;
+
+            // Negative ids are the enemy, 0 is nothing hovered. The right-click that issues a cast
+            // order only accepts an enemy squad, so previewing on a friendly would advertise an
+            // order the player cannot actually give.
+            int hoveredSquadId = BattleManager.Instance.UIManager.HoveredSquadId;
+            if (hoveredSquadId >= 0) return false;
+
+            // A spent caster has had MageSquad stripped by SquadRanOutOfAmmoSystem and can cast
+            // nothing, so it should stop offering a preview even though it is still a Mage by type.
+            if (!EntityManager.HasComponent<MageSquad>(squadEntity.SelfEntity)) return false;
+
+            // GetSquadEntityFromId builds an EntityQuery and a NativeArray on every call, so it is
+            // paid only when the hovered squad changes, not once per frame per selected mage.
+            if (hoveredSquadId != _previewHoveredSquadId)
+            {
+                _previewHoveredSquadId = hoveredSquadId;
+                _previewHoveredEntity = BattleManager.Instance.SquadManager.GetSquadEntityFromId(hoveredSquadId, true).SelfEntity;
+            }
+
+            if (!EntityManager.Exists(_previewHoveredEntity)) return false;
+            if (!EntityManager.HasComponent<SquadMovementComponent>(_previewHoveredEntity)) return false;
+
+            center = EntityManager.GetComponentData<SquadMovementComponent>(_previewHoveredEntity).SquadCenter;
+            return true;
         }
 
         #endregion
@@ -251,6 +312,18 @@ namespace TJ
             
             if (!PassesSanityChecks()) return;
 
+            // Resolved before the no-orders early-out below, because an unordered mage while the
+            // player hovers an enemy is exactly the case the blast preview exists for. It is also
+            // why UpdateBlastRadiusRing is the sole owner of the ring's visibility: the arrow's own
+            // on/off path cannot express "no arrow, but still show the footprint".
+            bool isCasting = false;
+            Vector3 castTargetCenter = Vector3.zero;
+            if (_isCaster)
+            {
+                isCasting = TryGetCastTargetCenter(out castTargetCenter);
+                UpdateBlastRadiusRing(isCasting, castTargetCenter);
+            }
+
             DynamicBuffer<QueuedOrder> queuedOrders = EntityManager.GetBuffer<QueuedOrder>(squadEntity.SelfEntity);
             if (queuedOrders.Length == 0)
             {
@@ -263,7 +336,6 @@ namespace TJ
                 }
                 _hasValidPath = false;
                 pointTriangle.gameObject.SetActive(false);
-                if (_hasBlastRing) blastRadiusRing.gameObject.SetActive(false);
                 return;
             }
             if (_arrowToggleState == ArrowToggleState.ToggledOn)
@@ -316,13 +388,11 @@ namespace TJ
                 return;
             }
 
-            // Resolved ahead of the draw, unlike the archer branch further down, so the arc and
-            // the blast ring are both right on the frame casting starts instead of a frame later.
+            // Applied ahead of RecalculateArrowPath, unlike the archer branch further down, so the
+            // arc is right on the frame casting starts instead of a frame later. isCasting itself
+            // was resolved at the top of Update, above the no-orders early-out.
             if (_isCaster)
             {
-                bool isCasting = TryGetCastTargetCenter(out Vector3 castTargetCenter);
-                if (isCasting && _hasBlastRing) PositionBlastRadiusRing(castTargetCenter);
-
                 if (isCasting && !isInRangedFire) TurnOnRangedFire();
                 else if (!isCasting && isInRangedFire) TurnOffRangedFire();
             }
@@ -400,7 +470,6 @@ namespace TJ
             movementLine.gameObject.SetActive(false);
             archerAttackArc.gameObject.SetActive(true);
             pointTriangle.gameObject.SetActive(_hasValidPath);
-            if (_hasBlastRing) blastRadiusRing.gameObject.SetActive(_hasValidPath);
         }
         private void TurnOffRangedFire()
         {
@@ -408,7 +477,6 @@ namespace TJ
             movementLine.gameObject.SetActive(true);
             archerAttackArc.gameObject.SetActive(false);
             pointTriangle.gameObject.SetActive(_hasValidPath);
-            if (_hasBlastRing) blastRadiusRing.gameObject.SetActive(false);
         }
         private void RecalculateArrowPath()
         {
@@ -429,7 +497,6 @@ namespace TJ
             // pointTriangle.transform.Rotate(0, 180, 0);
             _hasValidPath = true;
             pointTriangle.gameObject.SetActive(true);
-            if (_hasBlastRing) blastRadiusRing.gameObject.SetActive(isInRangedFire);
 
             if (isInRangedFire)
             {
@@ -464,12 +531,6 @@ namespace TJ
             movementLineBloom.Bloom();
             triangleBloom.Bloom();
             archerRangeBloom.Bloom();
-
-            if (_hasBlastRing)
-            {
-                blastRingBloom.SetColor(color);
-                blastRingBloom.Bloom();
-            }
         }
         private void OnDestroy()
         {

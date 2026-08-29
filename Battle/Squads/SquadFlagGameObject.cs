@@ -22,6 +22,7 @@ namespace TJ
         [SerializeField] private Slider healthBar;
         [SerializeField] private Slider moraleBar;
         [SerializeField] private Slider ammoBar;
+        [SerializeField] private Slider cooldownBar;
         [SerializeField] private QuickOutline.Outline outline;
         [SerializeField] private SquadSFXManager squadSFXManager;
         [SerializeField] private Image minimapImage;
@@ -59,6 +60,11 @@ namespace TJ
         // component check would report false exactly when the readout needs to know.
         bool isMage;
 
+        // Artillery and casters only. Latched at SetUp for the same reason isMage is: the components
+        // the readout reads can be stripped mid-battle, but the unit type cannot change.
+        bool hasCooldown;
+        UnitType unitType;
+
         private static readonly int LowMoraleID = Shader.PropertyToID("_LowMorale");
         private static readonly int AlphaID = Shader.PropertyToID("_Alpha");
         private static readonly int CameraHideID = Shader.PropertyToID("_CameraHide");
@@ -83,7 +89,9 @@ namespace TJ
             normalRarityFlagPostGO.SetActive(!isLegendary);
             legendaryRarityFlagPostGO.SetActive(isLegendary);
             ammunition = _ammunition;
-            isMage = TabletopTavernConstants.Casts(TabletopTavernData.Instance.GetUnitTypeFromUnitName(unitName));
+            unitType = TabletopTavernData.Instance.GetUnitTypeFromUnitName(unitName);
+            isMage = TabletopTavernConstants.Casts(unitType);
+            hasCooldown = TabletopTavernConstants.HasVisibleCooldown(unitType);
             broken = false;
             _block = new MaterialPropertyBlock();
 
@@ -108,7 +116,8 @@ namespace TJ
 
             this.gameObject.SetActive(true);
             Team team = _squadId < 0 ? Team.Enemy : Team.Player;
-            healthBarGO = battleManager.UIManager.LoadHealthbar(healthBarTransform, team, squadId, ammunition, unitName == UnitName.Gate);
+            healthBarGO = battleManager.UIManager.LoadHealthbar(healthBarTransform, team, squadId, ammunition, unitName == UnitName.Gate, hasCooldown);
+            cooldownBar = healthBarGO.CooldownSlider;
             healthBar = healthBarGO.HealthSlider;
             healthBar.value = 1;
 
@@ -245,6 +254,23 @@ namespace TJ
                     if(battleManager.SquadManager.SquadRangeDrawers.ContainsKey(squadId))
                         battleManager.SquadManager.SquadRangeDrawers[squadId].SwitchToMelee(true);
                 }
+            }
+            void HandleCooldownBar()
+            {
+                if (!hasCooldown) return;
+                if (cooldownBar == null) return;
+
+                // A spent mage has had MageSquad and MageCast stripped by SquadRanOutOfAmmoSystem and
+                // is a melee body from then on, so there is nothing left to count down to. TryGet
+                // reports false for it, and the row is retired rather than frozen at its last value.
+                if (!SquadCooldown.TryGet(EntityManager, squadEntity, unitType, out float progress, out _))
+                {
+                    if (cooldownBar.gameObject.activeSelf) cooldownBar.gameObject.SetActive(false);
+                    return;
+                }
+
+                if (!cooldownBar.gameObject.activeSelf) cooldownBar.gameObject.SetActive(true);
+                cooldownBar.value = progress;
             }
             void HandleExhausted()
             {
@@ -434,6 +460,7 @@ namespace TJ
             if (isGate) return;
             HandleMoraleBar();
             HandleAmmoBar();
+            HandleCooldownBar();
             HandleExhausted();
             HandleWeaponStrengthBonuses();
             HandleArmorSundered();

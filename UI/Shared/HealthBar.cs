@@ -6,9 +6,11 @@ namespace TJ
     public class HealthBar : MonoBehaviour
     {
         [SerializeField] private Slider healthSlider, moraleSlider, ammoSlider;
+        [SerializeField] private Slider cooldownSlider;
         public Slider HealthSlider => healthSlider;
         public Slider MoraleSlider => moraleSlider;
         public Slider AmmoSlider => ammoSlider;
+        public Slider CooldownSlider => cooldownSlider;
         [SerializeField] private Image brokenImage;
         [SerializeField] private Image fill;
         public Image Fill => fill;
@@ -44,11 +46,21 @@ namespace TJ
         private bool _isOutOfAmmo = false;
         public bool IsOutOfAmmo => _isOutOfAmmo;
         
-        public void SetUp(Team _team, Transform _squadTransform, int ammunition, bool isGate)
+        public void SetUp(Team _team, Transform _squadTransform, int ammunition, bool isGate, bool hasCooldown)
         {
             squadTransform = _squadTransform;
             fill.color = _team == Team.Player ? playerColor : enemyColor;
             DisableAllStatusIcons();
+
+            // Only artillery and casters have a cycle worth a bar, so for everything else the row is
+            // switched off entirely rather than sitting empty under the ammo bar.
+            if (cooldownSlider != null)
+            {
+                cooldownSlider.gameObject.SetActive(hasCooldown);
+                cooldownSlider.minValue = 0f;
+                cooldownSlider.maxValue = 1f;
+                cooldownSlider.value = 1f;
+            }
             
             if (ammunition > 0)
             {
@@ -89,6 +101,7 @@ namespace TJ
             healthSlider.gameObject.SetActive(false);
             moraleSlider.gameObject.SetActive(false);
             ammoSlider.gameObject.SetActive(false);
+            if (cooldownSlider != null) cooldownSlider.gameObject.SetActive(false);
 
             DisableAllStatusIcons();
             DisablePrestigeIcons();
