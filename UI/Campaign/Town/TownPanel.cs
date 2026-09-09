@@ -231,6 +231,11 @@ namespace TJ.Town
         public async void LoadEnemyCompany()
         {
             garrisonCanvasGroup.CGEnable();
+            // Rebuild from scratch. Nothing guarantees HideEnemyCompany ran first, so without this a second
+            // DisplayTownOptions appends a whole extra set of garrison cards on top of the existing ones.
+            foreach (Transform child in garrisonTroopTransform) {
+                Destroy(child.gameObject);
+            }
             List<SquadDisplayCardMenu> enemySquadsCards = new ();
             foreach (SquadToLoad squad in campaignSaveManager.SaveData.townData.townGarrisonUnits)
             {

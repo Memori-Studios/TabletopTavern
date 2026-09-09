@@ -49,6 +49,34 @@ namespace TJ
         [SerializeField] private Image raceColorImage2;
         [SerializeField] private MemoriTooltipTrigger passiveTooltipTrigger;
 
+        // Only casters populate these, and the run-setup / collection copies of this panel are
+        // authored separately, so every field is null-guarded exactly like the cooldown row above.
+        [Header("Mage Spell")]
+        [SerializeField] private GameObject spellGroup;
+        [SerializeField] private TMP_Text spellTitleText;
+        [SerializeField] private TMP_Text spellDescriptionText;
+        [SerializeField] private Image spellIcon;
+        [SerializeField] private Image spellAccentImage;
+        [SerializeField] private Image spellRaceRailImage;
+        [SerializeField] private Image spellRaceGradientImage;
+        [SerializeField] private MemoriTooltipTrigger spellTooltipTrigger;
+        // The "+ Spell: Smite" line that sits in the attribute list alongside "+ Shielded". It has
+        // no UnitAttributesUI component on purpose, so UnitAttributesUIContainer's pool - which
+        // finds its children with GetComponentsInChildren<UnitAttributesUI> - never adopts or
+        // destroys it.
+        [SerializeField] private GameObject spellAttributeLine;
+        [SerializeField] private TMP_Text spellAttributeText;
+        // Holds the spell card out in the right-hand column. Deliberately NOT parented under the
+        // bonus stack: that stack is hidden by scaling its parent to zero, and this card stays
+        // visible whether or not the panel is hovered.
+        [SerializeField] private RectTransform spellBonusRoot;
+
+        // Matches SpellLoadoutSlot / SpellBrowseSlot, so a spell reads the same here, in the
+        // grimoire, in its loadout slot and on the battle hotbar.
+        private const float SPELL_RAIL_ALPHA = 0.9f;
+        // Mirrors the VerticalLayoutGroup spacing on Unit Bonuses Parent.
+        private const float BONUS_STACK_SPACING = 10f;
+
         [Header("Battlefield Attributes")]
         [SerializeField] private UnitAttributesUI inForestAttribute;
         [SerializeField] private UnitAttributesUI inSwampAttribute, isChargingAttribute, inCombatAttribute, isTerrifiedAttribute, isExhaustedAttribute, isOutOfAmmoAttribute, bloodFrenzyAttribute, rageAttribute, armorSunderedAttribute, isOnFireAttribute, garrisonDefenderAttribute, defendersResolveAttribute;
@@ -389,6 +417,7 @@ namespace TJ
             unitRarityText.text = LocalizationManager.Instance.GetText(squadStats.RarityTier.ToString());
 
             LoadRacePassive();
+            LoadMageSpell();
 
             tooltipCanvasGroup.CGEnable();
 
@@ -396,6 +425,9 @@ namespace TJ
             LayoutRebuilder.ForceRebuildLayoutImmediate(transform as RectTransform);
             unitAttributesUIContainer.Refresh();
             unitStatsUIContainer.Refresh();
+
+            // Needs the bonus boxes to have been laid out, so it runs after the rebuild above.
+            PositionSpellBonus();
 
             healthbarText.text = $"{health}";
             healthBarSlider.maxValue = maxHealth;
@@ -418,6 +450,104 @@ namespace TJ
             passiveNameText.text = passiveName;
 
             passiveTooltipTrigger.SetUpToolTip(_title: passiveName, _description: passiveDesc);
+        }
+        private void LoadMageSpell()
+        {
+            // Gate on the predicate rather than a bare unitType comparison, so a future caster
+            // type is covered for free.
+            bool casts = TabletopTavernConstants.Casts(squadStats.unitType);
+
+            TJ.Spells.SpellData spell = null;
+            if (casts)
+            {
+                spell = TabletopTavernData.Instance.SquadAssetsDictionary[squadStats.unitName].mageSpell;
+                // EntityWatcher already logs this authoring error loudly at spawn, so stay quiet here.
+            }
+
+            if (spell == null)
+            {
+                ShowSpellUI(false);
+                return;
+            }
+
+            ShowSpellUI(true);
+
+            string spellName = LocalizationManager.Instance.GetText(spell.Spell.ToString());
+            // Already run through ColorData.XMLTagColorApplicator - do not apply it a second time.
+            string spellDescription = spell.GetLocalizedSpellDescription();
+
+            string spellLabel = LocalizationManager.Instance.GetText("Spell");
+            if (spellTitleText != null) spellTitleText.text = $"{spellLabel} - {spellName}";
+            if (spellDescriptionText != null) spellDescriptionText.text = spellDescription;
+
+            // Display pair, not the passive pair: the icons are white sprites and the passive
+            // colours are banner fills, four of which are too dark to read as a glyph.
+            Color factionColour = ColorData.GetRaceDisplayColor(spell.Race);
+
+            if (spellIcon != null)
+            {
+                spellIcon.sprite = spell.SpellSprite;
+                spellIcon.color = factionColour;
+            }
+
+            // The glow disc behind the icon, the rail and the wash all carry the faction. Tinting
+            // the disc here is what stops it keeping the red it inherited from the faction block.
+            if (spellAccentImage != null) spellAccentImage.color = factionColour;
+            if (spellRaceRailImage != null)
+                spellRaceRailImage.color = ColorData.WithAlpha255(factionColour, SPELL_RAIL_ALPHA * 255f);
+            if (spellRaceGradientImage != null)
+                spellRaceGradientImage.color = ColorData.GetRaceDisplayTint(spell.Race);
+
+            if (spellTooltipTrigger != null)
+                spellTooltipTrigger.SetUpToolTip(_title: spellName, _description: spellDescription);
+
+            if (spellAttributeText != null)
+                spellAttributeText.text = $"{spellLabel}: {spellName}";
+
+            // The attribute pool instantiates its entries into this parent, so anything authored
+            // there starts out above them. Push this line back to the bottom every load.
+            if (spellAttributeLine != null) spellAttributeLine.transform.SetAsLastSibling();
+        }
+
+        private void ShowSpellUI(bool show)
+        {
+            if (spellGroup != null && spellGroup.activeSelf != show) spellGroup.SetActive(show);
+            if (spellAttributeLine != null && spellAttributeLine.activeSelf != show) spellAttributeLine.SetActive(show);
+            if (spellBonusRoot != null && spellBonusRoot.gameObject.activeSelf != show)
+                spellBonusRoot.gameObject.SetActive(show);
+        }
+
+        /// <summary>
+        /// Parks the spell card directly beneath the hover-only bonus boxes.
+        ///
+        /// Their stack is a fixed-height container whose children are laid out from its top, so the
+        /// card cannot simply be the next sibling - it would be scaled away with them. Measuring the
+        /// stack and offsetting by that much keeps the card in the same column and in the same
+        /// reading order, while staying visible on its own.
+        ///
+        /// Called after the layout rebuild in <see cref="Load"/>, because the boxes have no resolved
+        /// height before it.
+        /// </summary>
+        private void PositionSpellBonus()
+        {
+            if (spellBonusRoot == null || !spellBonusRoot.gameObject.activeSelf) return;
+            if (unitAttributesUIContainer == null) return;
+
+            Transform bonuses = unitAttributesUIContainer.UnitBonusesParent;
+            if (bonuses == null) return;
+
+            float stackHeight = 0f;
+            int shown = 0;
+            for (int i = 0; i < bonuses.childCount; i++)
+            {
+                RectTransform box = bonuses.GetChild(i) as RectTransform;
+                if (box == null || !box.gameObject.activeSelf) continue;
+                stackHeight += box.rect.height;
+                shown++;
+            }
+            if (shown > 0) stackHeight += BONUS_STACK_SPACING * shown;
+
+            spellBonusRoot.anchoredPosition = new Vector2(spellBonusRoot.anchoredPosition.x, -stackHeight);
         }
         private void HandlePrestige()
         {

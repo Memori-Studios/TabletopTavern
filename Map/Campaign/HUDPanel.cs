@@ -262,18 +262,26 @@ namespace TJ.Map
                 }
             }
         }
-        private void RefreshTroopsPanel()
+        // Public so a rejected card drop can ask for the rebuild it would otherwise have got for free from
+        // OnArmyStructureChanged (see SquadDisplayCardMenu.OnEndDrag).
+        public void RefreshTroopsPanel()
         {
             // Debug.Log($"Refreshing troops panel");
+
+            // Resolved before the destroy sweeps below, not after. RecordGameOver deletes the campaign save
+            // (CampaignSaveManager.saveData = null) while this panel is still on screen underneath the
+            // game-over panel, and reading playerArmy after clearing the cards would wipe the panel and
+            // then throw on the way to refilling it.
+            SquadToLoad[] playerSquads = campaignSaveManager.SaveData?.playerArmy;
+            if (playerSquads == null) return;
+
             playerSquadsCards = new List<SquadDisplayCardMenu>();
             foreach (Transform child in deployedUnitsParent) Destroy(child.gameObject);
             foreach (Transform child in reserveUnitsParent) Destroy(child.gameObject);
             emptySquadCards = new();
 
-            SquadToLoad[] playerSquads = CampaignManager.Instance.CampaignSaveManager.SaveData.playerArmy;
             deployedTroopsCount = 0;
             reserveTroopsCount = 0;
-            if(playerSquads == null) return;
             int maxArmySize = 10 + campaignSaveManager.MaxReserveSlots;
             for (int i = 0; i < playerSquads.Length && i < maxArmySize; i++)
             {
@@ -551,12 +559,17 @@ namespace TJ.Map
         // Returns the playerArmy index a card would land on if appended to the end of the packed region, or -1 if the region is full.
         public int GetFirstEmptySlotIndex(bool _deployedRegion, SquadDisplayCardMenu _exclude)
         {
+            // No army to place into once the run has ended and the save was deleted - report the region as
+            // full so callers reject the drop instead of dereferencing it.
+            SquadToLoad[] playerArmy = campaignSaveManager.SaveData?.playerArmy;
+            if (playerArmy == null) return -1;
+
             Transform parent = _deployedRegion ? deployedUnitsParent : reserveUnitsParent;
             int regionBase = _deployedRegion ? 0 : 10;
             int capacity = _deployedRegion ? 10 : campaignSaveManager.MaxReserveSlots;
             // Clamp to the actual playerArmy length in case MaxReserveSlots was just unlocked
             // mid-run and the save array hasn't been expanded yet (see CampaignSaveManager.EnsureArmyCapacity).
-            capacity = Mathf.Min(capacity, campaignSaveManager.SaveData.playerArmy.Length - regionBase);
+            capacity = Mathf.Min(capacity, playerArmy.Length - regionBase);
 
             int realCount = 0;
             for (int i = 0; i < parent.childCount; i++)
@@ -590,6 +603,16 @@ namespace TJ.Map
             {
                 squadDisplayCardMenu.LockCard(_lock);
             }
+        }
+        // Called once from GameOverPanel.RecordGameOver, which has just deleted the campaign save. The map
+        // and this panel stay on screen underneath the game-over panel, so the cards have to stop taking
+        // input: every mutation path (drag, prestige, disband, rename, consumables) reads
+        // CampaignSaveManager.SaveData, which is now null. Nothing done after the run ends could persist
+        // anyway. Deliberately one-way - nothing unlocks these, the scene is torn down on exit to menu.
+        public void LockForRunEnd()
+        {
+            LockCards(true);
+            ShowConsumablesBlocker();
         }
         public void PrestigeUnit(string _guID)
         {

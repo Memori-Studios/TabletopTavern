@@ -23,7 +23,7 @@ namespace TJ
 
         [Header("Main Buttons")]
         [SerializeField] private Button resumeGameButton;
-        [SerializeField] private Button exitToMenuButton, exitToDesktopButton, abandonRunButton, quickRestartButton, creditsButton, concedeDefeatButton;
+        [SerializeField] private Button exitToMenuButton, exitToDesktopButton, abandonRunButton, quickRestartButton, creditsButton, concedeDefeatButton, collectionButton;
 
         [Header("Abandon Run")]
         [SerializeField] private MemoriCanvasGroup abandonRunConfirmationCanvasGroup;
@@ -72,6 +72,7 @@ namespace TJ
         {
             settingsCanvasGroup.CGDisable();
             resumeGameButton.onClick.AddListener(CloseSettingsPanel);
+            collectionButton.onClick.AddListener(OpenCollectionPanel);
             exitToMenuButton.onClick.AddListener(ExitToMenu);
             exitToDesktopButton.onClick.AddListener(ExitToDesktop);
 
@@ -127,10 +128,25 @@ namespace TJ
             cameraRotationSpeedSlider.AssignMonitoredData(CameraRotationSpeed);
             cameraMovementSpeedSlider.AssignMonitoredData(CameraMovementSpeed);
         }
+        /// <summary>
+        /// Opens the Collection as an additive overlay. The Settings panel deliberately stays open
+        /// underneath: closing it would restore cachedTimeValue and unpause the battle, and fire
+        /// OnSettingsPanelToggled(false) into GameSpeedManager, UIManager and MainMenu. Leaving it
+        /// open also keeps SettingsPanelOpen true, which is what input-gates the battle and map.
+        /// </summary>
+        private void OpenCollectionPanel()
+        {
+            _ = SceneHandler.Instance.OpenOverlayScene(SceneHandler.CollectionScenePath);
+        }
         private void SettingsHotkeyPressed()
         {
+            // The Collection overlay owns Esc while it is up. Without this, Esc over a battle would
+            // run CloseSettingsPanel and unpause the fight behind a still-open Collection, and in
+            // the main menu it would fire OnSettingsPanelToggled into MainMenu.ReturnToMainMenu.
+            if (SceneHandler.Instance.OverlaySceneOpen) return;
+
             Debug.Log($"SettingsManager.SettingsHotkeyPressed() - SettingsPanelOpen: {SettingsPanelOpen}");
-            if(SceneHandler.Instance.CurrentGameState == GameStateEnum.MainMenu) 
+            if(SceneHandler.Instance.CurrentGameState == GameStateEnum.MainMenu)
             {
                 OnSettingsPanelToggled?.Invoke(true);
                 return;

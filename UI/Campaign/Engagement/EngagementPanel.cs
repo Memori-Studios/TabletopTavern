@@ -543,7 +543,11 @@ namespace TJ.Engagement
             }
 
             enemySquadsCards = new ();
-            if (campaignSaveManager.SaveData.enemyArmy == null || campaignSaveManager.SaveData.enemyArmy.Length == 0) return;
+            if (campaignSaveManager.SaveData.enemyArmy == null || campaignSaveManager.SaveData.enemyArmy.Length == 0)
+            {
+                isLoadingEnemyCompany = false; // don't leave OnArmyStructureChanged permanently blocked
+                return;
+            }
             foreach (SquadToLoad squad in campaignSaveManager.SaveData.enemyArmy)
             {
                 // Debug.Log($"squad: {squad.UnitName} - {squad.currentUnitCount}");

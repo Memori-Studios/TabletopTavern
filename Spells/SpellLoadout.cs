@@ -39,6 +39,11 @@ namespace TJ.Spells
             Spell.LesserDamageSpell,
             Spell.LesserWindSpell,
             Spell.LesserWeaponStrengthSpell,
+            // Load-bearing, not decoration: GetGrimoireSpells skips any spell that is neither
+            // always-available nor some hero's signature, so a SpellRegistry entry alone would
+            // render nothing at all.
+            Spell.LesserMending,
+            Spell.LesserEmbers,
         };
 
         #region Renown upgrades

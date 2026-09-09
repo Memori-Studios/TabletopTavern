@@ -25,6 +25,11 @@ namespace TJ.Engagement
                 ConsoleUtility.ClearConsole();
                 autoResolveBattle.RunSimulationLoop();
             }
+            // Needs Play Mode: TabletopTavernData only fills its dictionaries at Awake.
+            if (GUILayout.Button("Test Mage Auto-Resolve")) {
+                ConsoleUtility.ClearConsole();
+                MageAutoResolveTests.RunFromMenu();
+            }
 
             if (DrawDefaultInspector()) {
             }

@@ -88,9 +88,48 @@ partial struct MageSquadFindTargetSystem : ISystem
                 squad.ValueRW.TargetSquadEntity = Entity.Null;
                 queuedOrders.Clear();
             }
+            else if (squadOverrides.AutoTarget && queuedOrders.Length > 0)
+            {
+                // The target is gone - killed, or broken and dropped from the non-broken set. The
+                // Attack order that produced it is still InProgress, and the guard at the bottom
+                // would refuse to issue a replacement, so the mage would hold full charges for the
+                // rest of the battle. Clear it for the same reason the out-of-range path does.
+                queuedOrders.Clear();
+            }
 
             float3 selfCenter = squadMovementComponent.ValueRO.SquadCenter;
-            bool searchForEnemySquads = squad.ValueRO.SquadId > 0;
+            bool selfIsPlayer = squad.ValueRO.SquadId > 0;
+            MageTargetPriority priority = mageSquad.ValueRO.TargetPriority;
+
+            // A buff caster scans its OWN side; everything else scans the opposition. Both cases
+            // reduce to one flag because SquadId sign is the team, so a friendly search is just
+            // the opposite sign to the one an offensive mage would use.
+            bool wantFriendly = priority == MageTargetPriority.FriendlyNearestEnemy;
+            bool searchForEnemySquads = wantFriendly ? !selfIsPlayer : selfIsPlayer;
+
+            // FriendlyNearestEnemy means "the ally doing the fighting", so it needs a point that
+            // stands in for the enemy line to measure allies against. The hostile squad nearest
+            // the mage is a cheap and honest proxy: the mage sits behind its own line, so
+            // whatever is closest to it is the part of the enemy its army is actually engaging.
+            float3 enemyReference = selfCenter;
+            bool hasEnemyReference = false;
+            if (wantFriendly)
+            {
+                float nearestHostileDistance = float.MaxValue;
+                foreach (var (hostileSquad, hostileMovement) in SystemAPI
+                    .Query<RefRO<SquadEntity>, RefRO<SquadMovementComponent>>()
+                    .WithNone<BrokenSquadTag>())
+                {
+                    bool hostileIsEnemy = hostileSquad.ValueRO.SquadId < 0;
+                    if (hostileIsEnemy != selfIsPlayer) continue;
+
+                    float hostileDistance = math.distance(selfCenter, hostileMovement.ValueRO.SquadCenter);
+                    if (hostileDistance >= nearestHostileDistance) continue;
+                    nearestHostileDistance = hostileDistance;
+                    enemyReference = hostileMovement.ValueRO.SquadCenter;
+                    hasEnemyReference = true;
+                }
+            }
 
             // Two candidates tracked at once. The priority rule only applies among squads actually in
             // range; if nothing is in range we still take the nearest, because that is what makes the
@@ -107,6 +146,17 @@ partial struct MageSquadFindTargetSystem : ISystem
                 bool isEnemy = enemySquad.ValueRO.SquadId < 0;
                 if (isEnemy != searchForEnemySquads) continue;
 
+                // Load-bearing only for a friendly search, where the mage is otherwise a valid
+                // candidate at distance zero and would always pick itself.
+                if (enemySquad.ValueRO.SelfEntity == squad.ValueRO.SelfEntity) continue;
+
+                // Nor another caster. A mage is a one-model support unit standing behind the line,
+                // so it is never "the ally doing the fighting" this priority is meant to find -
+                // two mages would otherwise happily buff each other. MageSquad is the right test
+                // rather than UnitType: a spent mage has traded it for MeleeSquad and by then is a
+                // legitimate front-line body to buff.
+                if (wantFriendly && entityManager.HasComponent<MageSquad>(enemySquad.ValueRO.SelfEntity)) continue;
+
                 float distance = math.distance(selfCenter, enemyMovement.ValueRO.SquadCenter);
 
                 if (distance < nearestDistance)
@@ -119,9 +169,12 @@ partial struct MageSquadFindTargetSystem : ISystem
 
                 float score = ScoreCandidate(
                     ref entityManager,
-                    mageSquad.ValueRO.TargetPriority,
+                    priority,
                     enemySquad.ValueRO.SelfEntity,
-                    distance);
+                    distance,
+                    enemyMovement.ValueRO.SquadCenter,
+                    enemyReference,
+                    hasEnemyReference);
 
                 if (score > bestInRangeScore)
                 {
@@ -159,7 +212,8 @@ partial struct MageSquadFindTargetSystem : ISystem
     // Higher is better. Distance is folded in as a small negative term so that ties break toward the
     // closer squad and every rule stays a single comparable float.
     private static float ScoreCandidate(ref EntityManager entityManager, MageTargetPriority priority,
-        Entity candidate, float distance)
+        Entity candidate, float distance, float3 candidateCenter, float3 enemyReference,
+        bool hasEnemyReference)
     {
         switch (priority)
         {
@@ -171,10 +225,17 @@ partial struct MageSquadFindTargetSystem : ISystem
                     modelCount = entityManager.GetBuffer<EntityReferenceBufferElement>(candidate).Length;
                 return modelCount - distance * 0.01f;
 
-            // FriendlyNearestEnemy and ChargingEnemy are declared for the Gruntkin and Drakosaur
-            // mages and are not implemented yet. No shipped SpellData selects them, so this is
-            // unreachable rather than a silent wrong answer - but implement them before authoring
-            // either spell.
+            case MageTargetPriority.FriendlyNearestEnemy:
+                // Buff whichever ally is closest to the fighting. With no live opponent there is
+                // no front line to measure against, so fall back to the nearest ally rather than
+                // picking arbitrarily - which is also the sane answer once a battle is won.
+                if (!hasEnemyReference) return -distance;
+                return -math.distance(candidateCenter, enemyReference);
+
+            // ChargingEnemy is still declared but unimplemented. Primal Quake was the design it
+            // was written for and deliberately ships on NearestEnemy instead - a charge-hunter
+            // idles whenever nothing is charging, which a unit with three casts cannot afford.
+            // Kept as a tuning upgrade; no shipped SpellData selects it.
             case MageTargetPriority.NearestEnemy:
             default:
                 return -distance;

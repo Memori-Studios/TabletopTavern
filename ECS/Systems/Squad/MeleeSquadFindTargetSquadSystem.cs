@@ -46,10 +46,22 @@ partial struct SquadFindTargetSquadSystem : ISystem
             ChargeSquad,
             InCombat,
             WithdrawSquadTag>()
+        // MageSquad is excluded here. This list predates UnitType.Mage and only named RangedSquad,
+        // the archer/artillery marker, so every mage fell through and was targeted as melee: nearest
+        // enemy, issued as an Attack order, which added ChargeSquad and locked MageSquadFindTargetSystem
+        // out for the rest of the battle (it carries .WithNone<ChargeSquad>()).
+        //
+        // Invisible for offensive casters, since nearest-enemy is a plausible answer for them, though it
+        // did quietly override DensestEnemyCluster. A FriendlyNearestEnemy buff caster is what exposed
+        // it: it kept being handed an enemy and charging across the field alone.
+        //
+        // SquadRanOutOfAmmoSystem swaps MageSquad for MeleeSquad once charges are spent, so a burnt-out
+        // mage correctly rejoins melee targeting here.
         .WithNone<
             CavalryFlankingTag,
             SquadMoveOverrideTag,
             RangedSquad>()
+        .WithNone<MageSquad>()
         .WithNone<
             StartChargeTag>()
         ){

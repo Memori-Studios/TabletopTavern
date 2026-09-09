@@ -242,6 +242,28 @@ namespace Memori.SaveData
         // Populated lazily on first LoadPlayerSaveData(); invalidated by DeletePlayerSaveData().
         static PlayerSaveData _playerCache;
 
+        // Root directory every save file is read from and written to. Null means the real one.
+        // Nothing in the game should ever set this: it exists so a test run can point the whole save
+        // layer at a temp directory and be structurally unable to read or overwrite a player's save.
+        static string _saveRootOverride;
+
+        /// <summary>Where save files live. Defaults to Application.persistentDataPath.</summary>
+        public static string SaveRoot => _saveRootOverride ?? Application.persistentDataPath;
+
+        /// <summary>
+        /// Redirects every save read and write to <paramref name="root"/>, or back to the real save
+        /// directory when passed null.
+        ///
+        /// Dropping _playerCache is load-bearing rather than tidiness: it is an in-memory copy of the
+        /// PREVIOUS root's file, and LoadPlayerSaveData returns it before ever touching disk, so
+        /// without this a redirected read would be served the old root's data.
+        /// </summary>
+        public static void SetSaveRoot(string root)
+        {
+            _saveRootOverride = root;
+            _playerCache = null;
+        }
+
         public static bool CheckForGear(GearID _gearID)
         {
             return Load().Gear.Contains(_gearID);
@@ -329,7 +351,7 @@ namespace Memori.SaveData
         }
         private static string GetPath (string filename)
         {
-            return useLocal ? Application.dataPath +"/Data/" +filename : Application.persistentDataPath + "/" + filename;
+            return useLocal ? Application.dataPath + "/Data/" + filename : Path.Combine(SaveRoot, filename);
         }
         private static string ReadFile (string path)
         {

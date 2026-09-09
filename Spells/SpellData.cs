@@ -15,7 +15,17 @@ namespace TJ.Spells
         // registry drives the run-setup grimoire, and GetGrimoireSpells only lists spells that are
         // always-available or some hero's signature, so a unit spell would render as a permanently
         // locked row nobody could ever unlock. A mage reaches its spell through SquadAssets.mageSpell.
-        Smite }
+        Smite,
+        // The per-faction mage spells. All follow the same "keep it out of SpellRegistry" rule as
+        // Smite above - they are cast by units, not by the player, and reach the unit through
+        // SquadAssets.mageSpell.
+        Doomspeak, Veilmist, BloodScent, Foxfire, PrimalQuake, BattleBrew, Runeward,
+        // Common-pool spells, promoted from mage spells to fill the two holes in the always-available
+        // set: it had no heal and no damage-over-time. Separate assets from their mage parents on
+        // purpose - a unit spell carries Mana 0 because units do not spend mana, and tuning one would
+        // otherwise silently rebalance the other. Unlike the mage spells above, these two DO belong in
+        // SpellRegistry and in SpellLoadout.AlwaysAvailableSpells.
+        LesserMending, LesserEmbers }
     // World: raycast ground point, stays fixed. Squad: follows the target squad's live
     // position through warmup and damage resolution.
     public enum SpellTargetingType { World, Squad }

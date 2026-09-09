@@ -39,6 +39,8 @@ namespace TJ.Recruit
         [Header("Unit Rarity")]
         [SerializeField] private Image unitRarityImage;
         [SerializeField] private TMP_Text unitRarityText;
+        [Tooltip("Optional. Only casters show it; it hides itself for everything else.")]
+        [SerializeField] private SpellInfoBlock spellInfoBlock;
 
         RecruitPanel recruitPanel;
         SquadStats squadStats;
@@ -83,6 +85,11 @@ namespace TJ.Recruit
             unitStatsUIContainer = GetComponent<UnitStatsUIContainer>();
             unitStatsUIContainer.Load(squadStats.unitName, true, 0);
 
+            // Before the refreshes below: the block sizes itself to its description, and the card's
+            // ContentSizeFitter has to sum a settled height.
+            if (spellInfoBlock != null && spellInfoBlock.Load(squadStats.unitName, squadStats.unitType))
+                CollapseEmptyAttributesRow();
+
             unitStatsUIContainer.Refresh();
             unitAttributesUIContainer.Refresh();
 
@@ -115,6 +122,26 @@ namespace TJ.Recruit
         public void AddHoverToAttributes()
         {
             unitAttributesUIContainer.EnableHoverBonuses();
+        }
+
+        /// <summary>
+        /// The attribute row reserves a flat 65px via its LayoutElement's minHeight, whether or not
+        /// it has any entries. On a caster that is dead space sitting directly under the spell block,
+        /// and it is what pushes the card past its fixed 580px frame.
+        ///
+        /// Only collapsed when the row is genuinely empty, so a prestige-granted trait on a mage
+        /// still gets its space. Cards are instantiated per recruit, so there is no authored value
+        /// to restore afterwards.
+        /// </summary>
+        private void CollapseEmptyAttributesRow()
+        {
+            if (unitAttributesUIContainer.DisplayedAttributeCount > 0) return;
+
+            Transform attributesParent = unitAttributesUIContainer.UnitAttributesParent;
+            if (attributesParent == null) return;
+
+            LayoutElement layoutElement = attributesParent.GetComponent<LayoutElement>();
+            if (layoutElement != null) layoutElement.minHeight = 0f;
         }
         private void SetUpTierVisuals()
         {

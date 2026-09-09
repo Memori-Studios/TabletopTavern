@@ -34,6 +34,15 @@ partial struct EnemyArmyTargetOverrideSystem : ISystem
             WithdrawSquadTag>()
         .WithNone<
             CavalryFlankingTag>()
+        // Mages are excluded: they have their own find-target system, exactly as artillery does,
+        // and this override would undo it. It writes TargetSquadEntity directly and adds
+        // StartChargeTag, so an enemy caster loses the squad MageSquadFindTargetSystem chose and
+        // charges the nearest player squad instead - which for a FriendlyNearestEnemy buff caster
+        // means abandoning the ally it was about to heal and walking the length of the field alone.
+        // It also silently replaced DensestEnemyCluster with "closest" for every enemy Smite/Foxfire
+        // caster. SquadRanOutOfAmmoSystem strips MageSquad once the charges are spent, so a burnt-out
+        // mage is a plain melee body again and correctly falls back under this system.
+        .WithNone<MageSquad>()
         ){
 
             // Prune expired kiter-blacklist entries so an abandoned target becomes eligible again.

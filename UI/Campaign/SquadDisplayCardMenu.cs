@@ -84,6 +84,9 @@ namespace TJ
         GameObject shiftPreviewPlaceholder;
         bool lastValidRegionIsDeployed;
         GameObject originSlotMarker;
+        // OnBeginDrag locks every card (including this one) so the rest of the panel stops reacting, so
+        // isLocked cannot be the guard for OnDrag/OnEndDrag - they key off this instead.
+        bool dragActive;
 
         public void SetUp(SquadToLoad _squad, bool _inReserve, HUDPanel _hudPanel = null, bool _isEnemy = false)
         {
@@ -424,7 +427,10 @@ namespace TJ
         }
         public void OnBeginDrag(PointerEventData eventData)
         {
-            if (isEnemy) return;
+            // A locked card is either mid-drag on another card or belongs to a run that has already ended
+            // (see HUDPanel.LockForRunEnd) - in the latter case the campaign save is null and every commit
+            // path below would throw.
+            if (isEnemy || isLocked) return;
 
             Vector3 ogWorldPosition = transform.position;
             ogParent = transform.parent;
@@ -459,10 +465,14 @@ namespace TJ
             hudPanel.LockCards(true);
             OnPointerEnter(null);
             hudPanel.DestroyEmptySquadCards();
+
+            // Latched last so a throw above leaves OnDrag/OnEndDrag inert rather than running their
+            // cleanup against a half-built drag.
+            dragActive = true;
         }
         public void OnDrag(PointerEventData eventData)
         {
-            if (isEnemy) return;
+            if (!dragActive) return;
 
             transform.position = eventData.position;
 
@@ -576,32 +586,60 @@ namespace TJ
         }
         public void OnEndDrag(PointerEventData eventData)
         {
-            if (isEnemy) return;
+            if (!dragActive) return;
+            dragActive = false;
 
             if (layoutElement != null)
                 layoutElement.ignoreLayout = false;
 
+            // OnBeginDrag leaves the panel in a state only a rebuild undoes: the empty-slot cards destroyed,
+            // an origin marker spawned, this card parked at the last sibling index, and possibly a swap
+            // preview holding another card in the wrong parent. A committed drop gets that rebuild for free
+            // from OnArmyStructureChanged. A rejected drop (target region full) and a throw do not, so both
+            // have to ask for it here - otherwise the mangled layout, the locked cards and this card's
+            // boosted sorting order all persist for the rest of the session.
+            bool committed = false;
+            try
+            {
+                committed = CommitDrag();
+            }
+            finally
+            {
+                if (!committed)
+                {
+                    RevertHoverPreview();
+                    hudPanel.RefreshTroopsPanel();
+                }
+
+                if (originSlotMarker != null) Destroy(originSlotMarker);
+                originSlotMarker = null;
+
+                OnPointerExit(null);
+                hudPanel.LockCards(false);
+                canvas.sortingOrder = 2;
+                healthBarTextCanvas.sortingOrder = 101;
+            }
+        }
+        // Writes the drop into the army. Returns true only when the save actually changed, which is also
+        // the signal that OnArmyStructureChanged has already rebuilt the panel.
+        bool CommitDrag()
+        {
             if (hoveredCard != null)
             {
                 if (previewIsShift)
                     hudPanel.ShiftUnit(UniqueID, hoveredCard.SquadId);
                 else
                     hudPanel.MoveUnit(UniqueID, hoveredCard.SquadId);
-            }
-            else
-            {
-                int targetIndex = hudPanel.GetFirstEmptySlotIndex(lastValidRegionIsDeployed, this);
-                if (targetIndex >= 0)
-                {
-                    hudPanel.MoveUnit(UniqueID, targetIndex);
-                    CampaignManager.Instance.CampaignSaveManager.ReorderUnits();
-                }
+                return true;
             }
 
-            OnPointerExit(null);
-            hudPanel.LockCards(false);
-            canvas.sortingOrder = 2;
-            healthBarTextCanvas.sortingOrder = 101;
+            // -1 means the region the card was released over is full, so the drop is rejected outright.
+            int targetIndex = hudPanel.GetFirstEmptySlotIndex(lastValidRegionIsDeployed, this);
+            if (targetIndex < 0) return false;
+
+            hudPanel.MoveUnit(UniqueID, targetIndex);
+            CampaignManager.Instance.CampaignSaveManager.ReorderUnits();
+            return true;
         }
         public void SpawnInJuice(bool makeInteractable)
         {

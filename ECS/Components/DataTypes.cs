@@ -84,6 +84,28 @@ public enum UnitName
     // value alone, so mod JSON and the override loaders never have to deal with encoding, and this
     // file stays pure ASCII.
     HexenjagerMage,
+
+    // The per-faction mage roster. Each casts a mechanic that already ships for some OTHER race, so
+    // no mage repeats a hero spell of its own faction. ASCII only - Onmyoji carries a macron in the
+    // localization value alone.
+    //
+    // Raven Host. Doomspeak, an enemy morale drain, borrowed from Sanguine Court's Dread.
+    Cairnwitch,
+    // Taelindor Forest. Veilmist, an enemy accuracy debuff, borrowed from Sakura's Smokescreen.
+    NytherialSeer,
+    // Sanguine Court. Blood Scent, a damage-amplifying mark, borrowed from Iron Legion's Hunter's Mark.
+    SableConsort,
+    // Sakura Dynasty. Foxfire, a lingering damage zone, borrowed from Drakosaur's Venomous Bite.
+    OnmyojiDiviner,
+    // Drakosaur Brood. Primal Quake, knockback and scatter, borrowed from Raven Host's Cyclone.
+    QuakescaleElder,
+    // The two friendly-target casters. Both depend on MageTargetPriority.FriendlyNearestEnemy,
+    // which is why they landed after the six enemy-facing mages rather than alongside them.
+    //
+    // Gruntkin. Battle Brew, a friendly heal over time, borrowed from Taelindor's Healing Grove.
+    GutrotShaman,
+    // Deepstone Hold. Runeward, a friendly brace, borrowed from Raven Host's Shieldwall.
+    Glyphwright,
 }
 [System.Serializable] public struct SquadSpawnData {
     public int squadId;

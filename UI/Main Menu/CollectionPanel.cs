@@ -12,11 +12,17 @@ using Memori.Steamworks;
 using Memori.Input;
 using MoreMountains.Feedbacks;
 using Memori.Localization;
+using UnityEngine.Serialization;
 
 namespace TJ.MainMenu
 {
-    public class CollectionPanel : MainMenuPanel
+    [RequireComponent(typeof(MemoriCanvasGroup))]
+    public class CollectionPanel : MonoBehaviour
     {
+        private MemoriCanvasGroup panelCanvasGroup;
+        [FormerlySerializedAs("returnToMainMenuButton")]
+        [SerializeField] private Button closeButton;
+
         [Header("Gear")]
         [SerializeField] private Transform gearCardParent;
         [SerializeField] private TMP_Text gearCountText;
@@ -45,10 +51,6 @@ namespace TJ.MainMenu
         [SerializeField] private CollectionRaceParent deepstoneHoldCardParent;
         [SerializeField] private CollectionRaceButton drakosaurBroodButton;
         [SerializeField] private CollectionRaceParent drakosaurBroodCardParent;
-
-        [Header("Total Collection")]
-        [SerializeField] private TMP_Text totalCollectionText;
-        [SerializeField] private GameObject collectionUnacknowledgedIndicator;
 
         [Header("Buttons")]
         [SerializeField] private MemoriButtonV2 gearButton;
@@ -86,7 +88,7 @@ namespace TJ.MainMenu
         [SerializeField] private GameObject heroDetailsPanel;
 
         private string collectionType = "gear";
-        private bool unacknowledgedAnything, gearUnacknowledged, potionsUnacknowledged;
+        private bool gearUnacknowledged, potionsUnacknowledged;
         private Dictionary<Race, bool> raceUnacknowledged = new();
 
         private RaceConfig[] raceConfigs;
@@ -95,16 +97,20 @@ namespace TJ.MainMenu
         [System.Serializable]
         private class RaceConfig
         {
-            public string[] unitIds;
+            // Roster cached once. GetUnitsOfRace does unitNames.ToArray() on every call, so reading
+            // it per use previously cost ~40 array allocations per build.
+            public UnitName[] units;
+            // Cards are built the first time this race's tab is opened, not during SetUp.
+            public bool cardsBuilt;
             public CollectionRaceParent cardParent;
             public CollectionRaceButton button;
             public Race raceType;
             public string collectionTypeKey;
             public Hero hero1, hero2;
 
-            public RaceConfig(UnitName[] unitIds, CollectionRaceParent cardParent, CollectionRaceButton button, Race raceType, string collectionTypeKey, Hero hero1, Hero hero2)
+            public RaceConfig(UnitName[] units, CollectionRaceParent cardParent, CollectionRaceButton button, Race raceType, string collectionTypeKey, Hero hero1, Hero hero2)
             {
-                this.unitIds = Array.ConvertAll(unitIds, id => id.ToString());
+                this.units = units;
                 this.cardParent = cardParent;
                 this.button = button;
                 this.raceType = raceType;
@@ -114,9 +120,20 @@ namespace TJ.MainMenu
             }
         }
 
-        public override void SetUp(MainMenu _mainMenu)
+        private void Awake()
         {
-            base.SetUp(_mainMenu);
+            panelCanvasGroup = GetComponent<MemoriCanvasGroup>();
+        }
+
+        public void SetUp(Action onClose)
+        {
+            if (closeButton == null)
+                Debug.LogError("[CollectionPanel] closeButton is not assigned - the panel cannot be closed.");
+            else
+            {
+                closeButton.onClick.RemoveAllListeners();
+                closeButton.onClick.AddListener(() => onClose());
+            }
 
             // Setup buttons
             SetupButtons();
@@ -133,14 +150,13 @@ namespace TJ.MainMenu
             // Load all races
             LoadAllRaces();
 
-            // Update totals and achievements
-            UpdateTotalsAndAchievements();
-
             CheckForAcknowledged();
             gearCanvasGroup.CGEnable();
             SetupRotationButtons();
 
             OpenCollectionType("gear");
+
+            StartCoroutine(EvaluateCollectionAchievements());
         }
 
         private void SetupButtons()
@@ -171,6 +187,7 @@ namespace TJ.MainMenu
         {
             raceConfigs = new RaceConfig[]
             {
+                // The arrays passed here are the only GetUnitsOfRace calls in the whole build now.
                 new(TabletopTavernData.Instance.GetUnitsOfRace(Race.IronLegion), ironLegionRaceParent, ironLegionRaceButton, Race.IronLegion, "ironlegion", HeroData.EdricValeward, HeroData.RhydanGreythorne),
                 new(TabletopTavernData.Instance.GetUnitsOfRace(Race.Gruntkin), greenTideCardParent, greenTideButton, Race.Gruntkin, "Gruntkin", HeroData.BoblinTheGoblinKing, HeroData.KragmukGorethirster),
                 new(TabletopTavernData.Instance.GetUnitsOfRace(Race.RavenHost), ravenhostCardParent, ravenhostButton, Race.RavenHost, "ravenhost", HeroData.BjornIronskull, HeroData.FreyjaStormweaver),
@@ -193,16 +210,15 @@ namespace TJ.MainMenu
             List<int> gearIdsAsInts = SaveDataHandler.GetGearIDsCollected();
             List<int> gearIdsAcknowledged = SaveDataHandler.GetGearIDsAcknowledged();
 
+            int collectedCount = 0;
             for (int i = 0; i < allGear.Length; i++)
             {
                 bool isCollected = gearIdsAsInts.Contains((int)allGear[i]);
                 bool acknowledged = gearIdsAcknowledged.Contains((int)allGear[i]);
                 gearCards[i].LoadGearCard(allGear[i], isCollected, acknowledged, this);
+                if (isCollected) collectedCount++;
             }
-            int collectedCount = allGear.Count(g => gearIdsAsInts.Contains((int)g));
             gearCountText.text = $"{collectedCount}/{allGear.Length}";
-
-            SaveDataHandler.EvaluateGearCollection();
         }
 
         private void LoadPotions()
@@ -212,37 +228,62 @@ namespace TJ.MainMenu
             List<int> potionsIdsAsInts = SaveDataHandler.GetPotionsIDsCollected();
             List<int> potionsIdsAcknowledged = SaveDataHandler.GetPotionsIDsAcknowledged();
 
+            int collectedCount = 0;
             for (int i = 0; i < consumables.Length; i++)
             {
                 bool isCollected = potionsIdsAsInts.Contains((int)consumables[i]);
                 bool acknowledged = potionsIdsAcknowledged.Contains((int)consumables[i]);
                 potionsCards[i].LoadConsumableCard(consumables[i], isCollected, acknowledged, this);
+                if (isCollected) collectedCount++;
             }
-            int collectedCount = consumables.Count(c => potionsIdsAsInts.Contains((int)c));
             potionsCountText.text = $"{collectedCount}/{consumables.Length}";
-
-            SaveDataHandler.EvaluateConsumableCollection();
         }
 
+        /// <summary>
+        /// Only refreshes the eight race buttons. Building their cards used to happen here and cost
+        /// ~446ms of a ~448ms SetUp - 112 instantiations of a 156-object prefab, every one of them
+        /// hidden immediately because the panel opens on the gear tab. Cards are now built by
+        /// EnsureRaceCardsBuilt the first time a race is actually opened.
+        /// </summary>
         private void LoadAllRaces()
         {
-            List<UnitName> unitsRecruitedIdsAsInts = SaveDataHandler.GetTroopsIDsCollected();
-            List<UnitName> troopsIdsAcknowledged = SaveDataHandler.GetTroopsIDsAcknowledged();
+            List<UnitName> troopsCollected = SaveDataHandler.GetTroopsIDsCollected();
 
             foreach (var config in raceConfigs)
             {
-                LoadRace(config, unitsRecruitedIdsAsInts, troopsIdsAcknowledged);
-                SaveDataHandler.EvaluateRaceCollection(config.raceType);
+                int collectedCount = 0;
+                foreach (UnitName unitId in config.units)
+                    if (troopsCollected.Contains(unitId)) collectedCount++;
+
+                config.button.UnitCountText.text = $"{collectedCount}/{config.units.Length}";
+
+                // Nothing is visible yet, so keep every card container switched off. A CanvasGroup at
+                // alpha 0 does NOT deactivate its children, so without this the hidden races' cards
+                // would keep their Animators ticking for the whole session.
+                config.cardParent.RaceUnitsParent.gameObject.SetActive(false);
             }
         }
 
-        private void LoadRace(RaceConfig config, List<UnitName> unitsRecruited, List<UnitName> acknowledged)
+        /// <summary>
+        /// Builds one race's unit cards, once. Costs roughly 4ms per card, so about 56ms for a
+        /// 14-unit roster - a brief hitch on the first click of a tab, and free thereafter.
+        /// </summary>
+        private void EnsureRaceCardsBuilt(RaceConfig config)
         {
-            config.cardParent.Clear();
-            int collectedCount = 0;
-            selectedRace = config.raceType;
+            if (config.cardsBuilt) return;
+            config.cardsBuilt = true;
 
-            foreach (UnitName unitId in TabletopTavernData.Instance.GetUnitsOfRace(config.raceType))
+            // Callers must activate RaceUnitsParent first: Instantiate into an inactive parent
+            // skips Awake, and SquadDisplayCard caches its presenter there.
+            if (!config.cardParent.RaceUnitsParent.gameObject.activeInHierarchy)
+                Debug.LogError("[CollectionPanel] Building cards for " + config.raceType + " while its container is inactive - their Awake will not run.");
+
+            List<UnitName> unitsRecruited = SaveDataHandler.GetTroopsIDsCollected();
+            List<UnitName> acknowledged = SaveDataHandler.GetTroopsIDsAcknowledged();
+
+            config.cardParent.Clear();
+
+            foreach (UnitName unitId in config.units)
             {
                 bool isCollected = unitsRecruited.Contains(unitId);
                 bool isAcknowledged = acknowledged.Contains(unitId);
@@ -259,35 +300,26 @@ namespace TJ.MainMenu
                 SquadDisplayCardCollection card = Instantiate(squadDisplayCardCollectionPrefab, config.cardParent.RaceUnitsParent);
                 card.SetUp(squadToLoad, isCollected, isAcknowledged, this, config.raceType);
                 config.cardParent.RaceCardCollection.Add(card);
-
-                if (isCollected) collectedCount++;
             }
-
-            config.button.UnitCountText.text = $"{collectedCount}/{TabletopTavernData.Instance.GetUnitsOfRace(config.raceType).Length}";
-            config.cardParent.ResetLayout();
         }
 
-        private void UpdateTotalsAndAchievements()
+        /// <summary>
+        /// Collection achievements are unrelated to drawing the panel, and each evaluator re-reads
+        /// the save data and re-allocates its roster. Kept off the build frame so they cannot
+        /// contribute to the open cost.
+        /// </summary>
+        private System.Collections.IEnumerator EvaluateCollectionAchievements()
         {
-            GearID[] allGear = GearData.GetGearIDs();
-            ConsumableEnum[] consumables = ConsumableData.GetAllConsumableEnums();
-            List<int> gearIdsAsInts = SaveDataHandler.GetGearIDsCollected();
-            List<int> potionsIdsAsInts = SaveDataHandler.GetPotionsIDsCollected();
+            yield return null;
 
-            int totalCollected = gearIdsAsInts.Count + potionsIdsAsInts.Count;
-            int totalAvailable = allGear.Length + consumables.Length;
+            SaveDataHandler.EvaluateGearCollection();
+            SaveDataHandler.EvaluateConsumableCollection();
 
             foreach (var config in raceConfigs)
             {
-                UnitName[] units = TabletopTavernData.Instance.GetUnitsOfRace(config.raceType);
-                List<UnitName> unitsRecruited = SaveDataHandler.GetTroopsIDsCollected();
-                totalCollected += unitsRecruited.Count(u => units.Contains(u));
-                totalAvailable += units.Length;
+                SaveDataHandler.EvaluateRaceCollection(config.raceType);
+                yield return null;
             }
-
-            totalCollectionText.text = $"{totalCollected}/{totalAvailable}";
-
-            // Achievements are evaluated in LoadGear / LoadPotions / LoadAllRaces, which all run just above.
         }
 
         private void SetupRotationButtons()
@@ -305,15 +337,18 @@ namespace TJ.MainMenu
 
         void Update()
         {
+            // baseObject is destroyed by ClearUnitPrefab, which can happen while a rotate button is held.
+            // Unscaled time because the panel is usable while Settings has paused the battle.
+            if (baseObject == null) return;
+
             if (isRotatingRight)
-                baseObject.transform.Rotate(0, -rotationSpeed * Time.deltaTime, 0);
+                baseObject.transform.Rotate(0, -rotationSpeed * Time.unscaledDeltaTime, 0);
             if (isRotatingLeft)
-                baseObject.transform.Rotate(0, rotationSpeed * Time.deltaTime, 0);
+                baseObject.transform.Rotate(0, rotationSpeed * Time.unscaledDeltaTime, 0);
         }
 
         public void CheckForAcknowledged()
         {
-            unacknowledgedAnything = false;
             gearUnacknowledged = false;
             potionsUnacknowledged = false;
             raceUnacknowledged.Clear();
@@ -327,60 +362,66 @@ namespace TJ.MainMenu
 
             // Check gear
             if (gearCollected.Any(id => !gearAcknowledged.Contains(id)))
-            {
                 gearUnacknowledged = true;
-                unacknowledgedAnything = true;
-            }
 
             // Check potions
             if (potionsCollected.Any(id => !potionsAcknowledged.Contains(id)))
-            {
                 potionsUnacknowledged = true;
-                unacknowledgedAnything = true;
-            }
 
             // Check races
             foreach (var config in raceConfigs)
             {
-                bool hasUnacknowledged = TabletopTavernData.Instance.GetUnitsOfRace(config.raceType)
-                    .Where(unit => troopsCollected.Contains(unit))
-                    .Any(unit => !troopsAcknowledged.Contains(unit));
+                bool hasUnacknowledged = false;
+                foreach (UnitName unit in config.units)
+                {
+                    if (!troopsCollected.Contains(unit)) continue;
+                    if (troopsAcknowledged.Contains(unit)) continue;
+                    hasUnacknowledged = true;
+                    break;
+                }
 
                 raceUnacknowledged[config.raceType] = hasUnacknowledged;
-                if (hasUnacknowledged) unacknowledgedAnything = true;
 
                 config.button.UnacknowledgedIndicator.SetActive(hasUnacknowledged);
             }
 
             gearUnacknowledgedIndicator.SetActive(gearUnacknowledged);
             potionsUnacknowledgedIndicator.SetActive(potionsUnacknowledged);
-            collectionUnacknowledgedIndicator.SetActive(unacknowledgedAnything);
         }
 
-        public override void OpenPanel()
+        public void OpenPanel()
         {
-            base.OpenPanel();
+            if (closeButton != null) EventSystem.current.SetSelectedGameObject(closeButton.gameObject);
+            panelCanvasGroup.CGEnable();
             OpenCollectionType("gear");
             InputHandler.Instance.onUnitCardSelector += OnUnitCardSelector;
         }
 
-        public override void ClosePanel()
+        public void ClosePanel()
         {
-            base.ClosePanel();
+            EventSystem.current.SetSelectedGameObject(null);
+            panelCanvasGroup.CGDisable();
             HideUnitPrefab();
             CheckForAcknowledged();
-            InputHandler.Instance.onUnitCardSelector -= OnUnitCardSelector;
+            // Teardown path now, so guard the same way OnDestroy does.
+            if (InputHandler.HasInstance)
+                InputHandler.Instance.onUnitCardSelector -= OnUnitCardSelector;
         }
 
         private void OpenCollectionType(string type)
         {
             collectionType = type;
             
-            // Hide all
+            // Hide all. Deactivating RaceUnitsParent matters as much as the CanvasGroup: alpha 0
+            // hides a card but leaves it active, so without this every hidden faction's cards keep
+            // their Animators ticking.
             gearCanvasGroup.CGDisable();
             potionsCanvasGroup.CGDisable();
             foreach (var config in raceConfigs)
+            {
                 config.cardParent.RaceCanvasGroup.CGDisable();
+                config.cardParent.RaceUnitsParent.gameObject.SetActive(false);
+            }
 
             HideUnitPrefab();
 
@@ -407,6 +448,13 @@ namespace TJ.MainMenu
                     activeRaceConfig = raceConfigs.FirstOrDefault(r => r.collectionTypeKey == collectionType);
                     if (activeRaceConfig != null)
                     {
+                        // Activate BEFORE building. A GameObject instantiated into an inactive
+                        // parent does not run Awake, so SquadDisplayCard._presenter would still be
+                        // null when SetUp dereferences it.
+                        activeRaceConfig.cardParent.RaceUnitsParent.gameObject.SetActive(true);
+                        // First open of this tab pays for its own cards, roughly 4ms each.
+                        EnsureRaceCardsBuilt(activeRaceConfig);
+                        selectedRace = activeRaceConfig.raceType;
                         activeRaceConfig.cardParent.RaceCanvasGroup.CGEnable();
                         if (activeRaceConfig.cardParent.RaceCardCollection.Count > 0)
                             activeRaceConfig.cardParent.RaceCardCollection[0].OnPointerEnter(null);
@@ -469,6 +517,15 @@ namespace TJ.MainMenu
 
             prefabObject.SetParent(baseObject.transform);
 
+            // The panel is usable while Settings has paused the battle, so the idle animation
+            // must ignore timeScale or the unit stands in a frozen pose.
+            foreach (Animator animator in prefabObject.GetComponentsInChildren<Animator>())
+            {
+                animator.updateMode = AnimatorUpdateMode.UnscaledTime;
+                if (!isCollected)
+                    animator.speed = 0;
+            }
+
             if (!isCollected)
             {
                 foreach (Renderer renderer in prefabObject.GetComponentsInChildren<Renderer>())
@@ -478,8 +535,6 @@ namespace TJ.MainMenu
                         materials[i] = undiscoveredTroopMaterial;
                     renderer.materials = materials;
                 }
-                foreach (Animator animator in prefabObject.GetComponentsInChildren<Animator>())
-                    animator.speed = 0;
             }
 
             troopCamera.enabled = true;
@@ -548,6 +603,9 @@ namespace TJ.MainMenu
                 InputHandler.Instance.onUnitCardSelector -= OnUnitCardSelector;
             _hoverCts?.Cancel();
             _hoverCts?.Dispose();
+            // The panel is destroyed on every scene unload now, so this is the last chance to
+            // release. AddressablesManager.Release is refcount-safe and no-ops on an unknown key.
+            ReleaseRecruitmentPrefab();
         }
         private void OnUnitsButtonClicked()
         {

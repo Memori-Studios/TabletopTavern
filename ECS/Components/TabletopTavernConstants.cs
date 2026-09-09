@@ -108,9 +108,22 @@ public static class TabletopTavernConstants
     //
     // This is the dial. Raise it toward 24 to match ideal geometry, lower it to nerf auto-resolve
     // mages relative to live. It scales automatically with SpellModifierValue, so retuning the
-    // spell does not require touching this; it does NOT scale with SpellRadius, which is fine while
-    // Smite is the only mage spell but wants revisiting if a second one lands with a different one.
+    // spell does not require touching this; it does NOT scale with SpellRadius. All eight mage spells
+    // now share it, and their radii range from 7 to 18, so this is the loosest part of the model -
+    // worth revisiting if area size ever needs to matter in auto-resolve.
     public const int MAGE_AOE_MODELS_HIT = 18;
+
+    // How much of a hit a braced squad shrugs off in auto-resolve, per charge spent on it, as a
+    // reduction to its damageTakenMultiplier. A live brace grants knockback immunity and halves
+    // speed, neither of which auto-resolve models, so its worth is expressed as plain damage
+    // avoidance. Three charges on one squad reach 0.7x, which is a real but not decisive edge.
+    public const float AUTORESOLVE_BRACE_DAMAGE_REDUCTION = 0.10f;
+
+    // What fraction of its ticks a persistent spell is worth in auto-resolve. A zone does not hold a
+    // full complement of models for its whole duration in a live battle - squads walk out of it - so
+    // counting every tick at full width over-values a damage-over-time or heal-over-time spell.
+    // Counting a single tick, which is what this used to do, badly under-values it.
+    public const float AUTORESOLVE_PERSISTENT_SPELL_UPTIME = 0.6f;
 
     // Hysteresis on a mage dropping a target that has walked out of casting range. The drop check
     // only runs while the mage is halted (its find-target query excludes ChargeSquad), but without a

@@ -305,7 +305,9 @@ public class BoxFormation : MonoBehaviour
     // archer-equivalent, so a rank further back would leave it out of range exactly when the
     // archers are in range, and it would walk itself forward out of the back line. If mage range
     // is ever pushed above an archer's, moving it to 4 becomes the correct call.
-    private static int GetTypePriority(UnitType t) => t switch
+    // internal so the UnitTypePredicateGoldenTests golden can lock the mapping. The `_ => 0` default
+    // is the trap: a UnitType appended later silently deploys with the melee line.
+    internal static int GetTypePriority(UnitType t) => t switch
     {
         UnitType.Melee     => 0,
         UnitType.Hybrid    => 1,

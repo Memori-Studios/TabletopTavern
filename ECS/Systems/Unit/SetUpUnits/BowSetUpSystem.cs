@@ -24,6 +24,9 @@ public partial struct BowSetUpSystem : ISystem
                 if (SystemAPI.HasComponent<Parent>(parentEntity))
                 {
                     var grandparentComponent = SystemAPI.GetComponent<Parent>(parentEntity);
+                    // A shallower hierarchy than the archer prefab (placeholder art on a non-archer unit) has no great-grandparent.
+                    if (!SystemAPI.HasComponent<Parent>(grandparentComponent.Value)) continue;
+
                     var greatGrandparentComponent = SystemAPI.GetComponent<Parent>(grandparentComponent.Value);
                     Entity grandparentEntity = greatGrandparentComponent.Value;
 

@@ -1,5 +1,7 @@
 using Memori.Scenes;
 using Memori.Utilities;
+using System.Collections.Generic;
+using System.Linq;
 using TMPro;
 using UnityEngine;
 using UnityEngine.UI;
@@ -20,11 +22,15 @@ namespace TJ.MainMenu
 {
     public class MainMenu : MonoBehaviour
     {
-        [SerializeField] private MainMenuPanel mainMenuPanel, playPanel, upgradesPanel, questsPanel, libraryPanel, exitPanel, modsPanel;
+        [SerializeField] private MainMenuPanel mainMenuPanel, playPanel, upgradesPanel, questsPanel, exitPanel, modsPanel;
 
         [Header("Buttons")]
         [SerializeField] private Button playPanelButton;
         [SerializeField] private Button upgradesPanelButton, questsPanelButton, collectionPanelButton, settingsPanelButton, exitPanelButton, abandonRunButton, customBattleButton, modsPanelButton;
+
+        [Header("Collection Button Badge")]
+        [SerializeField] private TMP_Text collectionTotalText;
+        [SerializeField] private GameObject collectionUnacknowledgedIndicator;
         enum PanelType { Main, Play, Upgrades, Quests, Collection, Options, Exit, Mods }
         MainMenuPanel currentPanel;
         bool _isPanelTransitioning;
@@ -90,10 +96,10 @@ namespace TJ.MainMenu
             playPanel.SetUp(this);
             upgradesPanel.SetUp(this);
             questsPanel.SetUp(this);
-            libraryPanel.SetUp(this);
             exitPanel.SetUp(this);
             modsPanel.SetUp(this);
             SceneHandler.Instance.OnGameStateChanged += OnGameStateChanged;
+            SceneHandler.Instance.OnOverlaySceneClosed += RefreshCollectionButtonState;
             SettingsManager.Instance.OnSettingsPanelToggled += OnSettingsPanelToggled;
 
             UpdateButtonText();
@@ -190,11 +196,10 @@ namespace TJ.MainMenu
                     UpdateCurrentPanel(PanelType.Mods);
                     break;
                 case PanelType.Collection:
-                    currentPanel.ClosePanel();
-                    playPanel.gameObject.SetActive(false);
-                    libraryPanel.OpenPanel();
-                    depthField.focusDistance.value = 0.1f;
-                    UpdateCurrentPanel(PanelType.Collection);
+                    // The Collection is its own additive overlay scene now. The menu deliberately
+                    // stays open behind it, so currentPanel must not move and the depth-of-field
+                    // blur is dropped - the overlay's own scrim covers the backdrop.
+                    _ = SceneHandler.Instance.OpenOverlayScene(SceneHandler.CollectionScenePath);
                     break;
                 case PanelType.Exit:
                     ExitToDesktop();
@@ -209,7 +214,6 @@ namespace TJ.MainMenu
                 PanelType.Play => playPanel,
                 PanelType.Upgrades => upgradesPanel,
                 PanelType.Quests => questsPanel,
-                PanelType.Collection => libraryPanel,
                 PanelType.Exit => exitPanel,
                 PanelType.Mods => modsPanel,
                 _ => currentPanel
@@ -225,7 +229,7 @@ namespace TJ.MainMenu
                 if (panelToClose != mainMenuPanel)
                     panelToClose.ClosePanel();
 
-                if (panelToClose != libraryPanel && panelToClose != modsPanel && panelToClose != mainMenuPanel)
+                if (panelToClose != modsPanel && panelToClose != mainMenuPanel)
                     await Task.Delay(500);
 
                 mainMenuPanel.gameObject.SetActive(true);
@@ -399,7 +403,52 @@ namespace TJ.MainMenu
 
             activeLocaleText.text = LocalizationManager.Instance.GetActiveLocaleName();
             CloseLocalizationPanel();
-            libraryPanel.SetUp(this);
+            RefreshCollectionButtonState();
+        }
+
+        /// <summary>
+        /// Drives the counter and the unacknowledged dot on the Collection button. This used to be
+        /// computed by CollectionPanel, which is now in its own scene and cannot reach these two
+        /// objects. Runs on every localization reload and whenever the overlay closes.
+        /// </summary>
+        private void RefreshCollectionButtonState()
+        {
+            // The eight collectable races. Deliberately not Enum.GetValues(typeof(Race)), which
+            // includes Race.Special - structures only, with no collection entry.
+            Race[] collectableRaces =
+            {
+                Race.IronLegion, Race.Gruntkin, Race.RavenHost, Race.TaelindorForest,
+                Race.SanguineCourt, Race.SakuraDynasty, Race.DeepstoneHold, Race.DrakosaurBrood
+            };
+
+            GearID[] allGear = GearData.GetGearIDs();
+            ConsumableEnum[] consumables = ConsumableData.GetAllConsumableEnums();
+            List<int> gearCollected = SaveDataHandler.GetGearIDsCollected();
+            List<int> potionsCollected = SaveDataHandler.GetPotionsIDsCollected();
+            List<int> gearAcknowledged = SaveDataHandler.GetGearIDsAcknowledged();
+            List<int> potionsAcknowledged = SaveDataHandler.GetPotionsIDsAcknowledged();
+            List<UnitName> troopsCollected = SaveDataHandler.GetTroopsIDsCollected();
+            List<UnitName> troopsAcknowledged = SaveDataHandler.GetTroopsIDsAcknowledged();
+
+            int totalCollected = gearCollected.Count + potionsCollected.Count;
+            int totalAvailable = allGear.Length + consumables.Length;
+
+            bool unacknowledgedAnything =
+                gearCollected.Any(id => !gearAcknowledged.Contains(id)) ||
+                potionsCollected.Any(id => !potionsAcknowledged.Contains(id));
+
+            foreach (Race race in collectableRaces)
+            {
+                UnitName[] units = TabletopTavernData.Instance.GetUnitsOfRace(race);
+                totalCollected += troopsCollected.Count(u => units.Contains(u));
+                totalAvailable += units.Length;
+
+                if (units.Where(u => troopsCollected.Contains(u)).Any(u => !troopsAcknowledged.Contains(u)))
+                    unacknowledgedAnything = true;
+            }
+
+            collectionTotalText.text = $"{totalCollected}/{totalAvailable}";
+            collectionUnacknowledgedIndicator.SetActive(unacknowledgedAnything);
         }
         private async void OpenLocalizationPanel()
         {
@@ -445,7 +494,10 @@ namespace TJ.MainMenu
         private void OnDestroy()
         {
             if (SceneHandler.HasInstance)
+            {
                 SceneHandler.Instance.OnGameStateChanged -= OnGameStateChanged;
+                SceneHandler.Instance.OnOverlaySceneClosed -= RefreshCollectionButtonState;
+            }
 
             if (LocalizationManager.HasInstance)
                 LocalizationManager.Instance.OnLocalizedStringsLoaded -= UpdateButtonText;

@@ -22,6 +22,20 @@ namespace TJ
         [Header("Unit Bonuses")]
         [SerializeField] private UnitBonusUI unitBonusUIPrefab;
         [SerializeField] private Transform unitBonusesParent;
+        /// <summary>
+        /// The right-hand bonus stack. Exposed so a panel that parks its own always-visible card
+        /// beneath it can measure how tall the stack currently is. Read-only on purpose - the pools
+        /// in <see cref="Load"/> own everything under it.
+        /// </summary>
+        public Transform UnitBonusesParent => unitBonusesParent;
+        /// <summary>The row of "+ Trait" entries.</summary>
+        public Transform UnitAttributesParent => unitAttributesParent;
+        /// <summary>
+        /// How many attributes the last <see cref="Load"/> actually rendered. Read this rather than
+        /// counting children: the pool trims with Destroy(), which does not take effect until the
+        /// end of the frame, so the surplus entries are still there immediately after Load returns.
+        /// </summary>
+        public int DisplayedAttributeCount { get; private set; }
         GearManager gearManager;
         Coroutine scaleCoroutine;
         bool overriden;
@@ -79,6 +93,8 @@ namespace TJ
                     if (!unitAttributes.Contains(bonus.UnitAttribute)) unitAttributes.Add(bonus.UnitAttribute);
                 }
             }
+
+            DisplayedAttributeCount = unitAttributes.Count;
 
             _unitAttributeUIs = unitAttributesParent.GetComponentsInChildren<UnitAttributesUI>().ToList();
             List<UnitBonusUI> unitBonusUIs = unitBonusesParent.GetComponentsInChildren<UnitBonusUI>().ToList();

@@ -36,18 +36,26 @@ namespace TJ.MainMenu
         [SerializeField] private List<TavernThemeData> _tavernThemes;
         [SerializeField] private MemoriTooltipTrigger _tavernTooltipTrigger;
 
+        [Header("Reset Confirmation")]
+        [SerializeField] private MemoriCanvasGroup _resetConfirmationCanvasGroup;
+        [SerializeField] private Button _resetConfirmButton, _resetCancelButton;
+
         List<MetaprogressionModel> _unlockedNodes = new();
         MetaprogressionPresenter _selectedNode;
         // Index 0 is always "None"; subsequent entries map 1:1 to _tavernThemes
         int _lastValidThemeIndex = 0;
         int _renownAvailable = 0;
         bool _isOpen = false;
+        bool _resetConfirmationOpen = false;
 
         private void Start()
         {
             _metaprogressionCamera.enabled = false;
             cameraSceneParent.gameObject.SetActive(false);
-            _resetButton.onClick.AddListener(ResetMetaprogression);
+            _resetButton.onClick.AddListener(ShowResetConfirmation);
+            _resetConfirmationCanvasGroup.CGDisable();
+            _resetConfirmButton.onClick.AddListener(ResetMetaprogression);
+            _resetCancelButton.onClick.AddListener(HideResetConfirmation);
             _depositButton.onClick.AddListener(OverrideAddRenown);
             _tavernThemeDropdown.onValueChanged.AddListener(OnTavernThemeChanged);
 
@@ -64,7 +72,22 @@ namespace TJ.MainMenu
         {
             if(!_isOpen) return;
 
-            if (EventSystem.current.IsPointerOverGameObject()) return;
+            // The pop up only covers its own rect, unlike the settings-panel confirmations which sit
+            // over a full-screen panel. Without this the tree behind it stays hoverable and a click
+            // beside the pop up still reaches PurchaseUnlockNode.
+            if(_resetConfirmationOpen)
+            {
+                ClearSelectedNode();
+                return;
+            }
+
+            // Clearing before the early return matters: without it, moving the pointer off a node
+            // and onto UI left that node hover-scaled and _selectedNode stale indefinitely.
+            if (EventSystem.current.IsPointerOverGameObject())
+            {
+                ClearSelectedNode();
+                return;
+            }
 
             Ray ray = _metaprogressionCamera.ScreenPointToRay(Input.mousePosition);
 
@@ -77,6 +100,10 @@ namespace TJ.MainMenu
                 {
                     if(_selectedNode != presenter)
                     {
+                        // Moving straight from one node onto an adjacent one never reaches the else
+                        // branches below, so the node being left behind stayed enlarged.
+                        if(_selectedNode != null) _selectedNode.MouseOverHighlight(false);
+
                         _selectedNode = presenter;
                         IAudioRequester.Instance.PlaySFX(SFXData.ButtonHover);
 
@@ -94,20 +121,12 @@ namespace TJ.MainMenu
                 }
                 else
                 {
-                    if(_selectedNode != null)
-                        _selectedNode.MouseOverHighlight(false);
-                        
-                    _selectedNode = null;
-                    TooltipManager.Instance.HideTooltip();
+                    ClearSelectedNode();
                 }
             }
             else
             {
-                if(_selectedNode != null)
-                    _selectedNode.MouseOverHighlight(false);
-
-                _selectedNode = null;
-                TooltipManager.Instance.HideTooltip();
+                ClearSelectedNode();
             }
 
             // On left mouse click, attempt to purchase unlock
@@ -115,6 +134,18 @@ namespace TJ.MainMenu
             {
                 PurchaseUnlockNode();
             }
+        }
+        /// <summary>
+        /// Drops the hover state for whatever node currently holds it. Idempotent, so the callers
+        /// in Update can run it every frame without re-hiding an already hidden tooltip.
+        /// </summary>
+        private void ClearSelectedNode()
+        {
+            if(_selectedNode == null) return;
+
+            _selectedNode.MouseOverHighlight(false);
+            _selectedNode = null;
+            TooltipManager.Instance.HideTooltip();
         }
         /// <summary>
         /// The body of a node's hover tooltip: its price, or why it cannot be bought.
@@ -240,6 +271,10 @@ namespace TJ.MainMenu
         }
         public override async void ClosePanel()
         {
+            // Presenters are reused across opens, so a _selectedNode surviving the close would fail
+            // the changed-node guard in Update and leave the last hovered node with no tooltip.
+            ClearSelectedNode();
+            HideResetConfirmation();
             TooltipManager.Instance.HideTooltip();
             SceneHandler.Instance.TranstionCameras(_metaprogressionCamera, _mainCamera);
             await Task.Delay(500);
@@ -249,8 +284,19 @@ namespace TJ.MainMenu
             base.ClosePanel();
             this.gameObject.SetActive(false);
         }
+        private void ShowResetConfirmation()
+        {
+            _resetConfirmationOpen = true;
+            _resetConfirmationCanvasGroup.CGEnable();
+        }
+        private void HideResetConfirmation()
+        {
+            _resetConfirmationOpen = false;
+            _resetConfirmationCanvasGroup.CGDisable();
+        }
         private void ResetMetaprogression()
         {
+            HideResetConfirmation();
             SaveDataHandler.ResetMetaprogression();
             DisplayNodes();
         }

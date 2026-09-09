@@ -107,14 +107,73 @@ namespace TJ
         {
             return _isPlayerTeam ? HexToRgba(MinimapPlayer) : HexToRgba(MinimapEnemy);
         }
+        #region Rarity tag cache
+
+        // XMLTagColorApplicator used to rebuild and re-localize all of this on EVERY call: 8 rarity
+        // and tier words, 16 unit stats and 27 damage attributes, so 51 string-table lookups plus 4
+        // array allocations per invocation. It runs once per gear card, which made it roughly 2,000
+        // lookups during a single Collection build. All of it is invariant for a given locale, so it
+        // is cached and invalidated on locale change. LocalizationManager lives in Core for the life
+        // of the process, so the one-time subscription below never needs unhooking.
+        // Terms to colour, not a strict UnitStat enum mirror - "Ranged" and "Morale" have no
+        // matching enum value. Morale is here so effects that move CurrentMorale can name it
+        // instead of misattributing themselves to [Leadership], which is the MaxMorale cap.
+        private static readonly string[] UnitStatKeys = new string[] { "MeleeAttack", "MeleeDefense", "WeaponStrength", "Accuracy", "Range", "MissileStrength", "HitPoints", "None", "Speed", "Armor", "ChargeBonus", "Leadership", "Ammunition", "ChargeImpactDamage", "Ranged", "Morale" };
+        private static readonly string[] DamageAttributeKeys = new string[] { "None", "ArmorPiercing", "AntiInfantry", "AntiLarge", "ArmorPiercingAntiInfantry", "ArmorPiercingAntiLarge", "Terror", "Outrider", "Rage", "StandardShields", "Terrifying", "Stalwart", "Ethereal", "SwampCreature", "ForestDweller", "ChickenFlight", "BloodFrenzy", "Emblazing", "Unstoppable", "HeavyShields", "ThrowingAxes", "ArmorSundering", "ForgefuryTempering", "FlamingAmmo", "MonsterSlayer", "DragonsHoard", "BackStabbers" };
+
+        private static string[] _rarityTags, _unitStatTags, _damageAttributeTags;
+        private static bool _tagsHooked;
+
+        private static void EnsureTagCache()
+        {
+            if (!_tagsHooked)
+            {
+                _tagsHooked = true;
+                LocalizationManager.Instance.OnLocalizedStringsLoaded += InvalidateTagCache;
+            }
+            if (_rarityTags != null) return;
+
+            LocalizationManager lm = LocalizationManager.Instance;
+            _rarityTags = new string[]
+            {
+                "[" + lm.GetText("Common") + "]",
+                "[" + lm.GetText("Uncommon") + "]",
+                "[" + lm.GetText("Rare") + "]",
+                "[" + lm.GetText("Legendary") + "]",
+                "[" + lm.GetText("Tier I") + "]",
+                "[" + lm.GetText("Tier II") + "]",
+                "[" + lm.GetText("Tier III") + "]",
+                "[" + lm.GetText("Tier IV") + "]"
+            };
+
+            _unitStatTags = new string[UnitStatKeys.Length];
+            for (int i = 0; i < UnitStatKeys.Length; i++)
+                _unitStatTags[i] = "[" + lm.GetText(UnitStatKeys[i]) + "]";
+
+            _damageAttributeTags = new string[DamageAttributeKeys.Length];
+            for (int i = 0; i < DamageAttributeKeys.Length; i++)
+                _damageAttributeTags[i] = "[" + lm.GetText(DamageAttributeKeys[i]) + "]";
+        }
+
+        private static void InvalidateTagCache()
+        {
+            _rarityTags = null;
+            _unitStatTags = null;
+            _damageAttributeTags = null;
+        }
+
+        #endregion
+
         public static string XMLTagColorApplicator(ref string _text)
         {
             if (_text.Length <= 0) return _text;
 
-            string commonLocalized = "[" + LocalizationManager.Instance.GetText("Common") + "]";
-            string uncommonLocalized = "[" + LocalizationManager.Instance.GetText("Uncommon") + "]";
-            string rareLocalized = "[" + LocalizationManager.Instance.GetText("Rare") + "]";
-            string legendaryLocalized = "[" + LocalizationManager.Instance.GetText("Legendary") + "]";
+            EnsureTagCache();
+            string[] tags = _rarityTags;
+            string commonLocalized = tags[0];
+            string uncommonLocalized = tags[1];
+            string rareLocalized = tags[2];
+            string legendaryLocalized = tags[3];
 
             //if text contains commonlocalized, replace common localized with the colordata xml tag
             if (_text.Contains(commonLocalized))
@@ -134,10 +193,10 @@ namespace TJ
                 _text = _text.Replace(legendaryLocalized, $"<color={Tier4}>{legendaryLocalized}</color>");
             }
 
-            string tier1Localized = "[" + LocalizationManager.Instance.GetText("Tier I") + "]";
-            string tier2Localized = "[" + LocalizationManager.Instance.GetText("Tier II") + "]";
-            string tier3Localized = "[" + LocalizationManager.Instance.GetText("Tier III") + "]";
-            string tier4Localized = "[" + LocalizationManager.Instance.GetText("Tier IV") + "]";
+            string tier1Localized = tags[4];
+            string tier2Localized = tags[5];
+            string tier3Localized = tags[6];
+            string tier4Localized = tags[7];
 
             //if text contains commonlocalized, replace common localized with the colordata xml tag
             if (_text.Contains(tier1Localized))
@@ -180,22 +239,8 @@ namespace TJ
                     }
                 }
             }
-            // Terms to colour, not a strict UnitStat enum mirror - "Ranged" and "Morale" have no
-            // matching enum value. Morale is here so effects that move CurrentMorale can name it
-            // instead of misattributing themselves to [Leadership], which is the MaxMorale cap.
-            string[] unitStats = new string[] { "MeleeAttack", "MeleeDefense", "WeaponStrength", "Accuracy", "Range", "MissileStrength", "HitPoints", "None", "Speed", "Armor", "ChargeBonus", "Leadership", "Ammunition", "ChargeImpactDamage", "Ranged", "Morale" };
-            string[] damageAttributes = new string[] { "None", "ArmorPiercing", "AntiInfantry", "AntiLarge", "ArmorPiercingAntiInfantry", "ArmorPiercingAntiLarge", "Terror", "Outrider", "Rage", "StandardShields", "Terrifying", "Stalwart", "Ethereal", "SwampCreature", "ForestDweller", "ChickenFlight", "BloodFrenzy", "Emblazing", "Unstoppable", "HeavyShields", "ThrowingAxes", "ArmorSundering", "ForgefuryTempering", "FlamingAmmo", "MonsterSlayer", "DragonsHoard", "BackStabbers" };//"TowerShields",
-
-            string[] unitStatLocalized = new string[unitStats.Length];
-            for (int i = 0; i < unitStats.Length; i++)
-            {
-                unitStatLocalized[i] = "[" + LocalizationManager.Instance.GetText(unitStats[i]) + "]";
-            }
-            string[] damageAttributesLocalized = new string[damageAttributes.Length];
-            for (int i = 0; i < damageAttributes.Length; i++)
-            {
-                damageAttributesLocalized[i] = "[" + LocalizationManager.Instance.GetText(damageAttributes[i]) + "]";
-            }
+            string[] unitStatLocalized = _unitStatTags;
+            string[] damageAttributesLocalized = _damageAttributeTags;
 
             for (int i = 0; i < unitStatLocalized.Length; i++)
             {

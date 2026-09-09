@@ -40,9 +40,30 @@ namespace TJ
         protected override void Awake()
         {
             base.Awake();
-            InitializeSquadStats();
+            EnsureDataLoaded();
         }
-        private void InitializeSquadStats()
+
+        /// <summary>
+        /// Builds the stat, asset and race catalogues once. Awake calls this, but anything that needs
+        /// the catalogue outside Play Mode - an editor tool, a test - can call it directly rather than
+        /// depending on Awake having run. Resources.LoadAll works fine in edit mode; Awake is the only
+        /// reason this used to be Play-Mode-only.
+        ///
+        /// Idempotent, and deliberately so: a second call costs one dictionary Count check. It does not
+        /// reload, because a reload mid-session would hand out fresh SquadStats instances while live
+        /// code still holds the old ones. Call ReloadData when a genuine refresh is what you want.
+        /// </summary>
+        public void EnsureDataLoaded()
+        {
+            if (SquadStatsDictionary.Count > 0) return;
+            ReloadData();
+        }
+
+        /// <summary>
+        /// Unconditionally rebuilds the catalogue from Resources and re-applies every enabled mod's
+        /// overrides. This is what Awake used to do inline.
+        /// </summary>
+        public void ReloadData()
         {
             LoadStatsFromSOs();
             ApplyModOverrides();
@@ -804,11 +825,7 @@ namespace TJ
         [ContextMenu("Create Squad SOs")]
         private void CreateSquadSOs()
         {
-            // Ensure the dictionary is populated (works if LoadStatsFromFile() is editor-safe)
-            if (SquadStatsDictionary.Count == 0)
-            {
-                InitializeSquadStats();
-            }
+            EnsureDataLoaded();
 
             // Create folder if it doesn't exist
             string folderPath = "Assets/SquadData";
@@ -836,10 +853,7 @@ namespace TJ
         [ContextMenu("Upload to Google Sheets")]
         private void UploadToGoogleSheets()
         {
-            if (SquadStatsDictionary.Count == 0)
-            {
-                InitializeSquadStats();
-            }
+            EnsureDataLoaded();
 
             if (string.IsNullOrEmpty(googleSheetUrl))
             {
@@ -855,7 +869,7 @@ namespace TJ
         [ContextMenu("Export Unit Stats Overrides JSON")]
         public void ExportUnitOverridesTemplate()
         {
-            if (SquadStatsDictionary.Count == 0) InitializeSquadStats();
+            EnsureDataLoaded();
 
             ModLoadOrder.EnsureModsDirectoryExists();
             string templateFolder = System.IO.Path.Combine(ModLoadOrder.ModsRootPath, "_Template");

@@ -109,6 +109,11 @@ public class GameOverPanel : MonoBehaviour
         GameEventTracker.RunEnded(saveData.heroID, (int)saveData.difficultyLevel, _beatDemo ? RunResult.Win : RunResult.Loss, runStats.chaptersCompleted);
 
         CampaignManager.Instance.CampaignSaveManager.DeleteCampaignSave();
+
+        // The save is gone but the map HUD underneath this panel is still live and interactive, and every
+        // troop interaction reads it. This is the single funnel for run end (defeat via EngagementPanel,
+        // victory via MapSceneManager), so locking here covers both.
+        CampaignManager.Instance.MapSceneUIManager.HUDPanel.LockForRunEnd();
     }
     public async void DisplayGameOver(bool beatDemo = false)
     {

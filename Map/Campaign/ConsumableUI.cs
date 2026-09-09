@@ -101,13 +101,13 @@ namespace TJ.Map
         {
             if(consumableLoaded)
             {
-                MemoriUI.BloomItemScale(transform, 1.025f, 0.1f);
+                ScaleTo(1.025f);
                 highlightImage.enabled = true;
                 IAudioRequester.Instance.PlaySFX(SFXData.Drink);
             }
             else
             {
-                MemoriUI.BloomItemScale(transform, 1.025f, 0.1f);
+                ScaleTo(1.025f);
                 IAudioRequester.Instance.PlaySFX(SFXData.ButtonHover);
             }
         }

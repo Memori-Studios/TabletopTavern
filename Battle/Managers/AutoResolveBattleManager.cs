@@ -20,6 +20,11 @@ namespace TJ.Engagement
         public float armorMitigation;
         public int ChargeBonus;
         public float shieldBlockChance;
+        // Scales every point of damage this squad RECEIVES. 1 = normal. Raised by a damage-amplifying
+        // mark (Blood Scent), lowered by a defensive brace (Runeward). A multiplier rather than an
+        // armour tweak because a mark applies to unarmoured squads too, where armourMitigation is 0
+        // and there is nothing to scale.
+        public float damageTakenMultiplier;
     }
     public class AutoResolveBattleManager : MonoBehaviour
     {
@@ -29,22 +34,50 @@ namespace TJ.Engagement
         [SerializeField] private ArmySaveData testPlayerArmySaveData;
         [SerializeField] private ArmySaveData testEnemyArmySaveData, playerArmyForEnemyScoringSaveData;
         [SerializeField] private SquadToLoad[] playerArmy, enemyArmy;
-        bool playerArmyIsDefeated, enemyArmyIsDefeated;
-        [SerializeField] AutoResolveSquad[] playerAutoResolveStats, enemyAutoResolveStats;
+        // internal, not private: the EditMode tests assert on the outcome of a simulation run.
+        internal bool playerArmyIsDefeated, enemyArmyIsDefeated;
+        // internal so tests can seed hand-built armies instead of reflecting into private fields.
+        [SerializeField] internal AutoResolveSquad[] playerAutoResolveStats, enemyAutoResolveStats;
         public SquadToLoad[] PredictedPlayerArmy => playerArmy;
         public AutoResolveSquad[] PlayerAutoResolveStats => playerAutoResolveStats;
         public AutoResolveSquad[] EnemyAutoResolveStats => enemyAutoResolveStats;
-        List<int3> unitsSlainData = new();
-        private float ENEMY_AUTORESOLVE_SPECIAL_BONUS => CampaignManager.Instance.CampaignSaveManager.SaveData.bookNumber switch {
-            2 => 1.25f,
-            3 => 1.50f,
-            _ => 1.00f,
-        };
+        internal List<int3> unitsSlainData = new();
+        // InstanceIfExists, never Instance. The Instance getter FABRICATES a CampaignManager on a miss -
+        // new GameObject, AddComponent, cached in a static for the session - and that phantom's
+        // campaignSaveManager is null, so reading this threw an NRE and poisoned the singleton for
+        // everything after it. That is where the stray CampaignManager.Start() errors came from.
+        //
+        // Auto-resolve runs from the Map scene, where a real manager exists and the multiplier applies as
+        // before. Anywhere else - a custom battle, the editor prediction button, a test - there is no
+        // campaign and no book number, so the honest answer is no bonus rather than an exception.
+        private float ENEMY_AUTORESOLVE_SPECIAL_BONUS
+        {
+            get
+            {
+                CampaignManager campaign = CampaignManager.InstanceIfExists;
+                if (campaign == null) return 1.00f;
+                CampaignSaveManager saveManager = campaign.CampaignSaveManager;
+                if (saveManager == null || saveManager.SaveData == null) return 1.00f;
+                return saveManager.SaveData.bookNumber switch
+                {
+                    2 => 1.25f,
+                    3 => 1.50f,
+                    _ => 1.00f,
+                };
+            }
+        }
         private const float GARRISON_AUTORESOLVE_BONUS = 1.4f;
+        // Hard ceiling on auto-resolve rounds. A real battle resolves in orders of magnitude
+        // fewer. This exists because both target pools in AssignTargets are positive whitelists,
+        // so a UnitType that falls out of both is untargetable, neither side is ever defeated,
+        // and the loop below spins forever. That has already happened once, with mages.
+        // FindAnySquadTarget is the real fix; this is the backstop that turns a frozen campaign
+        // into a log line.
+        private const int MAX_AUTORESOLVE_ROUNDS = 10000;
         private bool _isGarrisonBattle;
         // One-shot per battle. Reset wherever the armies are (re)built, not in RunSimulationLoop,
         // which is called once per round.
-        private bool _mageAlphaStrikeApplied;
+        internal bool _mageAlphaStrikeApplied;
 
         private struct CachedBattleResult
         {
@@ -58,14 +91,37 @@ namespace TJ.Engagement
         private readonly Dictionary<string, CachedBattleResult> _resultCache = new();
         private string _currentBattleKey = string.Empty;
 
+        // Resolved from the hierarchy, never from CampaignManager.Instance. This component is a child
+        // of the CampaignManager GameObject, and the singleton getter fabricates an unconfigured
+        // manager on a miss - whose ConsumableManager is null - then caches it for the session.
+        private CampaignManager _campaignManager;
+
         private void Start()
         {
-            CampaignManager.Instance.ConsumableManager.OnConsumableUsed += OnConsumableUsed;
+            _campaignManager = GetComponentInParent<CampaignManager>();
+            if (_campaignManager == null) _campaignManager = CampaignManager.InstanceIfExists;
+
+            // No campaign at all is an ORDINARY state, not a fault: a custom battle, the editor
+            // prediction button and the tests all run without one, and there is no auto-resolve
+            // prediction for a consumable to invalidate. Staying silent here matters - this was a
+            // LogError, which meant every custom battle logged an error before anything had gone
+            // wrong, and an "a battle logs no errors" check is worthless once it is red by default.
+            if (_campaignManager == null) return;
+
+            // A campaign IS present but its ConsumableManager is not wired. That is a real defect, so
+            // it is worth saying - as a warning rather than an error, because the only consequence is
+            // a stale prediction until the next re-simulate.
+            if (_campaignManager.ConsumableManager == null)
+            {
+                Debug.LogWarning("[AutoResolve] CampaignManager has no ConsumableManager, so the prediction will not re-simulate when a consumable is used.");
+                return;
+            }
+            _campaignManager.ConsumableManager.OnConsumableUsed += OnConsumableUsed;
         }
         private void OnDestroy()
         {
-            if(CampaignManager.HasInstance && CampaignManager.Instance.ConsumableManager != null)
-                CampaignManager.Instance.ConsumableManager.OnConsumableUsed -= OnConsumableUsed;
+            if (_campaignManager != null && _campaignManager.ConsumableManager != null)
+                _campaignManager.ConsumableManager.OnConsumableUsed -= OnConsumableUsed;
         }
         private void OnConsumableUsed()
         {
@@ -114,7 +170,11 @@ namespace TJ.Engagement
             }
             // Debug.Log($"playerArmyList count: {playerArmyList.Count}");
             playerArmy = playerArmyList.ToArray();
-            enemyArmy = CampaignManager.Instance.CampaignSaveManager.SaveData.enemyArmy;
+            // Copy, never alias. RecordResults writes the simulated outcome back into enemyArmy, and a
+            // prediction must not leave those numbers in the campaign save - a predicted win zeroed every
+            // enemy squad's health, which then rendered as 0 HP on the pre-battle enemy cards.
+            SquadToLoad[] savedEnemyArmy = CampaignManager.Instance.CampaignSaveManager.SaveData.enemyArmy;
+            enemyArmy = savedEnemyArmy == null ? null : (SquadToLoad[])savedEnemyArmy.Clone();
 
             if (enemyArmy == null || enemyArmy.Length == 0 || enemyArmy[0].SquadMaxHealth == 0)
             {
@@ -154,7 +214,7 @@ namespace TJ.Engagement
             // Debug.Log($"[AutoResolve] Cache MISS — running simulation. Cache size: {_resultCache.Count}");
             PredictAutoResolve();
         }
-    private static AutoResolveSquad GenerateAutoResolveSquadStats(SquadToLoad _squadToLoad, int _squadIndex, Team _team, CampaignSaveManager campaignSaveManager = null, bool allowGearModifiers = true)
+    internal static AutoResolveSquad GenerateAutoResolveSquadStats(SquadToLoad _squadToLoad, int _squadIndex, Team _team, CampaignSaveManager campaignSaveManager = null, bool allowGearModifiers = true)
     {
         SquadStats squadStats = TabletopTavernData.Instance.GetSquadStats(_squadToLoad.UnitName);
         UnitType unitType = TabletopTavernData.Instance.GetUnitTypeFromUnitName(_squadToLoad.UnitName);
@@ -249,7 +309,7 @@ namespace TJ.Engagement
             squadStats.Leadership += _squadToLoad.UnitPrestige * TabletopTavernConstants.PRESTIGE_BONUS;
             // Charges are the mage's damage budget here, so prestige has to reach them or the alpha
             // strike ignores prestige entirely. Same expression the live path uses in EntityWatcher's
-            // mage branch, folded into the stat copy so HandleMageAlphaStrike can just read Ammunition.
+            // mage branch, folded into the stat copy so HandleMageCasts can just read Ammunition.
             squadStats.Ammunition += _squadToLoad.UnitPrestige * TabletopTavernConstants.PRESTIGE_AMMO_BONUS_MAGE;
         }
 
@@ -282,6 +342,7 @@ namespace TJ.Engagement
             maxUnits = startingUnits,
             armorMitigation = armorMitigation,
             shieldBlockChance = shieldBlockChance,
+            damageTakenMultiplier = 1f,
             ChargeBonus = ChargeBonus,
         };
     }
@@ -296,7 +357,8 @@ namespace TJ.Engagement
         }
         playerArmy = playerArmyList.ToArray();
 
-        enemyArmy = CampaignManager.Instance.CampaignSaveManager.SaveData.enemyArmy;
+        // Copy, never alias - see the matching note in Load().
+        enemyArmy = (SquadToLoad[])CampaignManager.Instance.CampaignSaveManager.SaveData.enemyArmy.Clone();
         playerAutoResolveStats = new AutoResolveSquad[playerArmy.Length];
         enemyAutoResolveStats = new AutoResolveSquad[enemyArmy.Length];
         _mageAlphaStrikeApplied = false;
@@ -369,19 +431,43 @@ namespace TJ.Engagement
     public void PredictAutoResolve()
     {
         SetUpArmies();
-        while (!playerArmyIsDefeated && !enemyArmyIsDefeated)
-        {
-            RunSimulationLoop();
-        }
+        RunToCompletion();
         RecordResults(false);
     }
     public void AutoResolveThroughEditor()
     {
+        RunToCompletion();
+        RecordResults(false);
+    }
+    /// <summary>
+    /// Runs rounds until one side is defeated, aborting loudly at MAX_AUTORESOLVE_ROUNDS rather
+    /// than hanging. On abort the side holding less health is treated as defeated, so an engine
+    /// bug costs the player a plausible result instead of an unearned loss.
+    /// </summary>
+    internal void RunToCompletion()
+    {
+        int rounds = 0;
         while (!playerArmyIsDefeated && !enemyArmyIsDefeated)
         {
             RunSimulationLoop();
+            if (++rounds < MAX_AUTORESOLVE_ROUNDS) continue;
+
+            int playerHealth = TotalHealthRemaining(playerAutoResolveStats);
+            int enemyHealth = TotalHealthRemaining(enemyAutoResolveStats);
+            Debug.LogError(
+                $"[AutoResolve] Aborted after {MAX_AUTORESOLVE_ROUNDS} rounds with neither side defeated. " +
+                $"Player health {playerHealth}, enemy health {enemyHealth}. " +
+                "A squad is most likely untargetable - check the target pools in AssignTargets.");
+            if (enemyHealth <= playerHealth) enemyArmyIsDefeated = true;
+            else playerArmyIsDefeated = true;
+            break;
         }
-        RecordResults(false);
+    }
+    private static int TotalHealthRemaining(AutoResolveSquad[] _squads)
+    {
+        int total = 0;
+        for (int i = 0; i < _squads.Length; i++) total += math.max(0, _squads[i].finalHealth);
+        return total;
     }
     public void AutoResolve()
     {
@@ -391,13 +477,13 @@ namespace TJ.Engagement
     {
         unitsSlainData = new();
         AssignTargets();
-        HandleMageAlphaStrike();
+        HandleMageCasts();
         HandleRangedUnits();
         HandleMeleeUnits();
         RemoveSlainUnits();
         CheckArmyStatus();
     }
-    private void AssignTargets()
+    internal void AssignTargets()
     {
         static int FindMeleeSquadTarget(AutoResolveSquad[] _targetSquadStats)
         {
@@ -483,7 +569,7 @@ namespace TJ.Engagement
             enemyAutoResolveStats[i].TargetIndex = newTargetIndex;
         }
     }
-    private void ModifyDamageDealt(ref int _damageDealt, AutoResolveSquad _defendingSquad, SquadStats _attackingSquad)
+    internal void ModifyDamageDealt(ref int _damageDealt, AutoResolveSquad _defendingSquad, SquadStats _attackingSquad)
     {
         if(_defendingSquad.armorMitigation > 0) {
             float effectiveMitigation = _defendingSquad.armorMitigation;
@@ -508,6 +594,11 @@ namespace TJ.Engagement
 
         if (_attackingSquad.unitSize == UnitSize.Cavalry)
             _damageDealt = (int)(_damageDealt * 1.5f);
+
+        // Applied last so it scales the fully-resolved figure, which is what a mark means: more
+        // damage from everything, after armour and weapon multipliers have had their say.
+        if (_defendingSquad.damageTakenMultiplier != 1f && _defendingSquad.damageTakenMultiplier > 0f)
+            _damageDealt = math.max(1, (int)(_damageDealt * _defendingSquad.damageTakenMultiplier));
     }
     private void HandleRangedUnits()
     {
@@ -584,7 +675,17 @@ namespace TJ.Engagement
     // is DamageType.Magical, which ignores armor in the live pipeline, and the rest of that method is
     // weapon-flavoured multipliers (AntiInfantry, MonsterSlayer, cavalry) that a spell has no business
     // picking up.
-    private void HandleMageAlphaStrike()
+    // A mage's entire contribution to auto-resolve, resolved once at the start of the battle.
+    //
+    // In a live battle a mage spends one charge per cast on a long cooldown and converts to a melee
+    // body when the pool empties. Auto-resolve has no clock to spread that over, so the whole pool is
+    // spent up front and the mage then fights on with its melee stats.
+    //
+    // This used to assume every mage spell was damage, because Smite was the only one. It is not:
+    // SpellModifierValue means healing on a HoT, a percentage on a mark, and a NEGATIVE stat delta on a
+    // debuff. Read as damage, a brace dealt 900 a cast while a morale drain dealt 1. Each spell shape
+    // now maps onto the stat this simulation already reads for it.
+    internal void HandleMageCasts()
     {
         if (_mageAlphaStrikeApplied) return;
         _mageAlphaStrikeApplied = true;
@@ -594,13 +695,60 @@ namespace TJ.Engagement
         // already-dead squad would keep absorbing casts.
         Dictionary<int, int> queuedDamage = new();
 
-        void StrikeWith(AutoResolveSquad[] _attackingSquads, AutoResolveSquad[] _targetSquads, float _bonusModifier)
+        // How many times a persistent spell actually lands. Auto-resolve has no clock, so a ticking
+        // spell is worth its per-tick value times the ticks it would get in a live battle. Without
+        // this a damage-over-time spell was valued at a single tick.
+        static float ApplicationCount(TJ.Spells.SpellData spell)
         {
-            foreach (AutoResolveSquad mageSquad in _attackingSquads)
+            if (spell.IsOneOff || spell.TickInterval <= 0f) return 1f;
+            float ticks = math.max(1f, spell.SpellDuration / spell.TickInterval);
+            return math.max(1f, ticks * TabletopTavernConstants.AUTORESOLVE_PERSISTENT_SPELL_UPTIME);
+        }
+
+        // Maps a battlefield-bonus stat onto the auto-resolve stat standing in for it. Returns false for
+        // stats this simulation does not model (Range, Speed, ChargeBonus...), so an unmodelled buff is
+        // skipped rather than silently mis-applied.
+        static bool ApplyStat(ref AutoResolveSquad squad, UnitStat stat, float value)
+        {
+            switch (stat)
             {
+                case UnitStat.Accuracy:
+                    // Floor at zero, not one: a melee squad already sits at zero accuracy, and a
+                    // floor of one would have a debuff RAISE it. CalculateRangedDamage floors the
+                    // resulting damage at 1 anyway, so zero here is safe.
+                    squad.squadStats.attackAccuracy = math.max(0f, squad.squadStats.attackAccuracy + value);
+                    return true;
+                case UnitStat.Leadership:
+                    // HasRouted reads Leadership, so draining it makes a squad break with more models
+                    // still standing - which is what a morale spell does.
+                    squad.squadStats.Leadership = math.clamp(squad.squadStats.Leadership + value, 0f, 100f);
+                    return true;
+                case UnitStat.MeleeAttack:
+                    squad.squadStats.MeleeAttack = (int)math.max(0, squad.squadStats.MeleeAttack + value);
+                    return true;
+                case UnitStat.MeleeDefense:
+                    squad.squadStats.MeleeDefense = (int)math.max(0, squad.squadStats.MeleeDefense + value);
+                    return true;
+                case UnitStat.WeaponStrength:
+                    squad.squadStats.WeaponStrength = (int)math.max(0, squad.squadStats.WeaponStrength + value);
+                    return true;
+                case UnitStat.Armor:
+                    squad.armorMitigation = math.clamp(squad.armorMitigation + value, 0f, 0.9f);
+                    return true;
+                default:
+                    return false;
+            }
+        }
+
+        void CastFrom(AutoResolveSquad[] _casters, AutoResolveSquad[] _foes, AutoResolveSquad[] _allies, float _bonusModifier)
+        {
+            // Index loops throughout: AutoResolveSquad is a struct, so a foreach hands out copies and
+            // every stat change would be silently discarded.
+            for (int c = 0; c < _casters.Length; c++)
+            {
+                AutoResolveSquad mageSquad = _casters[c];
                 if (!TabletopTavernConstants.Casts(mageSquad.squadStats.unitType)) continue;
                 if (HasRouted(mageSquad)) continue;
-                if (mageSquad.TargetIndex == -1) continue;
 
                 // A mage whose SquadData has no mageSpell assigned contributes nothing rather than
                 // throwing - the same posture SpellManager takes on an unauthored spell asset.
@@ -608,22 +756,128 @@ namespace TJ.Engagement
                 if (mageSpell == null) continue;
 
                 // Charges are a SQUAD-level pool (SquadAmmunition), never per model.
-                int chargesLeft = mageSquad.squadStats.Ammunition;
-                if (chargesLeft <= 0) continue;
+                int charges = mageSquad.squadStats.Ammunition;
+                if (charges <= 0) continue;
 
-                // Spend on the assigned target first, then spill into anything else still standing.
-                // One cast removes a large fraction of a squad, so committing every charge to a single
+                float applications = ApplicationCount(mageSpell);
+                bool onAllies = mageSpell.MageTargetPriority == MageTargetPriority.FriendlyNearestEnemy;
+                AutoResolveSquad[] pool = onAllies ? _allies : _foes;
+
+                // A friendly-target spell must never land on a caster - itself included. This
+                // mirrors MageSquadFindTargetSystem, which excludes the caster and every other mage
+                // from a FriendlyNearestEnemy search: a one-model support unit standing behind the
+                // line is never "the ally doing the fighting". Without it a lone mage spent most of
+                // its charges bracing and healing itself. Skipping mages covers the self case too,
+                // since the caster is one.
+                System.Func<int, bool> ineligible = i =>
+                    HasRouted(pool[i]) ||
+                    (onAllies && TabletopTavernConstants.Casts(pool[i].squadStats.unitType));
+
+                // ---- a heal is effective HP, added straight back to the pool ----
+                if (mageSpell.HealsInsteadOfDamage)
+                {
+                    int healPerCast = math.max(1, (int)(mageSpell.SpellModifierValue * applications
+                                                        * TabletopTavernConstants.MAGE_AOE_MODELS_HIT));
+                    for (int spent = 0; spent < charges; spent++)
+                    {
+                        int pick = -1, worstMissing = 0;
+                        for (int i = 0; i < pool.Length; i++)
+                        {
+                            if (ineligible(i)) continue;
+                            int missing = (pool[i].maxUnits * pool[i].healthPerKill) - pool[i].finalHealth;
+                            if (missing > worstMissing) { worstMissing = missing; pick = i; }
+                        }
+                        if (pick == -1) break;   // nothing hurt enough to be worth a charge
+                        int maxHealth = pool[pick].maxUnits * pool[pick].healthPerKill;
+                        pool[pick].finalHealth = math.min(maxHealth, pool[pick].finalHealth + healPerCast);
+                        pool[pick].UnitsAlive = math.min(pool[pick].maxUnits,
+                            (int)math.ceil(pool[pick].finalHealth / (float)pool[pick].healthPerKill));
+                    }
+                    continue;
+                }
+
+                // ---- a brace cuts damage taken; a mark raises it ----
+                if (mageSpell.BracesTarget || mageSpell.MarksTarget)
+                {
+                    float delta = mageSpell.MarksTarget
+                        ? mageSpell.SpellModifierValue / 100f
+                        : -TabletopTavernConstants.AUTORESOLVE_BRACE_DAMAGE_REDUCTION;
+                    for (int spent = 0; spent < charges; spent++)
+                    {
+                        int pick = -1;
+                        for (int i = 0; i < pool.Length; i++)
+                        {
+                            if (ineligible(i)) continue;
+                            // Spread across squads rather than stacking on one: take the least-affected.
+                            bool better = pick == -1 || (mageSpell.MarksTarget
+                                ? pool[i].damageTakenMultiplier < pool[pick].damageTakenMultiplier
+                                : pool[i].damageTakenMultiplier > pool[pick].damageTakenMultiplier);
+                            if (better) pick = i;
+                        }
+                        if (pick == -1) break;
+                        pool[pick].damageTakenMultiplier = math.clamp(pool[pick].damageTakenMultiplier + delta, 0.25f, 3f);
+                    }
+                    continue;
+                }
+
+                // ---- a stat aura, buff or debuff ----
+                if (mageSpell.GrantsBattlefieldBonus)
+                {
+                    // Spread across squads. Unlike the brace and mark branches, which self-balance
+                    // because they pick by the very multiplier they are changing, a stat debuff does
+                    // not alter UnitsAlive - so picking purely by size re-picks the same squad every
+                    // charge and dumps the whole pool on it, which zeroed an archer's accuracy
+                    // outright. Fewest charges received first, biggest squad as the tie-break.
+                    int[] chargesApplied = new int[pool.Length];
+                    for (int spent = 0; spent < charges; spent++)
+                    {
+                        int pick = -1;
+                        for (int i = 0; i < pool.Length; i++)
+                        {
+                            if (ineligible(i)) continue;
+                            if (pick == -1) { pick = i; continue; }
+                            if (chargesApplied[i] < chargesApplied[pick] ||
+                                (chargesApplied[i] == chargesApplied[pick] && pool[i].UnitsAlive > pool[pick].UnitsAlive))
+                                pick = i;
+                        }
+                        if (pick == -1) break;
+                        chargesApplied[pick]++;
+
+                        // BonusStats takes precedence when non-empty, matching ActiveSpell.
+                        bool applied = false;
+                        if (mageSpell.BonusStats != null && mageSpell.BonusStats.Count > 0)
+                        {
+                            foreach (var bonus in mageSpell.BonusStats)
+                                applied |= ApplyStat(ref pool[pick], bonus.UnitStat, bonus.Value);
+                        }
+                        else
+                        {
+                            applied = ApplyStat(ref pool[pick], mageSpell.BonusUnitStat, mageSpell.SpellModifierValue);
+                        }
+                        if (!applied) break;   // a stat this simulation cannot model - stop burning charges
+                    }
+                    continue;
+                }
+
+                // ---- a spell that actually deals damage ----
+                if (mageSpell.SpellModifierValue <= 0) continue;
+                if (mageSquad.TargetIndex == -1) continue;
+
+                int chargesLeft = charges;
+
+                // Spend on the assigned target first, then spill into anything else still standing. One
+                // cast removes a large fraction of a squad, so committing every charge to a single
                 // target would throw away everything past its last model - in a live battle the mage
                 // simply retargets and keeps casting.
                 List<int> targetOrder = new() { mageSquad.TargetIndex };
-                foreach (AutoResolveSquad candidate in _targetSquads)
-                    if (candidate.SquadIndex != mageSquad.TargetIndex) targetOrder.Add(candidate.SquadIndex);
+                for (int i = 0; i < _foes.Length; i++)
+                    if (_foes[i].SquadIndex != mageSquad.TargetIndex) targetOrder.Add(_foes[i].SquadIndex);
 
                 foreach (int targetIndex in targetOrder)
                 {
                     if (chargesLeft <= 0) break;
 
-                    AutoResolveSquad targetSquad = TargetSquadFromIndex(targetIndex, _targetSquads);
+                    AutoResolveSquad targetSquad = TargetSquadFromIndex(targetIndex, _foes);
                     if (HasRouted(targetSquad)) continue;
 
                     queuedDamage.TryGetValue(targetIndex, out int alreadyQueued);
@@ -632,7 +886,7 @@ namespace TJ.Engagement
 
                     // The blast cannot catch more models than the squad still has standing.
                     int modelsHit = math.min(TabletopTavernConstants.MAGE_AOE_MODELS_HIT, targetSquad.UnitsAlive);
-                    int perCast   = math.max(1, (int)(mageSpell.SpellModifierValue * modelsHit * _bonusModifier));
+                    int perCast   = math.max(1, (int)(mageSpell.SpellModifierValue * applications * modelsHit * _bonusModifier));
 
                     int castsSpent = math.min(chargesLeft, (healthLeft + perCast - 1) / perCast);
                     int damage     = math.min(castsSpent * perCast, healthLeft);
@@ -644,8 +898,8 @@ namespace TJ.Engagement
             }
         }
 
-        StrikeWith(playerAutoResolveStats, enemyAutoResolveStats, 1f);
-        StrikeWith(enemyAutoResolveStats, playerAutoResolveStats,
+        CastFrom(playerAutoResolveStats, enemyAutoResolveStats, playerAutoResolveStats, 1f);
+        CastFrom(enemyAutoResolveStats, playerAutoResolveStats, enemyAutoResolveStats,
             ENEMY_AUTORESOLVE_SPECIAL_BONUS * (_isGarrisonBattle ? GARRISON_AUTORESOLVE_BONUS : 1f));
     }
     private void HandleMeleeUnits()

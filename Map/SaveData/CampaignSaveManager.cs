@@ -785,7 +785,10 @@ namespace TJ
         }
         public void SaveEnemyArmy(SquadToLoad[] _enemyArmy)
         {
-            saveData.enemyArmy = _enemyArmy;
+            // Store a copy. A garrison fight passes townData.townGarrisonUnits straight in, so keeping the
+            // caller's reference made saveData.enemyArmy and the town's persisted garrison the same array -
+            // anything that wrote enemy health then silently rewrote the town's garrison too.
+            saveData.enemyArmy = _enemyArmy == null ? null : (SquadToLoad[])_enemyArmy.Clone();
             SaveCampaign();
         }
             public void PrestigeAndCombineUnits(string _uniqueID)
