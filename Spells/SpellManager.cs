@@ -22,8 +22,8 @@ public class SpellManager : MonoBehaviour
     [SerializeField] private SpellQuickCastMenu spellQuickCastMenu;
 
     [Header("Pre-Battle Browsing (custom battle only)")]
-    // Pool the player can swap from before the battle starts. Curated in the inspector.
-    [SerializeField] private SpellData[] availableSpells;
+    // The pool the player can swap from is every registered spell (SpellRegistry.All). It used to be
+    // a hand-curated inspector list, which silently fell behind when spells were added.
     [SerializeField] private SpellBrowseMenu spellBrowseMenu;
     // Seconds the browse menu lingers after the pointer leaves both the spell buttons and the menu,
     // so crossing the gap between them does not flicker it closed.
@@ -39,6 +39,16 @@ public class SpellManager : MonoBehaviour
     private SpellSlotState[] slotStates;
     private int selectedSpellIndex = -1;
     private Entity targetedSquadSelfEntity = Entity.Null;
+
+    // Placement spells. Starstep first asks for a squad, then both it and Raise Dead draw a formation
+    // on the cursor and resolve on the right-click that confirms it (right-drag rotates and widens,
+    // left-click cancels - the same hands as a move order or a deployment spawn). While a phase is
+    // active the ordinary spell cursor (GetMouseCursorPosition) stands down.
+    public enum SpellPlacementPhase { None, AwaitingSquad, Placing }
+    public SpellPlacementPhase PlacementPhase => placementPhase;
+    private SpellPlacementPhase placementPhase = SpellPlacementPhase.None;
+    private int placementSlot = -1;
+    private static bool IsPlacementSpell(SpellData s) => s != null && (s.TeleportsSquad || s.SummonsSquad);
 
     // Per-battle mana. Granted whole in LoadSpellManager, spent permanently, never regenerated and
     // never carried over - so battle length does not change how many casts a player gets. This
@@ -77,6 +87,11 @@ public class SpellManager : MonoBehaviour
         InputHandler.Instance.OnSelectSpell2 += SelectSpellHotkey2;
         InputHandler.Instance.OnSelectSpell3 += SelectSpellHotkey3;
         InputHandler.Instance.OnSelectSpell4 += SelectSpellHotkey4;
+        if(UnitSelectionManager.Instance != null)
+        {
+            UnitSelectionManager.Instance.OnSelectedSquadsChanged -= OnSelectedSquadsChangedForPlacement;
+            UnitSelectionManager.Instance.OnSelectedSquadsChanged += OnSelectedSquadsChangedForPlacement;
+        }
 #endif
     }
     private void Update()
@@ -110,6 +125,8 @@ public class SpellManager : MonoBehaviour
         }
 
         EnsureLoadoutCoversHotbar();
+
+        if(_spells == null && browsingEnabled) ApplySavedCustomBattleSpells();
 
         // Two passes on purpose. State is fully populated before any View code runs, so a missing
         // serialized reference on a hotbar prefab throws ONCE and stays readable - filling and wiring
@@ -153,7 +170,7 @@ public class SpellManager : MonoBehaviour
         spellQuickCastMenu.Load(defaultSpells);
 
         if(browsingEnabled && spellBrowseMenu != null)
-            spellBrowseMenu.Initialize(availableSpells, SwapSpell, OnBrowseMenuHoverEnter, OnBrowseMenuHoverExit);
+            spellBrowseMenu.Initialize(new List<SpellData>(SpellRegistry.All).ToArray(), SwapSpell, OnBrowseMenuHoverEnter, OnBrowseMenuHoverExit);
     }
     /// <summary>
     /// Grows the loadout so it covers every hotbar button, because SwapSpell writes back into
@@ -190,6 +207,37 @@ public class SpellManager : MonoBehaviour
         }
         return summonUnitNames;
     }
+    #region Custom battle persistence
+    /// <summary>
+    /// The hotbar as enum values, slot by slot, for the custom-battle save written by
+    /// SquadManager.SaveFormation. An empty slot is recorded as Spell.None so the array keeps its
+    /// slot alignment; ApplySavedCustomBattleSpells treats None as "leave the inspector default".
+    /// </summary>
+    public Spell[] GetEquippedSpellEnums()
+    {
+        Spell[] equipped = new Spell[slotStates.Length];
+        for (int i = 0; i < slotStates.Length; i++)
+            equipped[i] = slotStates[i].SpellData == null ? Spell.None : slotStates[i].SpellData.Spell;
+        return equipped;
+    }
+    /// <summary>
+    /// Overlays the spells saved with the custom-battle army onto the inspector defaults. Slot by
+    /// slot, so a save that predates the field (empty array) or names a spell the registry no longer
+    /// has (None / missing asset) leaves that slot on its default rather than emptying it. Deliberately
+    /// not SpellLoadout.Sanitize: that enforces a hero's signature in slot 0, and a custom battle is a
+    /// sandbox with no hero.
+    /// </summary>
+    private void ApplySavedCustomBattleSpells()
+    {
+        Spell[] saved = SaveDataHandler.LoadCustomBattleSaveData().playerCustomBattleSpells;
+        if(saved == null) return;
+        for (int i = 0; i < saved.Length && i < defaultSpells.Length; i++) {
+            if(saved[i] == Spell.None) continue;
+            SpellData spell = SpellRegistry.Get(saved[i]);
+            if(spell != null) defaultSpells[i] = spell;
+        }
+    }
+    #endregion
     #region Pre-Battle Browsing
     private SpellData[] GetEquippedSpells()
     {
@@ -386,6 +434,15 @@ public class SpellManager : MonoBehaviour
             return;
 #endif
 
+        // SpellSystem only runs once BattleHasStarted, so a Deployment cast used to spend mana and
+        // cooldown immediately and then sit as a SpellEntity that detonated on Start Battle - a free
+        // delayed bomb whose VFX had long since played out. Casting is a battle-phase action.
+        if(BattleManager.Instance.GamePhase != GamePhase.Battle) {
+            RejectCast(slotIndex, $"game phase is {BattleManager.Instance.GamePhase}, spells cast only during Battle");
+            NotificationManager.Instance.ErrorNotification(LocalizationManager.Instance.GetText("SpellsLockedUntilBattle"));
+            return;
+        }
+
         if(slotStates[slotIndex].OnCooldown) {
             RejectCast(slotIndex, $"{slotStates[slotIndex].SpellData.name} on cooldown ({slotStates[slotIndex].CooldownRemaining:F1}s remaining)");
             return;
@@ -396,6 +453,12 @@ public class SpellManager : MonoBehaviour
             NotificationManager.Instance.ErrorNotification(LocalizationManager.Instance.GetText("notEnoughManaError"));
             return;
         }
+
+        if(IsPlacementSpell(slotStates[slotIndex].SpellData)) {
+            BeginPlacementFlow(slotIndex);
+            return;
+        }
+        if(placementPhase != SpellPlacementPhase.None) CancelPlacement(false);
 
         if(selectedSpellIndex >= 0 && selectedSpellIndex != slotIndex)
             spellCastButtons[selectedSpellIndex].SetSelected(false);
@@ -408,6 +471,162 @@ public class SpellManager : MonoBehaviour
             BattleManager.Instance.SetCursorMode(CursorMode.CastSpell);
         }
     }
+
+    #region Placement spells (Starstep, Raise Dead)
+    private void BeginPlacementFlow(int slotIndex)
+    {
+        if(placementPhase != SpellPlacementPhase.None) CancelPlacement(false);
+        SpellData spell = slotStates[slotIndex].SpellData;
+        UnitSelectionManager selection = BattleManager.Instance.UnitSelectionManager;
+        UIManager ui = BattleManager.Instance.UIManager;
+
+        // Deselect FIRST: the selection-changed handler may drop the cursor mode to Free, and leaving
+        // CastSpell clears the armed button, which must therefore be set after this line.
+        selection.DeselectSquadsBeforeDeletionOrSpawning();
+
+        if(selectedSpellIndex >= 0 && selectedSpellIndex != slotIndex)
+            spellCastButtons[selectedSpellIndex].SetSelected(false);
+        selectedSpellIndex = slotIndex;
+        spellCastButtons[slotIndex].SetSelected(true);
+        placementSlot = slotIndex;
+
+        if(spell.TeleportsSquad)
+        {
+            // The blink needs a squad first; the selection-changed handler moves us on to placing.
+            placementPhase = SpellPlacementPhase.AwaitingSquad;
+            ui.ShowCursorHint(LocalizationManager.Instance.GetText("SpellHintSelectSquad"));
+        }
+        else
+        {
+            // A summon knows its squad already: preview its footprint on the cursor straight away.
+            UnitName unit = spell.SummonedUnitName;
+            int count = TabletopTavernData.Instance.GetSquadStats(unit).baseUnitCount;
+            float spread = TabletopTavernConstants.GetSpread(TabletopTavernData.Instance.GetUnitSizeFromUnitName(unit));
+            // Face the enemy line, as a deployment spawn does, rather than whatever facing the last
+            // selection left in the drawer.
+            BattleManager.Instance.PositionDrawer.SetLookRotation(Quaternion.Euler(0f, -90f, 0f));
+            BattleManager.Instance.PositionDrawer.PreviewSpawnFormation(MouseWorldPosition.Instance.GetWorldPosition(), count, spread);
+            placementPhase = SpellPlacementPhase.Placing;
+            ui.ShowCursorHint(LocalizationManager.Instance.GetText("SpellHintPlaceFormation"));
+        }
+
+        if(BattleManager.Instance.CursorMode != CursorMode.CastSpell)
+            BattleManager.Instance.SetCursorMode(CursorMode.CastSpell);
+    }
+    // Subscribed to UnitSelectionManager.OnSelectedSquadsChanged. The only transition it owns is
+    // "a player squad was picked while Starstep waits for one".
+    private void OnSelectedSquadsChangedForPlacement(List<int> selectedSquadIds)
+    {
+        if(placementPhase != SpellPlacementPhase.AwaitingSquad) return;
+        bool playerSquadSelected = false;
+        foreach(int id in selectedSquadIds) if(id > 0) { playerSquadSelected = true; break; }
+        if(!playerSquadSelected) return;
+        // Next frame, not now: UnitSelectionManager rebuilds its per-squad unit counts in its own
+        // handler for this same event, and subscription order between the two managers is not
+        // something to depend on.
+        StartCoroutine(BeginPlacingSelectedSquadNextFrame());
+    }
+    private IEnumerator BeginPlacingSelectedSquadNextFrame()
+    {
+        yield return null;
+        if(placementPhase != SpellPlacementPhase.AwaitingSquad) yield break;
+        UnitSelectionManager selection = BattleManager.Instance.UnitSelectionManager;
+        if(selection.SelectedSquadEntityAndEntitiesCountDict.Count == 0) yield break;
+        selection.RefreshSelectedUnitCounts();
+        // The drawer lays a formation out with its parent yaw at facing - 90, which is exactly what
+        // BattleInputManager.Angle holds after a selection (and what a drag rewrites). Selection also
+        // stored the raw facing as lookRotation, and TurnOn would use THAT as the parent yaw - a
+        // preview 90 degrees off the squad's real orientation. HandleRotateFormation makes the same
+        // correction before its TurnOn for an ordinary move order.
+        BattleManager.Instance.PositionDrawer.SetLookRotation(Quaternion.Euler(0f, BattleInputManager.Instance.Angle, 0f));
+        BattleManager.Instance.PositionDrawer.TurnOn(selection.GetMousePositionOffsetByFormationCenter(), selection.SelectedSquadEntityAndEntitiesCountDict);
+        placementPhase = SpellPlacementPhase.Placing;
+        BattleManager.Instance.UIManager.ShowCursorHint(LocalizationManager.Instance.GetText("SpellHintPlaceFormation"));
+    }
+    /// <summary>The right-click that confirms a drawn formation. Called by BattleInputManager.HandleSpellPlacementCursorMode.</summary>
+    public void ConfirmPlacement()
+    {
+        if(placementPhase != SpellPlacementPhase.Placing || placementSlot < 0) return;
+        SpellData spell = slotStates[placementSlot].SpellData;
+        PositionDrawer drawer = BattleManager.Instance.PositionDrawer;
+
+        SpellPlacement placement = new SpellPlacement {
+            Positions = drawer.UnitPrefabPointPositions(),
+            // Same convention as SpawnManager.SpawnFormation and TeleportUnits: the drawn parent's
+            // yaw plus 90 is the squad's facing.
+            Rotation = drawer.PositionsParent.rotation * Quaternion.Euler(0f, 90f, 0f),
+            WidthAndDepth = spell.SummonsSquad ? drawer.Formation.GetWidthAndDepth(0) : default,
+            Center = drawer.PositionsParent.position
+        };
+
+        int slot = placementSlot;
+        bool teleport = spell.TeleportsSquad;
+        if(teleport)
+        {
+            // Apply the blink now, from the points on screen. TeleportUnits reads the drawer, turns it
+            // off, and carries the combat clear-out. Its facing comes from BattleInputManager.Angle,
+            // which selection already set to the squad's current facing and a right-drag updates -
+            // the same bookkeeping a deployment reposition relies on. Do not derive it from the
+            // drawer's parent yaw: that yaw follows two different conventions depending on whether
+            // the player dragged (2026-09-13: a click-to-place landed the squad 90 degrees off).
+            BattleManager.Instance.UnitPositioningManager.TeleportUnits(true);
+        }
+        else
+        {
+            drawer.TurnOff();
+        }
+
+        CancelPlacement(false);
+        CastPlacedSpell(slot, placement.Center, teleport ? null : placement, teleport);
+        // A blinked squad stays selected, exactly as it would after a move order.
+        bool squadsStillSelected = BattleManager.Instance.UnitSelectionManager.SelectedSquadIds.Count > 0;
+        BattleManager.Instance.SetCursorMode(squadsStillSelected ? CursorMode.UnitsSelected : CursorMode.Free);
+    }
+    /// <summary>
+    /// Leaves the placement flow. Nothing has been spent, so there is nothing to refund. Pass
+    /// resetCursor=false when the caller is about to set the cursor mode itself.
+    /// </summary>
+    public void CancelPlacement(bool resetCursor = true)
+    {
+        if(placementPhase == SpellPlacementPhase.None) return;
+        placementPhase = SpellPlacementPhase.None;
+        placementSlot = -1;
+        BattleManager.Instance.PositionDrawer.TurnOff();
+        BattleManager.Instance.UIManager.HideCursorHint();
+        if(resetCursor && BattleManager.Instance.CursorMode == CursorMode.CastSpell)
+            BattleManager.Instance.SetCursorMode(CursorMode.Free);
+    }
+    // The cast itself for a placed spell: the same gates and bookkeeping as CastSpell, minus the
+    // mouse-release wait (the confirming right-click has already been released).
+    private void CastPlacedSpell(int slotIndex, Vector3 origin, SpellPlacement placement, bool effectHandledByCaster)
+    {
+        SpellSlotState slot = slotStates[slotIndex];
+        if(slot.SpellData == null || slot.OnCooldown || !CanAfford(slot.SpellData)
+           || BattleManager.Instance.GamePhase != GamePhase.Battle) {
+            RejectCast(slotIndex, "failed re-check at placement time");
+            return;
+        }
+        if(slot.SpellData.SpellPrefab == null) {
+            Debug.LogError($"SpellManager: '{slot.SpellData.name}' has no SpellPrefab assigned and cannot be cast.", slot.SpellData);
+            return;
+        }
+
+        IAudioRequester.Instance.PlaySFX("cast-spell");
+        ActiveSpell spellInstance = Instantiate(slot.SpellData.SpellPrefab, origin, Quaternion.identity);
+        spellInstance.Load(slot.SpellData, origin, Entity.Null, Team.Player, 0, placement, effectHandledByCaster);
+
+        SpendMana(slot.SpellData.SpellManaCost);
+        Debug.Log($"SpellManager: cast {slot.SpellData.name} (placed) for {slot.SpellData.SpellManaCost} mana, {manaRemaining}/{manaMax} remaining");
+
+        slot.CooldownDuration = slot.SpellData.SpellCooldown;
+        slot.CooldownRemaining = slot.CooldownDuration;
+        spellCastButtons[slotIndex].RenderCooldown(1f, true);
+
+        spellsCast++;
+        slotsCastMask |= 1 << slotIndex;
+        CheckFullArsenal();
+    }
+    #endregion
     /// <summary>
     /// "Full Arsenal" - every slot on a fully-equipped hotbar cast at least once this battle.
     /// A partly-filled bar can never qualify, so the achievement always means all four spells.
@@ -443,6 +662,11 @@ public class SpellManager : MonoBehaviour
     {
         while(BattleManager.Instance.CursorMode == CursorMode.CastSpell)
         {
+            // A placement spell owns the mouse while its phase is active (BattleInputManager.
+            // HandleSpellPlacementCursorMode); the ordinary click-to-cast and right-click-cancel below
+            // would fight it - right-click is "place" there.
+            if(placementPhase != SpellPlacementPhase.None) { yield return null; continue; }
+
             if(Input.GetMouseButtonDown(1)){
                 BattleManager.Instance.SetCursorMode(CursorMode.Free);
                 yield break;
@@ -512,7 +736,8 @@ public class SpellManager : MonoBehaviour
         // public and this one is async void, so SelectSpell's gates are not on the only path in - and
         // mana is the first spell resource that can be driven negative by a second entry point.
         // The cooldown re-check rides along; it was previously only tested at select time.
-        if(slot.SpellData == null || slot.OnCooldown || !CanAfford(slot.SpellData)) {
+        if(slot.SpellData == null || slot.OnCooldown || !CanAfford(slot.SpellData)
+           || BattleManager.Instance.GamePhase != GamePhase.Battle) {
             RejectCast(selectedSpellIndex, "failed re-check at cast time");
             BattleManager.Instance.SetCursorMode(CursorMode.Free);
             return;
@@ -581,6 +806,9 @@ public class SpellManager : MonoBehaviour
         if(_cursorMode == CursorMode.CastSpell) {
             StartCoroutine(GetMouseCursorPosition());
         } else {
+            // Anything that pulls the cursor out of spell mode (battle end, another manager taking
+            // over) also ends a placement in progress. Nothing was spent yet.
+            if(placementPhase != SpellPlacementPhase.None) CancelPlacement(false);
             DeselectSpell();
         }
     }
@@ -599,6 +827,8 @@ public class SpellManager : MonoBehaviour
             InputHandler.Instance.OnSelectSpell3 -= SelectSpellHotkey3;
             InputHandler.Instance.OnSelectSpell4 -= SelectSpellHotkey4;
         }
+        if(UnitSelectionManager.Instance != null)
+            UnitSelectionManager.Instance.OnSelectedSquadsChanged -= OnSelectedSquadsChangedForPlacement;
 #endif
     }
 }

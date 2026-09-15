@@ -351,22 +351,10 @@ namespace TJ.Engagement
                         int battlesFought = campaignSaveManager.SaveData.BattlesFought;
                         Debug.Log($"[battle generation] battles fought: {battlesFought}");
 
-                        //DifficultyMod 7
-                        if (campaignSaveManager.SaveData.difficultyLevel >= TT_Difficulty.Squire)
-                        {
-                            battlesFought += 1;
-                        }
-
-                        //DifficultyMod 19
-                        if (campaignSaveManager.SaveData.difficultyLevel >= TT_Difficulty.Godking)
-                        {
-                            battlesFought += 1;
-                        }
-
-                        //DifficultyMod 10
-                        bool enemyPrestigeEligible = campaignSaveManager.SaveData.difficultyLevel >= TT_Difficulty.Duke;
-                        //DifficultyMod 14
-                        bool enemyPrestigeEnhanced = campaignSaveManager.SaveData.difficultyLevel >= TT_Difficulty.Emperor;
+                        // DifficultyMod 7 / 19 / 6 / 10 / 14 all resolve through DifficultyRules
+                        // so the difficulty sim generates the same armies the game does.
+                        TT_Difficulty difficulty = campaignSaveManager.SaveData.difficultyLevel;
+                        battlesFought += DifficultyRules.BattlesFoughtBonus(difficulty);
 
                         enemyArmy = ArmyCreator.GenerateEnemyArmy(
                             campaignSaveManager.SaveData.bookNumber,
@@ -374,10 +362,9 @@ namespace TJ.Engagement
                             campaignSaveManager.GetSeededRandom(),
                             engagementType == EngagementType.Horde,
                             unitsPool,
-                            //DifficultyMod 6
-                            campaignSaveManager.SaveData.difficultyLevel >= TT_Difficulty.Knight,
-                            enemyPrestigeEligible,
-                            enemyPrestigeEnhanced
+                            DifficultyRules.HarderFinalBattle(difficulty),
+                            DifficultyRules.EnemyPrestigeEligible(difficulty),
+                            DifficultyRules.EnemyPrestigeEnhanced(difficulty)
                         );
 
                         if (CampaignManager.Instance.GearManager.CheckForGear(GearID.BearSpray))

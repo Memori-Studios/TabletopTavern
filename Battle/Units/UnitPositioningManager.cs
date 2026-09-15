@@ -25,7 +25,13 @@ public class UnitPositioningManager : MonoBehaviour
         random = new Unity.Mathematics.Random(1);
         battleInputManager = BattleInputManager.Instance;
     }
-    private void TeleportUnits(bool _generateNoise)
+    /// <summary>
+    /// Moves every selected squad onto the PositionDrawer's current points instantly. Deployment
+    /// repositioning has always used this; Starstep's placement flow reuses it mid-battle, which is
+    /// why the clear-out below also raises DisengageFromCombat - a deployed squad is never in combat,
+    /// a blinked one usually is.
+    /// </summary>
+    public void TeleportUnits(bool _generateNoise)
     {
         EntityManager entityManager = World.DefaultGameObjectInjectionWorld.EntityManager;
         quaternion desiredRotation = quaternion.AxisAngle(math.up(), (battleInputManager.Angle+90) * Mathf.Deg2Rad);
@@ -47,6 +53,9 @@ public class UnitPositioningManager : MonoBehaviour
                     entityManager.RemoveComponent<ChargeSquad>(squadEntity.SelfEntity);
                 if (entityManager.HasComponent<IssueSquadCommand>(squadEntity.SelfEntity))
                     entityManager.RemoveComponent<IssueSquadCommand>(squadEntity.SelfEntity);
+                if (entityManager.HasComponent<InCombat>(squadEntity.SelfEntity) ||
+                    entityManager.HasComponent<FormationEngagedInRangedCombat>(squadEntity.SelfEntity))
+                    entityManager.SetComponentEnabled<DisengageFromCombat>(squadEntity.SelfEntity, true);
             }
             for (int i = 0; i < kvp.Value.Count; i++)
             {

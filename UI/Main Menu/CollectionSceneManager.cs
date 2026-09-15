@@ -29,7 +29,10 @@ namespace TJ.MainMenu
                 collectionPanel.SetUp(Close);
                 collectionPanel.OpenPanel();
 
+                // Esc and right-click both close the overlay; MainMenu's right-click handler
+                // stands down while OverlaySceneOpen, so this is the only responder up here.
                 InputHandler.Instance.SettingsButtonPressed += Close;
+                InputHandler.Instance.SecondaryActionPressed += Close;
             }
             finally
             {
@@ -49,7 +52,10 @@ namespace TJ.MainMenu
         private void OnDestroy()
         {
             if (InputHandler.HasInstance)
+            {
                 InputHandler.Instance.SettingsButtonPressed -= Close;
+                InputHandler.Instance.SecondaryActionPressed -= Close;
+            }
         }
     }
 }

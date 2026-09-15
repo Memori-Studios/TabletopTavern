@@ -177,17 +177,20 @@ namespace TJ
                 return;
             }
 
-            if (_rangedBehavior.ArmyHasArtillery())
-            {
-                Debug.Log("[EnemyGeneral] Starting Passive — army contains artillery");
-                SetPassive();
-                return;
-            }
-
+            // Outriders beat artillery on purpose: Passive holds WaitingForCommand on every squad, so an
+            // artillery army with outriders left the raiders parked at their spawn points behind the
+            // player and the whole army inert, which players reported as "the enemy never moves".
             if (ArmyHasOutriders())
             {
                 Debug.Log("[EnemyGeneral] Starting Aggressive — army contains outriders");
                 SetDelayedAggressive();
+                return;
+            }
+
+            if (_rangedBehavior.ArmyHasArtillery())
+            {
+                Debug.Log("[EnemyGeneral] Starting Passive — army contains artillery");
+                SetPassive();
                 return;
             }
 

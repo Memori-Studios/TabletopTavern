@@ -60,6 +60,32 @@ partial struct RangedSquadFindTargetSystem : ISystem
             CeaseFireTag
         >()){
 
+            // Dazed after abandoning a target (EnemyPursuitWatchdogSystem gives up on a kiter, or the
+            // opponent broke off). Mirrors the melee finder: tick the daze down, and drop the queued
+            // orders. The drop is load-bearing, not tidy-up - the abandoned Attack order is still
+            // InProgress (QueuedOrderSystem only completes an Attack when its target dies) and the
+            // guard at the bottom of this loop refuses a replacement while one is InProgress. Without
+            // this, an enemy archer that gave up chasing cavalry never targeted anything again.
+            // Only enemy squads are ever dazed, so this cannot discard a player's hand-queued orders.
+            if (entityManager.HasComponent<OpponentRanAwayTag>(squad.ValueRO.SelfEntity))
+            {
+                OpponentRanAwayTag opponentRanAwayTag = entityManager.GetComponentData<OpponentRanAwayTag>(squad.ValueRO.SelfEntity);
+                opponentRanAwayTag.DazedTime -= SystemAPI.Time.DeltaTime;
+                entityManager.SetComponentData(squad.ValueRO.SelfEntity, opponentRanAwayTag);
+
+                if (opponentRanAwayTag.DazedTime <= 0)
+                {
+                    entityCommandBuffer.RemoveComponent<OpponentRanAwayTag>(squad.ValueRO.SelfEntity);
+                }
+
+                if (queuedOrders.Length > 0)
+                {
+                    queuedOrders.Clear();
+                }
+
+                continue;
+            }
+
             if(!SquadOverridesComponent.AutoTarget && !entityManager.Exists(squad.ValueRO.TargetSquadEntity))
             {
                 continue;

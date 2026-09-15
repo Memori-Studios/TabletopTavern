@@ -17,6 +17,7 @@ namespace TJ
         // [SerializeField] private Transform unitAttributesParent;
         // [SerializeField] private UnitAttributesUI unitAttributePrefab;
         [SerializeField] private GameObject isChargingGO, inCombatGO, isTerrifiedGO, inForestGO, inSwampGO, chargeBonusCooldownGO, exhaustedGO, bloodFrenzyGO, rageGO, armorSunderedGO, attackedInFlanksGO, onFireGO, defensiveStanceGO, bracedGO, retreatingAlliesGO, garrisonDefenderGO, defendersResolveGO;
+        [SerializeField] private GameObject huntersMarkGO;
 
         [Header("Combat Status Indicators")]
         [SerializeField] private TMP_Text _combatStatusText;
@@ -117,6 +118,7 @@ namespace TJ
             bloodFrenzyGO.SetActive(entityManager.HasComponent<BloodFrenzyActiveTag>(squadEntity.SelfEntity));
             rageGO.SetActive(entityManager.HasComponent<RageActiveTag>(squadEntity.SelfEntity) || entityManager.HasComponent<SlayerActiveTag>(squadEntity.SelfEntity));
             armorSunderedGO.SetActive(entityManager.HasComponent<ArmorSunderedTag>(squadEntity.SelfEntity));
+            if (huntersMarkGO != null) huntersMarkGO.SetActive(entityManager.HasComponent<HuntersMarkTag>(squadEntity.SelfEntity));
             attackedInFlanksGO.SetActive(entityManager.IsComponentEnabled<TakingFlankingDamage>(squadEntity.SelfEntity));
             onFireGO.SetActive(entityManager.IsComponentEnabled<TakingFireDamage>(squadEntity.SelfEntity));
             bracedGO.SetActive(entityManager.IsComponentEnabled<BracedTag>(squadEntity.SelfEntity));

@@ -12,6 +12,7 @@ namespace TJ.MainMenu
         [SerializeField] private Material _tableClothMaterial1, _tableClothMaterial2;
         [SerializeField] private MeshRenderer[] _flags;
         Material _flagMaterialInstance;
+        Material _tableClothInstance1, _tableClothInstance2;
         GameObject _activeThemeInstance;
         string _activeThemeKey;
         TavernThemeData themeToLoad;
@@ -20,6 +21,7 @@ namespace TJ.MainMenu
         private async void Start()
         {
             _flagMaterialInstance = Instantiate(_flagMaterial);
+            CreateTableClothInstances();
             SaveDataHandler.RefreshTavernThemeUnlocks();
             themeToLoad = GetThemeForCurrentSave();
 // #if !UNITY_EDITOR
@@ -104,8 +106,52 @@ namespace TJ.MainMenu
                 flag.material = _flagMaterialInstance;
             }
 
-            _tableClothMaterial1.color = themeToLoad.RaceData.PrimaryColor;
-            _tableClothMaterial2.color = themeToLoad.RaceData.SecondaryColor;
+            _tableClothInstance1.color = themeToLoad.RaceData.PrimaryColor;
+            _tableClothInstance2.color = themeToLoad.RaceData.SecondaryColor;
         }
+
+        #region Tablecloth material instances
+        // The two tablecloth materials are project assets. Writing .color on them directly
+        // dirtied the .mat files on disk in the Editor on every theme load, so Unity VCS
+        // kept auto-checking them out. Swap every tablecloth renderer in the Tavern scene
+        // onto a runtime copy and tint that instead, the same way the flags use
+        // _flagMaterialInstance.
+        private void CreateTableClothInstances()
+        {
+            _tableClothInstance1 = Instantiate(_tableClothMaterial1);
+            _tableClothInstance2 = Instantiate(_tableClothMaterial2);
+
+            foreach (GameObject root in gameObject.scene.GetRootGameObjects())
+            {
+                foreach (MeshRenderer renderer in root.GetComponentsInChildren<MeshRenderer>(true))
+                {
+                    Material[] materials = renderer.sharedMaterials;
+                    bool swapped = false;
+                    for (int i = 0; i < materials.Length; i++)
+                    {
+                        if (materials[i] == _tableClothMaterial1)
+                        {
+                            materials[i] = _tableClothInstance1;
+                            swapped = true;
+                        }
+                        else if (materials[i] == _tableClothMaterial2)
+                        {
+                            materials[i] = _tableClothInstance2;
+                            swapped = true;
+                        }
+                    }
+
+                    if (swapped) renderer.sharedMaterials = materials;
+                }
+            }
+        }
+
+        private void OnDestroy()
+        {
+            Destroy(_flagMaterialInstance);
+            Destroy(_tableClothInstance1);
+            Destroy(_tableClothInstance2);
+        }
+        #endregion
     }
 }

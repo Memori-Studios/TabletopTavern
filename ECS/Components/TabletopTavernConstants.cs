@@ -69,6 +69,10 @@ public static class TabletopTavernConstants
     // Damage Modifiers
     public const float MELEE_TOTAL_DAMAGE_MODIFIER = 0.25f;
     public const float RANGED_TOTAL_DAMAGE_MODIFIER = 1.0f;
+    // Spells are authored at face value, like ranged: the number on the SpellData asset is the
+    // number that lands per model, and it is what tooltips, auto-resolve and the Difficulty Sim
+    // already assume. This is the only global spell-damage dial. (TT-78, 2026-09-14)
+    public const float SPELL_TOTAL_DAMAGE_MODIFIER = 1.0f;
     public const float MORALE_LOSS_MODIFIER = 0.75f;
     public const float ARTILLERY_VS_ARTILLERY_DAMAGE_MODIFIER = 0.5f;
 
@@ -78,6 +82,14 @@ public static class TabletopTavernConstants
     // glance rather than doing arithmetic. The tradeoff is only five usable price points.
     public const int SPELL_MANA_POOL_BASE = 10;
     public const int SPELL_MANA_POOL_PER_UPGRADE = 2;
+    // The pool grows by this much per act after the first (10 / 13 / 16 on a fresh save). Act 3 battles
+    // are longer and bigger, so a flat pool shrinks in relative terms; +3 is one extra cast of a
+    // mid-cost hero spell per act. Decided on TT-3, 2026-09-14.
+    public const int SPELL_MANA_POOL_PER_ACT = 3;
+    // Custom battles are the sandbox: they ignore the loadout slot locks and let the player pick all
+    // four spells, so they always get the largest pool a campaign can reach (act 3 with both Arcane
+    // Reserves nodes) regardless of the account's Renown. Keep this equal to that maximum.
+    public const int SPELL_MANA_POOL_CUSTOM_BATTLE = 20;
 
     // Campaign
     public const float RESERVES_HEAL_AMOUNT = 0.5f;
@@ -217,7 +229,7 @@ public static class TabletopTavernConstants
             4 => 99,
             _ => 69,
         };
-    }//<a href="https://www.flaticon.com/free-icons/jurassic" title="jurassic icons">Jurassic icons created by Marz Gallery - Flaticon</a>
+    }
     #region Unit type predicates
     // Single source of truth for how a unit type fights. Replaces the old UsesMeleePrestige
     // UnitName whitelist (Cragflayers / Berserkers / KunoichiInfiltrators), which are now

@@ -50,20 +50,26 @@ namespace TJ.Engagement
         // Auto-resolve runs from the Map scene, where a real manager exists and the multiplier applies as
         // before. Anywhere else - a custom battle, the editor prediction button, a test - there is no
         // campaign and no book number, so the honest answer is no bonus rather than an exception.
+        //
+        // The difficulty sim (Tests.Editor) has no campaign either but does know the act, so it
+        // sets ActBonusOverride and the getter uses that first. Null everywhere else.
+        internal float? ActBonusOverride;
+        internal static float ActBonus(int bookNumber) => bookNumber switch
+        {
+            2 => 1.25f,
+            3 => 1.50f,
+            _ => 1.00f,
+        };
         private float ENEMY_AUTORESOLVE_SPECIAL_BONUS
         {
             get
             {
+                if (ActBonusOverride.HasValue) return ActBonusOverride.Value;
                 CampaignManager campaign = CampaignManager.InstanceIfExists;
                 if (campaign == null) return 1.00f;
                 CampaignSaveManager saveManager = campaign.CampaignSaveManager;
                 if (saveManager == null || saveManager.SaveData == null) return 1.00f;
-                return saveManager.SaveData.bookNumber switch
-                {
-                    2 => 1.25f,
-                    3 => 1.50f,
-                    _ => 1.00f,
-                };
+                return ActBonus(saveManager.SaveData.bookNumber);
             }
         }
         private const float GARRISON_AUTORESOLVE_BONUS = 1.4f;
@@ -75,6 +81,9 @@ namespace TJ.Engagement
         // into a log line.
         private const int MAX_AUTORESOLVE_ROUNDS = 10000;
         private bool _isGarrisonBattle;
+        // Only Load() sets the garrison flag, and Load() needs a campaign. The difficulty sim
+        // sets it directly.
+        internal bool IsGarrisonBattle { set => _isGarrisonBattle = value; }
         // One-shot per battle. Reset wherever the armies are (re)built, not in RunSimulationLoop,
         // which is called once per round.
         internal bool _mageAlphaStrikeApplied;
@@ -216,6 +225,16 @@ namespace TJ.Engagement
         }
     internal static AutoResolveSquad GenerateAutoResolveSquadStats(SquadToLoad _squadToLoad, int _squadIndex, Team _team, CampaignSaveManager campaignSaveManager = null, bool allowGearModifiers = true)
     {
+        bool useCampaign = allowGearModifiers && campaignSaveManager != null;
+        return GenerateAutoResolveSquadStats(_squadToLoad, _squadIndex, _team,
+            useCampaign ? (Func<GearID, bool>)campaignSaveManager.CheckForGear : null,
+            useCampaign && campaignSaveManager.SaveData.battleFieldPreset.weather == Weather.Rain);
+    }
+    // Gear and weather as plain inputs. The game passes them from the campaign save through the
+    // overload above; the difficulty sim (Tests.Editor) passes a gear set and a weather flag as
+    // data, because it has no campaign. A null hasGear means no gear at all.
+    internal static AutoResolveSquad GenerateAutoResolveSquadStats(SquadToLoad _squadToLoad, int _squadIndex, Team _team, Func<GearID, bool> hasGear, bool rain)
+    {
         SquadStats squadStats = TabletopTavernData.Instance.GetSquadStats(_squadToLoad.UnitName);
         UnitType unitType = TabletopTavernData.Instance.GetUnitTypeFromUnitName(_squadToLoad.UnitName);
         if (_squadToLoad.PrestigeTrait != UnitAttribute.None) {
@@ -233,48 +252,46 @@ namespace TJ.Engagement
         int ChargeBonus = squadStats.ChargeBonus;
         float shieldBlockChance = 0;
 
-        if(allowGearModifiers && campaignSaveManager != null)
-        {
-            if(campaignSaveManager.SaveData.battleFieldPreset.weather == Weather.Rain) {
-                accuracyMultiplier *= 0.5f;
-            }
+        if (rain) accuracyMultiplier *= 0.5f;
 
+        if(hasGear != null)
+        {
             if(_team == Team.Player)
             {
-                if(campaignSaveManager.CheckForGear(GearID.ArmingSwords) && TabletopTavernConstants.FightsInMelee(unitType))
+                if(hasGear(GearID.ArmingSwords) && TabletopTavernConstants.FightsInMelee(unitType))
                     meleeAttack += GearData.GetGear(GearID.ArmingSwords).GearModifierValue;
-                if(campaignSaveManager.CheckForGear(GearID.BucklerShields) && (squadStats.SquadAttributes.StandardShields || squadStats.SquadAttributes.HeavyShields))
+                if(hasGear(GearID.BucklerShields) && (squadStats.SquadAttributes.StandardShields || squadStats.SquadAttributes.HeavyShields))
                     meleeDefense += GearData.GetGear(GearID.BucklerShields).GearModifierValue;
-                if(campaignSaveManager.CheckForGear(GearID.DiamondTippedArrows) && unitType == UnitType.Ranged) 
+                if(hasGear(GearID.DiamondTippedArrows) && unitType == UnitType.Ranged) 
                     squadStats.SquadAttributes.ArmorPiercing = true;
-                if(campaignSaveManager.CheckForGear(GearID.HeavyWeapons) && squadStats.RarityTier == UnitRarity.Rare) 
+                if(hasGear(GearID.HeavyWeapons) && squadStats.RarityTier == UnitRarity.Rare) 
                     squadStats.SquadAttributes.ArmorPiercing = true; 
-                if(campaignSaveManager.CheckForGear(GearID.Turkey) && unitType == UnitType.Ranged) 
+                if(hasGear(GearID.Turkey) && unitType == UnitType.Ranged) 
                     squadStats.SquadAttributes.AntiLarge = true;
-                if(campaignSaveManager.CheckForGear(GearID.Longbows) && unitType == UnitType.Ranged) 
+                if(hasGear(GearID.Longbows) && unitType == UnitType.Ranged) 
                     range += GearData.GetGear(GearID.Longbows).GearModifierValue;
-                if(campaignSaveManager.CheckForGear(GearID.Glaives) && squadStats.SquadAttributes.AntiLarge) 
+                if(hasGear(GearID.Glaives) && squadStats.SquadAttributes.AntiLarge) 
                     WeaponStrength += GearData.GetGear(GearID.Glaives).GearModifierValue;
-                if(campaignSaveManager.CheckForGear(GearID.TexanBBQ) && TabletopTavernConstants.FightsInMelee(unitType))
+                if(hasGear(GearID.TexanBBQ) && TabletopTavernConstants.FightsInMelee(unitType))
                     WeaponStrength += GearData.GetGear(GearID.TexanBBQ).GearModifierValue;
-                if(campaignSaveManager.CheckForGear(GearID.BallisticCharts)) 
+                if(hasGear(GearID.BallisticCharts)) 
                     accuracy += (GearData.GetGear(GearID.BallisticCharts).GearModifierValue/100f);
-                if(campaignSaveManager.CheckForGear(GearID.ConscriptionOrders) && squadStats.RarityTier == UnitRarity.Common) {
+                if(hasGear(GearID.ConscriptionOrders) && squadStats.RarityTier == UnitRarity.Common) {
                     meleeAttack += GearData.GetGear(GearID.ConscriptionOrders).GearModifierValue;
                     meleeDefense += GearData.GetGear(GearID.ConscriptionOrders).GearModifierValue;
                 }
-                if(campaignSaveManager.CheckForGear(GearID.JoustingLances) && (squadStats.SquadAttributes.StandardShields || squadStats.SquadAttributes.HeavyShields)) 
+                if(hasGear(GearID.JoustingLances) && (squadStats.SquadAttributes.StandardShields || squadStats.SquadAttributes.HeavyShields)) 
                     meleeDefense += GearData.GetGear(GearID.JoustingLances).GearModifierValue;
-                if(campaignSaveManager.CheckForGear(GearID.GnomishArmorers) && squadStats.RarityTier == UnitRarity.Rare)
+                if(hasGear(GearID.GnomishArmorers) && squadStats.RarityTier == UnitRarity.Rare)
                     meleeDefense += GearData.GetGear(GearID.GnomishArmorers).GearModifierValue;
-                if(campaignSaveManager.CheckForGear(GearID.WellHonedAxes) && squadStats.SquadAttributes.ArmorPiercing) //must apply after diamond tipped arrows
+                if(hasGear(GearID.WellHonedAxes) && squadStats.SquadAttributes.ArmorPiercing) //must apply after diamond tipped arrows
                     meleeAttack += GearData.GetGear(GearID.WellHonedAxes).GearModifierValue;
-                if(campaignSaveManager.CheckForGear(GearID.RavensEye) && squadStats.RarityTier != UnitRarity.Common && unitType == UnitType.Ranged) 
+                if(hasGear(GearID.RavensEye) && squadStats.RarityTier != UnitRarity.Common && unitType == UnitType.Ranged) 
                     accuracy += (GearData.GetGear(GearID.RavensEye).GearModifierValue/100f);
-                if(campaignSaveManager.CheckForGear(GearID.RingoftheElvenKing) && squadStats.unitType == UnitType.Ranged)
+                if(hasGear(GearID.RingoftheElvenKing) && squadStats.unitType == UnitType.Ranged)
                     missileStrength += GearData.GetGear(GearID.RingoftheElvenKing).GearModifierValue;
                 if(squadStats.SquadAttributes.StandardShields || squadStats.SquadAttributes.HeavyShields) {
-                    if(campaignSaveManager.CheckForGear(GearID.TowerShields)) {
+                    if(hasGear(GearID.TowerShields)) {
                         shieldBlockChance = GearData.GetGear(GearID.TowerShields).GearModifierValue/100f;
                     } else {
                         shieldBlockChance = 0.5f;
@@ -977,7 +994,8 @@ namespace TJ.Engagement
             RemoveUnitsFromSquad(data.z, data.y, data.x);
         }
     }
-    private static bool HasRouted(AutoResolveSquad squad)
+    // internal: the difficulty sim counts routed squads with the same rule the loop uses.
+    internal static bool HasRouted(AutoResolveSquad squad)
     {
         if (squad.UnitsAlive <= 0) return true;
         float routeThreshold = (1f - squad.squadStats.Leadership / 100f) * squad.maxUnits;

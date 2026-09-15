@@ -57,6 +57,7 @@ partial struct SnareTrapSystem : ISystem
                     DamageBufferElement = new DamageBufferElement
                     {
                         DamageType = DamageType.Magical,
+                        DamageSource = DamageSource.Spell,
                         AttackStrength = trap.ValueRO.Damage,
                         TeamOfSource = trap.ValueRO.OwnerTeam,
                         DamageSourceSquadId = 0

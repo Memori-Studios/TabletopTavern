@@ -29,7 +29,10 @@ public class ActiveSpell : MonoBehaviour
     [SerializeField] private float maxFlashThickness = 0.1f;
     [SerializeField] private float flashSpeed = 10f;
 
-    private bool HasBonusDiscs => spellData.GrantsBattlefieldBonus && disc1 != null && disc2 != null;
+    // Keyed on the prefab, not on GrantsBattlefieldBonus: Lesser Mending shares the AOE Buff prefab
+    // with the stat auras but is a healing zone, and gating on the bonus flag left its discs at
+    // whatever radius and colour the prefab was saved with. Only the two AOE Buff prefabs have discs.
+    private bool HasBonusDiscs => disc1 != null && disc2 != null;
 
     private SpellData spellData;
     private Entity targetSquadEntity = Entity.Null;
@@ -40,6 +43,12 @@ public class ActiveSpell : MonoBehaviour
     // army, and what gets a mage's kills credited instead of landing on the "no killer" sentinel.
     private Team sourceTeam = Team.Player;
     private int sourceSquadId = 0;
+
+    // Placement spells (Starstep, Raise Dead): the formation the player drew before confirming.
+    // Null for every other cast. The summon branch spawns onto it; the teleport branch has already
+    // been applied by SpellManager at placement time and only plays the visuals here.
+    private SpellPlacement placement;
+    private bool effectHandledByCaster;
 
     /// <summary>
     /// TargetTeam on a SpellData is authored from the caster's point of view - Enemy means "whoever
@@ -57,12 +66,15 @@ public class ActiveSpell : MonoBehaviour
     }
 
     public void Load(SpellData _spellData, float3 position, Entity _targetSquadEntity = default,
-                     Team _sourceTeam = Team.Player, int _sourceSquadId = 0)
+                     Team _sourceTeam = Team.Player, int _sourceSquadId = 0,
+                     SpellPlacement _placement = null, bool _effectHandledByCaster = false)
     {
         spellData = _spellData;
         targetSquadEntity = _targetSquadEntity;
         sourceTeam = _sourceTeam;
         sourceSquadId = _sourceSquadId;
+        placement = _placement;
+        effectHandledByCaster = _effectHandledByCaster;
         transform.position = position;
 
         if(HasBonusDiscs) SetDisplayOfBonus(spellData.SpellModifierValue, spellData.SpellRadius);
@@ -145,7 +157,12 @@ public class ActiveSpell : MonoBehaviour
         EntityManager entityManager = World.DefaultGameObjectInjectionWorld.EntityManager;
         var ecb = World.DefaultGameObjectInjectionWorld.GetOrCreateSystemManaged<EndSimulationEntityCommandBufferSystem>().CreateCommandBuffer();
 
-        if (spellData.SummonsSquad)
+        if (effectHandledByCaster)
+        {
+            // Starstep through the placement flow: SpellManager already teleported the squad onto the
+            // drawn formation when the player confirmed it. This instance is the visual only.
+        }
+        else if (spellData.SummonsSquad)
         {
             // Spawns a real player squad that lasts until killed. No SpellEntity is created, so
             // SpellSystem never sees this cast - the squad is the entire effect. CleanUpSpell still
@@ -156,6 +173,8 @@ public class ActiveSpell : MonoBehaviour
             // fights for the player, so this stays player-only until enemy summoning is built.
             if (sourceTeam == Team.Enemy)
                 Debug.LogError($"ActiveSpell: '{spellData.name}' summons, but enemy summoning is not supported - cast ignored.", spellData);
+            else if (placement != null)
+                BattleManager.Instance.ArmySpawnManager.SummonSquad(spellData.SummonedUnitName, placement);
             else
                 BattleManager.Instance.ArmySpawnManager.SummonSquad(spellData.SummonedUnitName, transform.position);
         }
@@ -164,13 +183,19 @@ public class ActiveSpell : MonoBehaviour
             // Hunter's Mark - no SpellEntity and no damage of its own; just tag the targeted enemy
             // squad so HuntersMarkSystem amplifies all hostile damage to it for SpellDuration seconds.
             // SpellModifierValue is the percent bonus (50 -> x1.5), matching the tooltip's {1} slot.
+            // A re-cast on an already-marked squad refreshes the mark rather than stacking it, so the
+            // duration may legitimately outlast the cooldown (it does since the 10 s flatten).
             if (targetSquadEntity != Entity.Null && entityManager.Exists(targetSquadEntity))
             {
-                ecb.AddComponent(targetSquadEntity, new HuntersMarkTag
+                HuntersMarkTag mark = new()
                 {
                     RemainingDuration = spellData.SpellDuration,
                     DamageMultiplier = 1f + spellData.SpellModifierValue / 100f
-                });
+                };
+                if (entityManager.HasComponent<HuntersMarkTag>(targetSquadEntity))
+                    ecb.SetComponent(targetSquadEntity, mark);
+                else
+                    ecb.AddComponent(targetSquadEntity, mark);
             }
         }
         else if (spellData.BracesTarget)
@@ -283,6 +308,9 @@ public class ActiveSpell : MonoBehaviour
             DamageBufferElement damageBufferElement = new ()
             {
                 DamageType = spellData.HealsInsteadOfDamage ? DamageType.Healing : DamageType.Magical,
+                // Load-bearing: an element with no source defaults to Melee and takes the 0.25 melee
+                // knob in ApplyDamageSystem, which is how every spell landed at a quarter until TT-78.
+                DamageSource = DamageSource.Spell,
                 AttackStrength = spellData.SpellModifierValue,
                 TeamOfSource = spellData.TargetTeam == Team.Neutral ? Team.Neutral : sourceTeam,
                 DamageSourceSquadId = sourceSquadId
@@ -298,7 +326,8 @@ public class ActiveSpell : MonoBehaviour
                 RemainingDuration = spellData.SpellDuration,
                 TargetSquadEntity = targetSquadEntity, // Entity.Null unless this is a Squad-targeted cast
                 TickInterval = spellData.TickInterval,
-                TickTimer = 0f // first tick fires immediately, then every TickInterval seconds
+                TickTimer = 0f, // first tick fires immediately, then every TickInterval seconds
+                HitsSingleUnit = spellData.HitsSingleUnit
             });
         }
 

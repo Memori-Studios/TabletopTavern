@@ -21,6 +21,8 @@ namespace TJ
         [Header("Status Effect Icons")]
         [SerializeField] private GameObject fireAtWillGO;
         [SerializeField] private GameObject chargeGO, terrifiedGO, exhaustedGO, weaponStrengthGO, armorSunderedGO, isTakingFlankingDamageGO, isFlankingGO, isOnFireGO, defensiveStanceGO, bracedGO, outOfAmmoGO;
+        // Hunter's Mark: shows while the squad carries HuntersMarkTag (see SquadFlagGameObject.HandleHuntersMark).
+        [SerializeField] private GameObject huntersMarkGO;
 
         [Header("Prestige Icons")]
         [SerializeField] private GameObject prestige1GO;
@@ -29,6 +31,8 @@ namespace TJ
         public bool IsExhausted => _isExhausted;
         private bool _weaponStrengthBonusActive = false;
         public bool WeaponStrengthBonusActive => _weaponStrengthBonusActive;
+        private bool _huntersMarkActive = false;
+        public bool HuntersMarkActive => _huntersMarkActive;
         private bool _armorSunderedActive = false;
         public bool ArmorSunderedActive => _armorSunderedActive;
         private bool _isTakingFlankingDamage = false;
@@ -85,6 +89,7 @@ namespace TJ
             exhaustedGO.SetActive(false);
             weaponStrengthGO.SetActive(false);
             armorSunderedGO.SetActive(false);
+            if (huntersMarkGO != null) huntersMarkGO.SetActive(false);
             isTakingFlankingDamageGO.SetActive(false);
             isFlankingGO.SetActive(false);
             isOnFireGO.SetActive(false);
@@ -132,6 +137,12 @@ namespace TJ
             _armorSunderedActive = isActive;
             if(armorSunderedGO != null)
             armorSunderedGO.SetActive(isActive);
+        }
+        public void SetHuntersMarkActive(bool isActive)
+        {
+            _huntersMarkActive = isActive;
+            if (huntersMarkGO != null)
+            huntersMarkGO.SetActive(isActive);
         }
         public void SetTakingFlankingDamageActive(bool isActive)
         {

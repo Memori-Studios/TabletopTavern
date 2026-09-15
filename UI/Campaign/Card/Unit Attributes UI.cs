@@ -38,6 +38,21 @@ namespace TJ
             tooltipTrigger = GetComponent<MemoriTooltipTrigger>();
             tooltipTrigger.SetUpToolTip(_description: localizedDescription);
         }
+        /// <summary>
+        /// A condition with a countdown, e.g. Hunter's Mark: the badge reads "Marked 8s" and the tooltip
+        /// description is the condition's Desc string formatted with descriptionArgs. Safe to call
+        /// repeatedly - SquadBattleInfo refreshes it on its ammo tick so the seconds stay live.
+        /// </summary>
+        public void LoadTimed(UnitCondition _unitCondition, float secondsRemaining, params object[] descriptionArgs)
+        {
+            unitCondition = _unitCondition;
+            string localizedAttribute = LocalizationManager.Instance.GetText(unitCondition.ToString());
+            string localizedDescription = LocalizationManager.Instance.GetText(unitCondition.ToString() + "Desc");
+
+            attributeText.text = $"{localizedAttribute} {Mathf.CeilToInt(secondsRemaining)}s";
+            tooltipTrigger = GetComponent<MemoriTooltipTrigger>();
+            tooltipTrigger.SetUpToolTip(_description: string.Format(localizedDescription, descriptionArgs));
+        }
         public void SetUpTooltip()
         {
             string localizedAttribute = LocalizationManager.Instance.GetText(unitAttribute.ToString());

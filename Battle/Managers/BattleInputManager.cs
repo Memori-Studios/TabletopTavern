@@ -244,6 +244,53 @@ public class BattleInputManager : MonoBehaviour
             RotateSquad();
         }
     }
+    /// <summary>
+    /// The placement spells' cursor (Starstep, Raise Dead), driven from UnitSelectionManager.Update
+    /// while the cursor is in CastSpell mode and SpellManager reports a placement phase. Same hands as
+    /// HandleSpawningSquadCursorMode: the preview follows the mouse, right-click places, right-drag
+    /// rotates and widens, left-click cancels. While Starstep is still waiting for a squad the
+    /// ordinary selection handling runs beside this and only right-click (cancel) is ours.
+    /// </summary>
+    public void HandleSpellPlacementCursorMode()
+    {
+        TJ.Spells.SpellManager spellManager = BattleManager.Instance.SpellManager;
+        if (spellManager.PlacementPhase == TJ.Spells.SpellManager.SpellPlacementPhase.AwaitingSquad)
+        {
+            if (_rightClickDownThisFrame) spellManager.CancelPlacement();
+            return;
+        }
+        if (spellManager.PlacementPhase != TJ.Spells.SpellManager.SpellPlacementPhase.Placing) return;
+
+        positionDrawer.ConfirmValidityOfPositions(Team.Player, false);
+
+        if (_leftClickDownThisFrame)
+        {
+            if (UnityEngine.EventSystems.EventSystem.current.IsPointerOverGameObject()) return;
+            spellManager.CancelPlacement();
+            IAudioRequester.Instance.PlaySFX(SFXData.ActionFailed);
+        }
+        else if (_rightClickUpThisFrame)
+        {
+            if (positionDrawer.ValidPositions)
+                spellManager.ConfirmPlacement();
+            else
+                NotificationManager.Instance.ErrorNotification(positionDrawer.PositionErrorMessage);
+        }
+        else if (!_rightClickHeldDown)
+        {
+            positionDrawer.MovePositionToMouse(unitSelectionManager.GetMousePositionOffsetByFormationCenter(), true);
+        }
+        else if (_rightClickDownThisFrame)
+        {
+            SetInitialMousePositions(positionDrawer.PositionsParent.position);
+        }
+        else
+        {
+            if (!MinimumDistanceFromInitialClick()) return;
+            RotateFormationToMouse();
+            CalculateMouseDraggedDistance();
+        }
+    }
     public void HandleRepositionUnits()
     {
         // Debug.Log($" Handle repo");
@@ -609,8 +656,10 @@ public class BattleInputManager : MonoBehaviour
     }
     private bool CheckAndRecordBattlefieldDoubleClick(int squadId)
     {
-        bool isDouble = (Time.time - _lastBattlefieldClickTime) <= DoubleClickTime && _lastBattlefieldClickedSquadId == squadId;
-        _lastBattlefieldClickTime = Time.time;
+        // Unscaled: Time.time freezes while the battle is paused, so every later click on the same
+        // squad would read as a double-click and select every squad of that unit type.
+        bool isDouble = (Time.unscaledTime - _lastBattlefieldClickTime) <= DoubleClickTime && _lastBattlefieldClickedSquadId == squadId;
+        _lastBattlefieldClickTime = Time.unscaledTime;
         _lastBattlefieldClickedSquadId = squadId;
         return isDouble;
     }

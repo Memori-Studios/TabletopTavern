@@ -23,6 +23,7 @@ namespace TJ
             {
                 var abandonedSave = SaveDataHandler.Load();
                 GameEventTracker.RunEnded(abandonedSave.heroID, (int)abandonedSave.difficultyLevel, RunResult.Abandon, abandonedSave.RunStats.chaptersCompleted);
+                SaveDataHandler.RecordAbandonedRun(abandonedSave);
             }
             
             if(campaignSaveManager == null) 

@@ -64,6 +64,10 @@ namespace TJ.Spells
         // routes it through DamageType.Healing (heals the TargetTeam) instead of the default Magical damage.
         public bool HealsInsteadOfDamage;
         public float TickInterval;
+        // Execute-style strike (Iaijutsu Flash): the hit lands on exactly one unit, the one nearest the
+        // strike point, rather than on every unit inside SpellRadius. Author the full per-hit damage in
+        // SpellModifierValue; the 0.25 melee modifier still applies like every other spell.
+        public bool HitsSingleUnit;
         public SFXReference warmupSound;
         public SFXReference hitSound;
         public Team TargetTeam;
@@ -83,7 +87,7 @@ namespace TJ.Spells
         // Marks the targeted enemy squad (author as SpellTargetingType.Squad, TargetTeam.Enemy).
         // HuntersMarkSystem then amplifies all hostile damage to that squad's units for SpellDuration
         // seconds by (1 + SpellModifierValue/100). No SpellEntity is created, so it deals no damage
-        // itself. Keep SpellDuration < SpellCooldown so a re-cast never double-marks the same squad.
+        // itself. A re-cast on a marked squad refreshes the mark, so SpellDuration may exceed SpellCooldown.
         public bool MarksTarget;
 
         [Header("Shieldwall")]

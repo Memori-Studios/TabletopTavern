@@ -34,6 +34,11 @@ public partial class ProcessUnitDeathSystem : SystemBase
             .ForEach((Entity entity, in UnitRemovedFromSquad removedUnit) =>
         {
             using var squadEntities = _squadQuery.ToEntityArray(Allocator.Temp);
+            // Whether some squad buffer held this unit. If none did (squad already destroyed, or the
+            // entry was stripped by SquadRemoveUnitSystem first), nothing below adds KillUnitTag, and
+            // the unit used to be left alive at 0 HP with UnitRemovedFromSquad removed: a zombie that
+            // stays in the world forever. Such a unit is killed outright after the loop.
+            bool removedFromSquad = false;
             foreach (var squadEntity in squadEntities)
             {
                 //make sure component exists
@@ -48,6 +53,7 @@ public partial class ProcessUnitDeathSystem : SystemBase
                 {
                     if (entityBuffer[i].Entity == removedUnit.Entity)
                     {
+                        removedFromSquad = true;
                         Entity debugEntity = entityBuffer[i].DebugEntity;
                         entityBuffer.RemoveAt(i);
 
@@ -73,10 +79,14 @@ public partial class ProcessUnitDeathSystem : SystemBase
                             break;
                         }
 
-                        //make sure GpuEcsAnimatorControlComponent exists
+                        //make sure GpuEcsAnimatorControlComponent exists. The unit is already out of the
+                        //buffer at this point, so it must still be killed or it leaks as an orphan.
                         if(!entityManager.HasComponent<GpuEcsAnimatorControlComponent>(animationDataHolder.gpuEcsAnimatorEntity)) {
                             Debug.LogError($"Entity {animationDataHolder.gpuEcsAnimatorEntity} does not have GpuEcsAnimatorControlComponent component.");
-                            continue;
+                            if (entityManager.Exists(childEntity)) ecbDelete.AddComponent<KillUnitTag>(childEntity);
+                            ecbDelete.AddComponent<KillUnitTag>(removedUnit.Entity);
+                            ecbDelete.AddComponent<KillUnitTag>(debugEntity);
+                            break;
                         }
 
                         GpuEcsAnimatorControlComponent controlComp = entityManager.GetComponentData<GpuEcsAnimatorControlComponent>(animationDataHolder.gpuEcsAnimatorEntity);
@@ -112,6 +122,7 @@ public partial class ProcessUnitDeathSystem : SystemBase
                     }
                 }
 
+                if(!removedFromSquad) continue;
                 if(!entityManager.HasComponent<SetDestination>(removedUnit.Entity)) continue;
 
                 SetDestination setDestination = entityManager.GetComponentData<SetDestination>(removedUnit.Entity);
@@ -129,6 +140,22 @@ public partial class ProcessUnitDeathSystem : SystemBase
                     squadPosition = setDestination.squadPosition,
                     indexRemoved = unit.unitIndex
                 });
+            }
+
+            if (!removedFromSquad)
+            {
+                Debug.LogWarning($"ProcessUnitDeathSystem: dead unit {entity} (squad {removedUnit.SquadId}) was in no squad buffer, killing it directly.");
+                if (entityManager.HasComponent<AnimationDataHolder>(entity))
+                {
+                    Entity orphanChild = entityManager.GetComponentData<AnimationDataHolder>(entity).gpuEcsAnimatorEntity;
+                    if (entityManager.Exists(orphanChild)) ecbDelete.AddComponent<KillUnitTag>(orphanChild);
+                }
+                if (entityManager.HasComponent<Cavalry>(entity))
+                {
+                    Entity rider = entityManager.GetComponentData<Cavalry>(entity).riderEntity;
+                    if (entityManager.Exists(rider)) ecbDelete.AddComponent<KillUnitTag>(rider);
+                }
+                ecbDelete.AddComponent<KillUnitTag>(entity);
             }
 
             // After processing, remove the UnitRemovedFromSquad component

@@ -94,6 +94,21 @@ public class UnitSelectionManager : MonoBehaviour
 
         if (battleInputManager.CursorMode == CursorMode.CastSpell)
         {
+            TJ.Spells.SpellManager.SpellPlacementPhase placementPhase = BattleManager.Instance.SpellManager.PlacementPhase;
+            if (placementPhase == TJ.Spells.SpellManager.SpellPlacementPhase.AwaitingSquad)
+            {
+                //Starstep waits for a squad: ordinary click-selection runs so the player can pick one,
+                //and the placement handler only listens for right-click (cancel)
+                battleInputManager.HandleSelectionArea();
+                battleInputManager.HandleHoverSquad();
+                battleInputManager.HandleSpellPlacementCursorMode();
+                return;
+            }
+            if (placementPhase == TJ.Spells.SpellManager.SpellPlacementPhase.Placing)
+            {
+                battleInputManager.HandleSpellPlacementCursorMode();
+                return;
+            }
             //hover detection still needed so Squad-targeted spells know what's under the cursor,
             //but selection-area clicks must not run while a spell is armed (SpellManager owns the click)
             battleInputManager.HandleHoverSquad();
@@ -527,9 +542,19 @@ public class UnitSelectionManager : MonoBehaviour
 
         unitsAreSelected = false;
         // OnUnitsSelectedChanged?.Invoke();
-        if (battleInputManager.CursorMode != CursorMode.SpawnSquad) BattleManager.Instance.SetCursorMode(CursorMode.Free);
+        if (battleInputManager.CursorMode != CursorMode.SpawnSquad && !PlacementSpellHoldsCursor) BattleManager.Instance.SetCursorMode(CursorMode.Free);
         entityQuery.Dispose();
     }
+    /// <summary>
+    /// True while Starstep or Raise Dead owns the cursor (CastSpell mode with a placement phase).
+    /// The selection paths keep their hands off the cursor mode then, exactly as they do for
+    /// SpawnSquad - a fresh click's deselect-then-select must not bounce the mode through Free,
+    /// because leaving CastSpell cancels the placement (found 2026-09-13: the blink's confirming
+    /// right-click became a plain move order).
+    /// </summary>
+    private bool PlacementSpellHoldsCursor =>
+        battleInputManager.CursorMode == CursorMode.CastSpell
+        && BattleManager.Instance.SpellManager.PlacementPhase != TJ.Spells.SpellManager.SpellPlacementPhase.None;
     public void SelectSquadsByGroup(List<int> _selectedSquadIds)
     {
         if (!battleInputManager.AddingToSelectedUnits)
@@ -669,7 +694,7 @@ public class UnitSelectionManager : MonoBehaviour
         positionDrawer.Formation.SetUnitTypes(SEunitTypes);
         positionDrawer.Formation.SetWidthAndDepthDict(SEwidthAndDepth);
 
-        if (battleInputManager.CursorMode != CursorMode.SpawnSquad)
+        if (battleInputManager.CursorMode != CursorMode.SpawnSquad && !PlacementSpellHoldsCursor)
         {
             BattleManager.Instance.SetCursorMode(unitsAreSelected ? CursorMode.UnitsSelected : CursorMode.Free);
         }

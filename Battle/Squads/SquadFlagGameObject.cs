@@ -325,6 +325,13 @@ namespace TJ
                     }
                 }
             }
+            void HandleHuntersMark()
+            {
+                // Same polling shape as HandleArmorSundered: HuntersMarkSystem removes the tag on expiry,
+                // and the tag is the only durable answer to is this squad marked right now.
+                bool marked = EntityManager.HasComponent<HuntersMarkTag>(squadEntity);
+                if (marked != healthBarGO.HuntersMarkActive) healthBarGO.SetHuntersMarkActive(marked);
+            }
             void HandleIsBeingFlanked()
             {
                 if (EntityManager.IsComponentEnabled<TakingFlankingDamage>(squadEntity))
@@ -464,6 +471,7 @@ namespace TJ
             HandleExhausted();
             HandleWeaponStrengthBonuses();
             HandleArmorSundered();
+            HandleHuntersMark();
             HandleIsBeingFlanked();
             HandleFlanking();
             HandleFireDamageTaking();

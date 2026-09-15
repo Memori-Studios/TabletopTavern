@@ -31,7 +31,8 @@ namespace TJ
         SignatureUnitPacks,
         GoldInterest,
         EventExplanation,
-        ConsumableUsage
+        ConsumableUsage,
+        Mage
     }
     public static class TutorialData
     {
@@ -149,6 +150,13 @@ namespace TJ
         {
             tutorialStepEnum = TutorialStepEnum.ConsumableUsage,
             stepID = 28,
+        };
+        // stepIDs 1, 8, 19, 20, 24 and 25 are gaps left by deleted steps. Do not reuse them: a save that
+        // completed the old step would silently skip the new one. Append past the highest id instead.
+        public static TutorialStep Mage = new()
+        {
+            tutorialStepEnum = TutorialStepEnum.Mage,
+            stepID = 29,
         };
     }
 }

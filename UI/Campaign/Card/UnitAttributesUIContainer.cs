@@ -36,6 +36,14 @@ namespace TJ
         /// end of the frame, so the surplus entries are still there immediately after Load returns.
         /// </summary>
         public int DisplayedAttributeCount { get; private set; }
+        /// <summary>
+        /// The bonus boxes the last <see cref="Load"/> left alive, in stack order. Measure these
+        /// rather than the children of <see cref="UnitBonusesParent"/>: surplus boxes and the "Large"
+        /// box are trimmed with Destroy(), so they are still active children until end of frame and
+        /// would be counted at full height.
+        /// </summary>
+        public IReadOnlyList<UnitBonusUI> DisplayedBonusUIs => _displayedBonusUIs;
+        readonly List<UnitBonusUI> _displayedBonusUIs = new ();
         GearManager gearManager;
         Coroutine scaleCoroutine;
         bool overriden;
@@ -143,6 +151,7 @@ namespace TJ
                 }
             }
 
+            _displayedBonusUIs.Clear();
             for (int i = 0; i < unitAttributes.Count; i++)
             {
                 string unitAttributesLocalised = LocalizationManager.Instance.GetText(unitAttributes[i].ToString());
@@ -153,6 +162,7 @@ namespace TJ
                 unitBonusUIs[i].LoadUnitBonusUI(unitBonusText, localizedDescription);
 
                 if (unitBonusText == "Large") Destroy(unitBonusUIs[i].gameObject);
+                else _displayedBonusUIs.Add(unitBonusUIs[i]);
             }
             if (scaleCoroutine != null)
             {

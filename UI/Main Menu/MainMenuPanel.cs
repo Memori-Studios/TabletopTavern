@@ -38,5 +38,14 @@ namespace TJ.MainMenu
         {
             mainMenu.ReturnToMainMenu();
         }
+        /// <summary>
+        /// Right-click "back" gesture. A panel with its own inner state (a sub-screen, a
+        /// confirmation pop-up) steps that back one level and returns true; the default returns
+        /// false, which MainMenu treats as "nothing to unwind here, return to the main menu".
+        /// </summary>
+        public virtual bool TryStepBack()
+        {
+            return false;
+        }
     }
 }

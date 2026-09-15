@@ -234,6 +234,7 @@ public class SquadManager : MonoBehaviour
                         entities.Add(entityBuffer[i].Entity);
                     } else {
                         entityBuffer.RemoveAt(i);
+                        i--; // the next element slid into this slot
                         // Debug.Log($"Entity {entityBuffer[i].Entity} does not exist");
                     }
                 }
@@ -867,6 +868,9 @@ public class SquadManager : MonoBehaviour
                 customBattleData.playerCustomBattleArmy = playerArmyList.ToArray();
                 customBattleData.playerCustomBattleSquadBattlePositions = battlePositions;
                 customBattleData.playerCustomBattleSquadGroups = savedGroups;
+#if SPELLS
+                customBattleData.playerCustomBattleSpells = BattleManager.Instance.SpellManager.GetEquippedSpellEnums();
+#endif
                 SaveDataHandler.SaveCustomBattleSaveData(customBattleData);
             }
             else

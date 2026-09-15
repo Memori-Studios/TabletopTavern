@@ -163,7 +163,10 @@ public struct CeaseFireRequestedTag : IComponentData, IEnableableComponent { }
 public struct EntityTeam : IComponentData { public Team Value; }
 public struct MaxHitPoints : IComponentData { public int Value; }
 public enum DamageType { Physical, Magical, Healing}
-public enum DamageSource { Melee, Ranged }
+// Which global damage knob applies (see TabletopTavernConstants, Damage Modifiers) and which
+// on-hit rolls run. Runtime only, never serialized. Spell was added 2026-09-14: before it every
+// spell element defaulted to Melee and landed at a quarter of its authored value.
+public enum DamageSource { Melee, Ranged, Spell }
 public enum DamageAttributes { None, ArmorPiercing, AntiInfantry, AntiLarge, ArmorPiercingAntiInfantry, ArmorPiercingAntiLarge }
 public struct LargeTag : IComponentData { }
 public struct InfantryTag : IComponentData { }
@@ -273,6 +276,9 @@ public struct SpellEntity : IComponentData {
     // counts down between applications and is ignored entirely when IsOneOff is true.
     public float TickInterval;
     public float TickTimer;
+    // Iaijutsu Flash: the blast hits exactly ONE unit - the one nearest the strike point - instead of
+    // everything inside SpellRadius. The radius then only decides how far the strike may reach.
+    public bool HitsSingleUnit;
 }
 // public struct UnitHitBySpell : IComponentData { public float3 SpellPosition; public float SpellForce; public float3 InitHitLocation;}
 public struct BattleOver : IComponentData {public bool PlayerWon; }

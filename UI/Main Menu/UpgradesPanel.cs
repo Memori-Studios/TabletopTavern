@@ -294,6 +294,17 @@ namespace TJ.MainMenu
             _resetConfirmationOpen = false;
             _resetConfirmationCanvasGroup.CGDisable();
         }
+        /// <summary>
+        /// Right-click dismisses the reset confirmation before it leaves the panel, so a stray
+        /// right-click over the pop-up reads as "cancel" rather than jumping to the main menu.
+        /// </summary>
+        public override bool TryStepBack()
+        {
+            if (!_resetConfirmationOpen) return false;
+
+            HideResetConfirmation();
+            return true;
+        }
         private void ResetMetaprogression()
         {
             HideResetConfirmation();

@@ -210,6 +210,7 @@ namespace TJ
             {
                 var restartedRun = SaveDataHandler.Load();
                 GameEventTracker.RunEnded(restartedRun.heroID, (int)restartedRun.difficultyLevel, RunResult.Abandon, restartedRun.RunStats.chaptersCompleted);
+                SaveDataHandler.RecordAbandonedRun(restartedRun);
             }
 
             campaignSaveManager.QuickRestartCampaign();

@@ -482,6 +482,13 @@ partial struct BattlefieldBonusJob : IJobEntity
                     bonus.Applied = true;
                     bonusBuffer.RemoveAt(i--);
                     bonusBuffer.Add(new BattlefieldBonusBufferElement { Value = bonus });
+                    // Accuracy and Armor debuffs floor at zero: Smokescreen (-25) on a 15-accuracy
+                    // archer and Sunder (-0.30) on a Rabble (mitigation 0.13, ArmoredTag is on every
+                    // unit) would otherwise go negative - and a negative ArmorMitigation is a damage
+                    // AMPLIFIER in ApplyDamageSystem. When the floor bites, the element keeps the
+                    // delta actually taken so the removal branch below restores the exact base.
+                    float appliedValue = bonus.Value;
+                    bool clamped = false;
                     for (int j = 0; j < entityBuffer.Length; j++)
                     {
                         Entity unitEntity = entityBuffer[j].Entity;
@@ -525,7 +532,10 @@ partial struct BattlefieldBonusJob : IJobEntity
                                 if (ShootAttackLookup.HasComponent(unitEntity))
                                 {
                                     var sa = ShootAttackLookup[unitEntity];
-                                    sa.Accuracy += (int)bonus.Value;
+                                    int accuracyDelta = (int)bonus.Value;
+                                    if (sa.Accuracy + accuracyDelta < 0) { accuracyDelta = -sa.Accuracy; clamped = true; }
+                                    sa.Accuracy += accuracyDelta;
+                                    appliedValue = accuracyDelta;
                                     ShootAttackLookup[unitEntity] = sa;
                                 }
                                 break;
@@ -541,11 +551,20 @@ partial struct BattlefieldBonusJob : IJobEntity
                                 if (ArmoredTagLookup.HasComponent(unitEntity))
                                 {
                                     var at = ArmoredTagLookup[unitEntity];
-                                    at.ArmorMitigation += bonus.Value;
+                                    float armorDelta = bonus.Value;
+                                    if (at.ArmorMitigation + armorDelta < 0f) { armorDelta = -at.ArmorMitigation; clamped = true; }
+                                    at.ArmorMitigation += armorDelta;
+                                    appliedValue = armorDelta;
                                     ArmoredTagLookup[unitEntity] = at;
                                 }
                                 break;
                         }
+                    }
+                    if (clamped)
+                    {
+                        // The element for this bonus is the one Add() just appended.
+                        bonus.Value = appliedValue;
+                        bonusBuffer[bonusBuffer.Length - 1] = new BattlefieldBonusBufferElement { Value = bonus };
                     }
                 }
             }

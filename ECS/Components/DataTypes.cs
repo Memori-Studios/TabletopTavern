@@ -7,7 +7,7 @@ using TJ;
 // Mage casts a spell instead of shooting: no ShootAttack, charges instead of ammo, and it
 // fights in melee when engaged. See the unit type predicates in TabletopTavernConstants.
 public enum UnitType { Melee, Ranged, Hybrid, Artillery, Structure, Mage }
-public enum UnitCondition { None, InForest, InCombat, IsCharging, IsTerrified, InSwamp, IsExhausted, IsOutOfAmmo, GarrisonDefender, DefendersResolve }
+public enum UnitCondition { None, InForest, InCombat, IsCharging, IsTerrified, InSwamp, IsExhausted, IsOutOfAmmo, GarrisonDefender, DefendersResolve, IsMarked }
 public enum UnitStat { MeleeAttack, MeleeDefense, WeaponStrength, 
     Accuracy, Range, MissileStrength, HitPoints, None, Speed, 
     Armor, ChargeBonus, Leadership, Ammunition, ChargeImpactDamage }

@@ -25,6 +25,13 @@ partial struct SpellSystem : ISystem
         CollisionWorld collisionWorld = physicsWorldSingleton.CollisionWorld;
         NativeList<DistanceHit> distanceHitList = new NativeList<DistanceHit>(Allocator.Temp);
         float deltaTime = SystemAPI.Time.DeltaTime;
+        // GetSingleton<PhysicsWorldSingleton>() does not guarantee the broadphase build jobs have
+        // finished by the time this variable-rate system runs, and an OverlapSphere against a
+        // half-built tree returns nothing. Measured 2026-09-13: about one persistent-spell tick in
+        // eight found 0 units at a point the next tick found 42 (NumBodies unchanged), and 52/52
+        // ticks landed once jobs were completed first. The sync point is paid at most once per
+        // frame, and only on frames where a spell actually applies.
+        bool jobsCompleted = false;
 
         CollisionFilter collisionFilter = new CollisionFilter
         {
@@ -62,12 +69,37 @@ partial struct SpellSystem : ISystem
 
             if (doApply)
             {
+            if (!jobsCompleted)
+            {
+                state.EntityManager.CompleteAllTrackedJobs();
+                collisionWorld = SystemAPI.GetSingleton<PhysicsWorldSingleton>().CollisionWorld;
+                jobsCompleted = true;
+            }
             distanceHitList.Clear();
             if (collisionWorld.OverlapSphere(spellPosition, spellRadius, ref distanceHitList, collisionFilter))
             {
+                // Execute strike: keep only the living unit nearest the strike point. Resolved up front
+                // so the loop below can stay one code path for both shapes.
+                Entity singleTarget = Entity.Null;
+                if (spellEntity.ValueRO.HitsSingleUnit)
+                {
+                    float bestDistance = float.MaxValue;
+                    foreach (DistanceHit candidate in distanceHitList)
+                    {
+                        Entity e = candidate.Entity;
+                        if (!SystemAPI.Exists(e) || !SystemAPI.HasComponent<Unit>(e)) continue;
+                        if (SystemAPI.HasComponent<Health>(e) && SystemAPI.GetComponent<Health>(e).Value <= 0) continue;
+                        if (SystemAPI.GetComponent<Unit>(e).Team == damageBufferElement.TeamOfSource) continue;
+                        if (candidate.Distance >= bestDistance) continue;
+                        bestDistance = candidate.Distance;
+                        singleTarget = e;
+                    }
+                }
+
                 foreach (DistanceHit distanceHit in distanceHitList)
                 {
                     Entity hitEntity = distanceHit.Entity;
+                    if (spellEntity.ValueRO.HitsSingleUnit && hitEntity != singleTarget) continue;
                     if (!SystemAPI.Exists(hitEntity) || !SystemAPI.HasComponent<Unit>(hitEntity)) continue;
 
                     if (SystemAPI.HasComponent<Health>(hitEntity) && SystemAPI.GetComponent<Health>(hitEntity).Value <= 0) continue;

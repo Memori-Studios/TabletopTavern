@@ -189,7 +189,10 @@ partial struct MeleeUnitAttackSystem : ISystem
                 //     new ForceLifetime { RemainingTime = 1f , TotalTime = 2.5f}
                 // );
 
-                entityCommandBuffer.SetComponentEnabled<NavMeshPath>(target.ValueRO.targetEntity, false);
+                // NavMeshPath is deliberately NOT disabled here. ExplosionSystem disables it on the units
+                // the delayed blast actually throws and UnitThrownSystem re-enables it when the throw ends;
+                // disabling it on every hit left any target the blast missed (moved away, already thrown,
+                // resists knockback) walking in straight lines through walls for the rest of the battle.
                 if (!entityManager.HasComponent<AnimationDataHolder>(target.ValueRO.targetEntity)) continue;
                 AnimationDataHolder animationDataHolder = entityManager.GetComponentData<AnimationDataHolder>(target.ValueRO.targetEntity);
                 Entity childEntity = animationDataHolder.gpuEcsAnimatorEntity;

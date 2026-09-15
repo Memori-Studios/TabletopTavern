@@ -153,7 +153,7 @@ namespace TJ
             new() { Board = 2, FinalBattle = false, BattlesFoughtMin = 7, TierCounts = T((1, 1), (2, 2), (3, 5)) },
 
             // Board 3
-            new() { Board = 3, FinalBattle = true, KnightDifficulty = true, TierCounts = T((1, 2), (2, 3), (3, 4), (4, 1)) },
+            new() { Board = 3, FinalBattle = true, KnightDifficulty = true, TierCounts = T((1, 2), (2, 4), (3, 4), (4, 1)) },
             new() { Board = 3, FinalBattle = true, KnightDifficulty = false, TierCounts = T((1, 3), (2, 3), (3, 4), (4, 1)) },
             new() { Board = 3, FinalBattle = false, BattlesFoughtMax = 3, TierCounts = T((1, 3), (2, 3), (3, 2)) },
             new() { Board = 3, FinalBattle = false, BattlesFoughtMin = 3, BattlesFoughtMax = 5, TierCounts = T((1, 2), (2, 2), (3, 4)) },

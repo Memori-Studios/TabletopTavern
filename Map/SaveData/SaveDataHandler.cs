@@ -64,6 +64,8 @@ namespace Memori.SaveData
         // removing a spell cannot produce an illegal loadout. See SpellLoadout.
         public Spell[] selectedSpells = Array.Empty<Spell>();
         public Guid runUUID;
+        /// <summary>Seconds of real play on this run (Map and campaign battles). See RunClock.</summary>
+        public double playTimeSeconds;
 
         // _selectedSpells is optional: the blank/recovery saves constructed elsewhere in this file
         // pass nothing and get the hero's default loadout, which Sanitize produces from null.
@@ -114,6 +116,9 @@ namespace Memori.SaveData
         public SquadToLoad[] playerCustomBattleArmy; 
         public List<SquadBattlePosition> playerCustomBattleSquadBattlePositions = new();
         public List<SavedSquadGroup> playerCustomBattleSquadGroups = new();
+        // The four hotbar spells as equipped when the army was saved. Empty on saves that predate the
+        // field, in which case SpellManager keeps its inspector defaults.
+        public Spell[] playerCustomBattleSpells = Array.Empty<Spell>();
         public SquadToLoad[] enemyCustomBattleArmy;
         public List<SquadBattlePosition> enemyCustomBattleSquadBattlePositions = new();
     }
@@ -197,6 +202,8 @@ namespace Memori.SaveData
         public Race activeTavernThemeRace;
         public bool isDevToolUser;
         public List<UnitNameKillsStored> UnitNameHistoricalKillStore = new();
+        /// <summary>Every finished campaign, newest last. See <see cref="RunRecord"/>.</summary>
+        public List<RunRecord> runHistory = new();
     }
     [System.Serializable] public struct SquadKillsStored
     {
@@ -366,11 +373,13 @@ namespace Memori.SaveData
         public static void SaveCampaign(CampaignSaveData toSave)
         {
             toSave.snapShot = false;
+            toSave.playTimeSeconds += RunClock.TakeUnflushed();
             SaveToJSON(toSave, "campaignSaveData.json");
         }
         public static void SaveCampaignSnapshot(CampaignSaveData toSave)
         {
             toSave.snapShot = true;
+            toSave.playTimeSeconds += RunClock.TakeUnflushed();
             SaveToJSON(toSave, "campaignSaveDataSnapshot.json");
         }
         public static void SaveCustomBattleSaveData(CustomBattleSaveData toSave)
@@ -469,7 +478,7 @@ namespace Memori.SaveData
         /// <param name="_playerWon"></param>
         /// <param name="_squadIdKillCounter"></param>
         /// <param name="_squadIdLossCounter"></param>
-        public static void SaveSquadsPostBattle(SquadToLoad[] _playerSquads, SquadToLoad[] _enemySquads, bool _playerWon, List<SquadKillsStored> _squadIdKillCounter, List<SquadLossesStored> _squadIdLossCounter)
+        public static void SaveSquadsPostBattle(SquadToLoad[] _playerSquads, SquadToLoad[] _enemySquads, bool _playerWon, List<SquadKillsStored> _squadIdKillCounter, List<SquadLossesStored> _squadIdLossCounter, int _spellKills = 0)
         {
             UnityEngine.Debug.Log($"SaveDataHandler SaveSquadsPostBattle: player won: {_playerWon}");
             CampaignSaveData saveData = Load();
@@ -504,7 +513,9 @@ namespace Memori.SaveData
             saveData.townData.townInteractionStatus = TownInteractionStatus.Sacked;
             // saveData.withdrawnSquads = _withdrawnSquads;
 
-            int totalKills = 0;
+            // Hotbar spell kills belong to no squad (ArmySpawnManager.SPELL_KILL_SQUAD_ID) and would
+            // otherwise vanish here; they count toward the run total even though no card shows them.
+            int totalKills = _spellKills;
             foreach (var squadKill in _squadIdKillCounter)
             {
                 totalKills += squadKill.Kills;
@@ -821,13 +832,20 @@ namespace Memori.SaveData
         /// The spell mana budget for one battle. Static because the battle scene has no
         /// CampaignSaveManager - the same reason GetCampaignSpells lives here.
         ///
-        /// Account-level, not per-run, so custom battles get the same pool as campaign ones.
-        /// The pool is granted whole at the start of every battle and does not regenerate or
-        /// carry over, so this is the only place its size is decided.
+        /// Base pool, plus SPELL_MANA_POOL_PER_ACT for every act after the first, plus the Renown
+        /// bonus. The act is read off the campaign save on disk because this runs in the battle scene.
+        /// A custom battle has no act and ignores Renown: it always gets the fixed sandbox maximum.
+        /// The pool is granted whole at the start of every battle and does not regenerate or carry
+        /// over, so this is the only place its size is decided.
         /// </summary>
         public static int GetSpellManaPool()
         {
-            return TabletopTavernConstants.SPELL_MANA_POOL_BASE + SpellLoadout.GetManaBonus();
+            if (IsCustomBattle()) return TabletopTavernConstants.SPELL_MANA_POOL_CUSTOM_BATTLE;
+
+            int act = Math.Max(1, Load().bookNumber);
+            return TabletopTavernConstants.SPELL_MANA_POOL_BASE
+                 + (act - 1) * TabletopTavernConstants.SPELL_MANA_POOL_PER_ACT
+                 + SpellLoadout.GetManaBonus();
         }
         public static Race GetEnemyRace()
         {
@@ -863,10 +881,8 @@ namespace Memori.SaveData
             for(int i = 0; i < playerArmy.Length; i++) {
                 playerArmy[i].UnitIndex = -1;
             }
-            float startingHealth = 1f;
-
-            //DifficultyMod 18
-            if(_difficultyLevelSelected >= TT_Difficulty.Overlord) startingHealth = 0.75f;
+            //DifficultyMod 18, via DifficultyRules so the difficulty sim starts its armies the same way
+            float startingHealth = DifficultyRules.StartingHealth(_difficultyLevelSelected);
 
             List<UnitName> recruitedUnitNames = new(squadsToLoad.Length);
             for(int i = 0; i < squadsToLoad.Length; i++) {
@@ -889,7 +905,8 @@ namespace Memori.SaveData
 
             int seed = UnityEngine.Random.Range(0, 1000000);
             CampaignSaveData campaignSaveData = new (seed, hero.HeroID, startingGold, playerArmy, _difficultyLevelSelected, _startingGear, _runUUID, _selectedSpells);
-            
+
+            RunClock.Reset();
             SaveCampaign(campaignSaveData);
             SaveCampaignSnapshot(campaignSaveData);
             SaveLastCampaignStats(hero.HeroID, _difficultyLevelSelected, _startingGear, squadsToLoad, startingGold);
@@ -994,6 +1011,69 @@ namespace Memori.SaveData
             SavePlayerSaveData(saveData);
         }
 
+        #region Run history
+        /// <summary>Newest run first. The stored list is oldest-first so appends are cheap.</summary>
+        public const int MAX_RUN_HISTORY = 100;
+
+        public static List<RunRecord> GetRunHistory()
+        {
+            List<RunRecord> history = LoadPlayerSaveData().runHistory;
+            var newestFirst = new List<RunRecord>(history);
+            newestFirst.Reverse();
+            return newestFirst;
+        }
+
+        /// <summary>
+        /// Records a run the player walked away from. Wins and losses are recorded inside
+        /// <see cref="RecordGameOver"/> so they share its save write; this is the entry for the
+        /// three abandon paths (main-menu Abandon Run, the settings Abandon Run, Quick Restart),
+        /// which each already hold the save they are about to delete.
+        /// </summary>
+        public static void RecordAbandonedRun(CampaignSaveData abandonedRun)
+        {
+            PlayerSaveData saveData = LoadPlayerSaveData();
+            abandonedRun.playTimeSeconds += RunClock.TakeUnflushed();
+            AppendRunRecord(saveData, abandonedRun, RunOutcome.Abandon, renownEarned: 0);
+            SavePlayerSaveData(saveData);
+        }
+
+        /// <summary>
+        /// Snapshots the run onto the player save. Does not write - the caller owns the save
+        /// round-trip so a win records in the same write as its renown.
+        /// </summary>
+        private static void AppendRunRecord(PlayerSaveData saveData, CampaignSaveData run, RunOutcome outcome, int renownEarned)
+        {
+            if (run == null || run.blank) return;
+
+            var record = new RunRecord
+            {
+                runUUID = run.runUUID.ToString(),
+                heroID = run.heroID,
+                difficulty = run.difficultyLevel,
+                outcome = outcome,
+                endedAtUtcTicks = DateTime.UtcNow.Ticks,
+                actReached = run.bookNumber,
+                chaptersCompleted = run.RunStats.chaptersCompleted,
+                battlesFought = run.BattlesFought,
+                goldAtEnd = run.goldAmount,
+                goldEarned = run.RunStats.goldEarned,
+                enemiesSlain = run.RunStats.enemiesSlain,
+                renownEarned = renownEarned,
+                playTimeSeconds = run.playTimeSeconds,
+                // A copy: SquadToLoad is a struct so the array is the only shared reference, and
+                // the campaign save is about to be deleted anyway.
+                army = run.playerArmy != null ? (SquadToLoad[])run.playerArmy.Clone() : Array.Empty<SquadToLoad>(),
+                gear = run.Gear != null ? new List<GearID>(run.Gear) : new List<GearID>(),
+                spells = run.selectedSpells != null ? new List<Spell>(run.selectedSpells) : new List<Spell>(),
+            };
+
+            if (saveData.runHistory == null) saveData.runHistory = new List<RunRecord>();
+            saveData.runHistory.Add(record);
+            if (saveData.runHistory.Count > MAX_RUN_HISTORY)
+                saveData.runHistory.RemoveRange(0, saveData.runHistory.Count - MAX_RUN_HISTORY);
+        }
+        #endregion
+
         #region Collection achievements
         // Evaluated both on acquisition and when CollectionPanel opens, so the pop lands at the moment
         // the set is completed rather than waiting for the player to visit the collection screen.
@@ -1091,6 +1171,7 @@ namespace Memori.SaveData
 
             CampaignSaveData campaignSaveData = CampaignManager.Instance.CampaignSaveManager.SaveData;
             PlayerSaveData saveData = LoadPlayerSaveData();
+            campaignSaveData.playTimeSeconds += RunClock.TakeUnflushed();
 
             // bookNumber is the act currently in progress. On a win it was actually finished, but on a
             // loss it wasn't - don't award renown for the act the player died in.
@@ -1171,6 +1252,15 @@ namespace Memori.SaveData
             // saveData.goldToDeposit += campaignSaveData.goldAmount;
             // SavePlayerSaveData(saveData);
             // DepositGold();
+
+            AppendRunRecord(saveData, campaignSaveData, _playerWon ? RunOutcome.Win : RunOutcome.Loss, renownAward.total);
+
+            // Only Godking goes on the board: it is the one difficulty with no auto-resolve, so the
+            // time is a real one. Fire and forget - the record above is the source of truth.
+            // Deliberately NOT behind SPELLS, unlike the Leaderboard button: times are collected
+            // from the moment this ships so the board is populated when players first see it.
+            if (_playerWon && campaignSaveData.difficultyLevel == TT_Difficulty.Godking)
+                _ = SteamLeaderboards.SubmitGodkingTime((int)Math.Round(campaignSaveData.playTimeSeconds));
 
             SavePlayerSaveData(saveData);
             return renownAward;

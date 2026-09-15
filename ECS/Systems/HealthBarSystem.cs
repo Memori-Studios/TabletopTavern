@@ -56,9 +56,11 @@ public partial struct HealthBarJob : IJobEntity {
     public void Execute(in HealthBar healthBar, Entity entity) {
         RefRW<LocalTransform> localTransform = localTransformComponentLookup.GetRefRW(entity);
         LocalTransform parentLocalTransform = localTransformComponentLookup[healthBar.healthEntity];
-        if (localTransform.ValueRO.Scale == 1f) {
+        // cameraForward is zero while no enabled main camera exists (scene door, Collection overlay), and
+        // quaternion.LookRotation returns NaN for a zero or vertical forward. Keep the last rotation then.
+        if (localTransform.ValueRO.Scale == 1f && math.lengthsq(cameraForward) > 0.0001f) {
             // Health bar is visible
-            localTransform.ValueRW.Rotation = parentLocalTransform.InverseTransformRotation(quaternion.LookRotation(cameraForward, math.up()));
+            localTransform.ValueRW.Rotation = parentLocalTransform.InverseTransformRotation(quaternion.LookRotationSafe(cameraForward, math.up()));
         }
         if(!healthComponentLookup.HasComponent(entity)) return; // Check if the entity has a Health component
 

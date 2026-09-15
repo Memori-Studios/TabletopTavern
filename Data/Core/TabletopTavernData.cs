@@ -658,11 +658,11 @@ namespace TJ
             
             if (TabletopTavernConstants.Casts(squadStats.unitType))
             {
-                // Range and charges only. A mage's spell is placed rather than aimed and fires no
-                // projectile, so Accuracy and MissileStrength would render as numbers on the card
-                // that nothing reads. Ammunition is the charge count.
+                // Range only. A mage's spell is placed rather than aimed and fires no projectile, so
+                // Accuracy and MissileStrength would render as numbers on the card that nothing
+                // reads. Its charges are deliberately not listed either - "Ammunition 3" read as an
+                // archer stat, and the flag's charge bar plus the spell block already carry them.
                 unitStats.Add(new UnitStatValue(UnitStat.Range, squadStats.BaseRange));
-                unitStats.Add(new UnitStatValue(UnitStat.Ammunition, squadStats.Ammunition));
             }
             else if (squadStats.unitType != UnitType.Melee)
             {

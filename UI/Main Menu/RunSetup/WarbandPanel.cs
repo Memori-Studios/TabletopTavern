@@ -334,7 +334,7 @@ namespace TJ.MainMenu
                     // release overrideSorting while it was briefly a root canvas, and fail silently.
                     SpellBrowseSlot tile = Instantiate(grimoireTilePrefab, group.TilesParent);
                     SpellData captured = spellData;
-                    tile.SetUp(captured, () => PickSpell(captured), ShowSpellInspector);
+                    tile.SetUp(captured, () => PickSpell(captured), ShowSpellInspector, NotifySpellAlreadyEquipped);
                     grimoireTiles.Add(tile);
                 }
             }
@@ -417,6 +417,12 @@ namespace TJ.MainMenu
             SetFocus(WarbandSection.Spells);
         }
 
+        private static void NotifySpellAlreadyEquipped()
+        {
+            NotificationManager.Instance.ErrorNotification(
+                LocalizationManager.Instance.GetText("SpellAlreadyEquipped"));
+        }
+
         private void PickSpell(SpellData spellData)
         {
             if (spellData == null) return;
@@ -426,10 +432,11 @@ namespace TJ.MainMenu
             // itself rather than trusting a UI state to be the only thing enforcing it.
             if (!SpellLoadout.IsUnlocked(spellData.Spell)) return;
 
+            // Normally unreachable: an equipped tile rejects its own click with a flash and raises
+            // NotifySpellAlreadyEquipped itself. Kept as the guard on the data path.
             if (Array.IndexOf(loadout, spellData.Spell) >= 0)
             {
-                NotificationManager.Instance.ErrorNotification(
-                    LocalizationManager.Instance.GetText("SpellAlreadyEquipped"));
+                NotifySpellAlreadyEquipped();
                 return;
             }
 

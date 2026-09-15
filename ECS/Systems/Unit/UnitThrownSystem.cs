@@ -66,8 +66,21 @@ partial struct UnitThrownSystem : ISystem
                 // Calculate the normalized elapsed time (0 -> 1 over the total lifetime)
                 float normalizedElapsedTime = math.saturate(1f - (ThrowUnit.ValueRW.RemainingTime / totalLifetime));
 
-                // Use initialPosition for direction calculation to avoid feedback loop
-                float3 direction = math.normalize(ThrowUnit.ValueRO.InitialLocation - ThrowUnit.ValueRO.HittingEntityLocation);
+                // Use initialPosition for direction calculation to avoid feedback loop.
+                // Horizontal only: the arc handles y. An artillery shell explodes at the exact x/z of the
+                // unit it was aimed at, so that unit's offset is zero (or purely vertical). math.normalize
+                // and quaternion.LookRotation both return NaN there, which left the unit unrendered and
+                // invisible to every physics query for the rest of the battle. Push it along its own
+                // facing instead, and fall back to +Z if even that is degenerate.
+                float3 offset = ThrowUnit.ValueRO.InitialLocation - ThrowUnit.ValueRO.HittingEntityLocation;
+                offset.y = 0f;
+                float3 direction = math.normalizesafe(offset, float3.zero);
+                if (math.lengthsq(direction) < 0.5f)
+                {
+                    float3 facing = math.forward(localTransform.ValueRO.Rotation);
+                    facing.y = 0f;
+                    direction = math.normalizesafe(facing, new float3(0f, 0f, 1f));
+                }
                 float3 totalDisplacement = direction * ThrowUnit.ValueRO.Force;
                 float3 displacementPerFrame = totalDisplacement * deltaTime / totalLifetime;
 
@@ -101,7 +114,7 @@ partial struct UnitThrownSystem : ISystem
                 }
 
                 // Rotate the unit to face the direction of the spell
-                localTransform.ValueRW.Rotation = quaternion.LookRotation(direction, new float3(0, 1, 0));
+                localTransform.ValueRW.Rotation = quaternion.LookRotationSafe(direction, new float3(0, 1, 0));
                 // Debug.Log($"normalizedElapsedTime: {normalizedElapsedTime}, Y position: {localTransform.ValueRW.Position.y}");
             }
             else

@@ -246,6 +246,18 @@ namespace TJ.MainMenu
         }
 
         /// <summary>
+        /// Right-click steps the two screens back one at a time: Warband -> Commander first, and
+        /// only from the Commander screen does the menu take over and return to the main menu.
+        /// </summary>
+        public override bool TryStepBack()
+        {
+            if (!warbandScreenShown) return false;
+
+            ShowCommanderScreen();
+            return true;
+        }
+
+        /// <summary>
         /// The blocker is a full-column overlay parented under the warband screen, and
         /// <c>LoadHeroes</c> raises it on every hero switch - which happens while the COMMANDER
         /// screen is up. That only looked safe because the warband screen is hidden by

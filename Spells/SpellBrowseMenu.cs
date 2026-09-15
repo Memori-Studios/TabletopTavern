@@ -141,6 +141,7 @@ namespace TJ.Spells
             {
                 spellInfoRaceText.text = SpellRaceLabel.Get(spell.Race);
                 spellInfoRaceText.color = factionColour;
+                ReserveRaceTagWidth();
             }
             if(spellInfoAccentImage != null) spellInfoAccentImage.color = factionColour;
 
@@ -148,6 +149,27 @@ namespace TJ.Spells
             // CGEnable turns raycast blocking on. This panel is display only, and swallowing pointer
             // events near the menu would read as "pointer left" and close it mid-browse.
             spellInfoPanel.canvasGroup.blocksRaycasts = false;
+        }
+
+        // Gap between the end of the spell name and the start of the faction tag.
+        private const float RACE_TAG_GAP = 8f;
+
+        /// <summary>
+        /// The name and the faction tag share one line, name left and tag right. The tag's width
+        /// changes with the faction ("Common" vs "Taelindor Forest") and with the locale, so the
+        /// name's right margin is measured off the tag each time rather than authored once - a
+        /// fixed margin let "Artillery Bombardment" run under "Deepstone Hold". The name auto-sizes
+        /// down inside whatever is left.
+        /// </summary>
+        private void ReserveRaceTagWidth()
+        {
+            if(spellInfoNameText == null || spellInfoRaceText == null) return;
+            // GetPreferredValues includes the component's own margins; take them back out.
+            Vector4 tagMargin = spellInfoRaceText.margin;
+            float tagWidth = spellInfoRaceText.GetPreferredValues(spellInfoRaceText.text).x - tagMargin.x - tagMargin.z;
+            Vector4 margin = spellInfoNameText.margin;
+            margin.z = tagMargin.z + tagWidth + RACE_TAG_GAP;
+            spellInfoNameText.margin = margin;
         }
 
         private void HideSpellInfo()
@@ -198,7 +220,7 @@ namespace TJ.Spells
                     // give up overrideSorting while it was briefly a root canvas, and fail silently.
                     SpellBrowseSlot row = Instantiate(rowPrefab, group.TilesParent);
                     SpellData capturedSpell = spell;
-                    row.SetUp(capturedSpell, () => Pick(capturedSpell), ShowSpellInfo);
+                    row.SetUp(capturedSpell, () => Pick(capturedSpell), ShowSpellInfo, NotifyAlreadyEquipped);
                     rows.Add(row);
                 }
             }
@@ -249,6 +271,13 @@ namespace TJ.Spells
         {
             if(targetSlotIndex < 0) return;
             onSpellPicked?.Invoke(targetSlotIndex, spell);
+        }
+
+        // The row has already flashed itself; this is the message that says why.
+        private static void NotifyAlreadyEquipped()
+        {
+            Memori.Notifications.NotificationManager.Instance.ErrorNotification(
+                LocalizationManager.Instance.GetText("SpellAlreadyEquipped"));
         }
 
         public void OnPointerEnter(PointerEventData eventData) => onHoverEnter?.Invoke();
@@ -407,6 +436,7 @@ namespace TJ.Spells
             {
                 spellInfoRaceText.text = SpellRaceLabel.Get(sample.Race);
                 spellInfoRaceText.color = factionColour;
+                ReserveRaceTagWidth();
             }
             if(spellInfoAccentImage != null) spellInfoAccentImage.color = factionColour;
 

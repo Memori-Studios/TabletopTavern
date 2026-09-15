@@ -134,7 +134,12 @@ namespace TJ
                             break;
                     }
 
-                    if (damageElement.DamageSource == DamageSource.Ranged)
+                    // One global knob per source, and only Ranged runs the on-hit rolls. The default
+                    // warns rather than picking a knob: a source added without a case here used to
+                    // inherit the melee quarter silently, which is exactly what spells did until TT-78.
+                    switch (damageElement.DamageSource)
+                    {
+                    case DamageSource.Ranged:
                     {
                         attackHitPoints = (int)(attackHitPoints * TabletopTavernConstants.RANGED_TOTAL_DAMAGE_MODIFIER);
 
@@ -165,10 +170,19 @@ namespace TJ
                                 attackHitPoints = 0;
                             }
                         }
+                        break;
                     }
-                    else
-                    {
+                    case DamageSource.Spell:
+                        // Face value. Magical already skipped armour above (direct-damage spells are
+                        // fully armour-piercing), and a spell is not an arrow: no shield or forest roll.
+                        attackHitPoints = (int)(attackHitPoints * TabletopTavernConstants.SPELL_TOTAL_DAMAGE_MODIFIER);
+                        break;
+                    case DamageSource.Melee:
                         attackHitPoints = (int)(attackHitPoints * TabletopTavernConstants.MELEE_TOTAL_DAMAGE_MODIFIER);
+                        break;
+                    default:
+                        Debug.LogWarning($"ApplyDamageSystem: no damage modifier for DamageSource {damageElement.DamageSource}; applying it unscaled.");
+                        break;
                     }
 
 

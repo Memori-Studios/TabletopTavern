@@ -615,6 +615,9 @@ namespace TJ
             if(_squadsStats.unitSize == UnitSize.Artillery) {
                 TutorialManager.Instance.LoadStepsFromRandomSpot(new TutorialStep[1] { TutorialData.Artillery });
             }
+            if(TabletopTavernConstants.Casts(_squadsStats.unitType)) {
+                TutorialManager.Instance.LoadStepsFromRandomSpot(new TutorialStep[1] { TutorialData.Mage });
+            }
 
             Debug.Log($"[Unit] Recruited {_squadsStats.unitName} ({_squadsStats.RarityTier} {_squadsStats.unitType}) at slot {nextEmptyUnitIndex}");
             saveData.RunStats.unitsRecruited++;
@@ -1407,12 +1410,11 @@ namespace TJ
 
             List<UnitTier> unitsPool = TabletopTavernData.Instance.GetSquadsWithTiersFromRace(townRace);
 
-            //DifficultyMod 16
-            bool isImperator = CampaignManager.Instance.CampaignSaveManager.SaveData.difficultyLevel >= TT_Difficulty.Imperator;
-            //DifficultyMod 10
-            bool enemyPrestigeEligible = CampaignManager.Instance.CampaignSaveManager.SaveData.difficultyLevel >= TT_Difficulty.Duke;
-            //DifficultyMod 14
-            bool enemyPrestigeEnhanced = CampaignManager.Instance.CampaignSaveManager.SaveData.difficultyLevel >= TT_Difficulty.Emperor;
+            // DifficultyMod 16 / 10 / 14 resolve through DifficultyRules, shared with the difficulty sim.
+            TT_Difficulty difficulty = CampaignManager.Instance.CampaignSaveManager.SaveData.difficultyLevel;
+            bool isImperator = DifficultyRules.StrongerGarrisons(difficulty);
+            bool enemyPrestigeEligible = DifficultyRules.EnemyPrestigeEligible(difficulty);
+            bool enemyPrestigeEnhanced = DifficultyRules.EnemyPrestigeEnhanced(difficulty);
             SquadToLoad[] townGarrison = ArmyCreator.GenerateTownGarrison(townSize, seed, unitsPool, isImperator, bookNumber, enemyPrestigeEligible, enemyPrestigeEnhanced);
             if (CampaignManager.Instance.GearManager.CheckForGear(GearID.AuraFarming))
             {

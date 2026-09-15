@@ -1036,6 +1036,17 @@ namespace TJ
         {
             spawnErrorMessage.CGDisable();
         }
+        /// <summary>
+        /// A short instruction under the cursor's context, e.g. "Select a squad to blink" while a
+        /// placement spell waits for a selection. Rides on the position-error label so it needs no
+        /// scene wiring; the two never show at the same time.
+        /// </summary>
+        public void ShowCursorHint(string message)
+        {
+            spawnErrorText.text = message;
+            spawnErrorMessage.FadeInAsync(0.25f, false, false);
+        }
+        public void HideCursorHint() => spawnErrorMessage.CGDisable();
         public void BroadcastSpawnError()
         {
             NotificationManager.Instance.DisplayNotification(recentPositionErrorMessage);

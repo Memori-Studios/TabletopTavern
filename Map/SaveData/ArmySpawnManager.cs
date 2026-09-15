@@ -32,6 +32,10 @@ namespace Memori.SaveData
         Dictionary<int, int> squadIdToUnitCount = new();
         Dictionary<int, int> squadIdToInitialUnitCount = new();
         Dictionary<int, int> squadIdKillCounter = new();
+        // Hotbar spells are cast with DamageSourceSquadId 0 (see ActiveSpell), so their kills land
+        // under this id rather than any army slot. Folded into the run total at battle end.
+        public const int SPELL_KILL_SQUAD_ID = 0;
+        public int SpellKillCount => squadIdKillCounter.TryGetValue(SPELL_KILL_SQUAD_ID, out int kills) ? kills : 0;
         int squadIndex = 0;
 
         List<SquadToLoad> withdrawnSquads = new();
@@ -513,7 +517,7 @@ namespace Memori.SaveData
                 }
             }
 
-            // Every squad's SquadCurrentHealth is now settled (normal combat, mercy-kill wipe, or withdrawal
+            // Every squad's SquadCurrentHealth is now settled (normal combat or withdrawal
             // all funnel into the writes above). Losses are the exact starting roster size (captured once
             // at spawn, never re-derived from health) minus the ending unit count - no hitPoints rounding
             // involved, so a single dead unit can never be lost to a fractional-health starting value.
@@ -530,7 +534,8 @@ namespace Memori.SaveData
             foreach (SquadToLoad squad in playerArmyLoaded) AddLossEntry(squad);
             foreach (SquadToLoad squad in enemyArmyLoaded) AddLossEntry(squad);
 
-            SaveDataHandler.SaveSquadsPostBattle(playerArmyLoaded, enemyArmyLoaded, _playerWonBattle, squadGUIDKillCounter, squadGUIDLossCounter);
+            SteamAchievements.AddStat(SteamStatId.UnitKills, SpellKillCount);
+            SaveDataHandler.SaveSquadsPostBattle(playerArmyLoaded, enemyArmyLoaded, _playerWonBattle, squadGUIDKillCounter, squadGUIDLossCounter, SpellKillCount);
             Debug.Log($"Saved post-battle squad data for {( _playerWonBattle ? "player" : "enemy")} with {squadGUIDKillCounter.Count} entries");
         }
         #endregion
@@ -731,6 +736,24 @@ namespace Memori.SaveData
             SquadEntity squadEntity = BattleManager.Instance.SquadManager.GetSquad(squadId);
             if (squadEntity.SelfEntity == Entity.Null) return;
             UnitName unitName = squadEntity.UnitName;
+
+            // A blink is an escape, so the squad must not carry its fight with it: the same clear-out
+            // UnitPositioningManager.TeleportUnits does for a deployment reposition, plus the
+            // DisengageFromCombat request a Move order raises. Without this (found 2026-09-13) a
+            // Starstepped squad kept its Attack order and InCombat and marched straight back into
+            // the melee it had just left, while its opponent stood frozen "in combat" with nobody there.
+            {
+                EntityManager clearEm = World.DefaultGameObjectInjectionWorld.EntityManager;
+                Entity self = squadEntity.SelfEntity;
+                clearEm.GetBuffer<QueuedOrder>(self).Clear();
+                squadEntity.TargetSquadEntity = Entity.Null;
+                clearEm.SetComponentData(self, squadEntity);
+                if (clearEm.HasComponent<StartChargeTag>(self)) clearEm.RemoveComponent<StartChargeTag>(self);
+                if (clearEm.HasComponent<ChargeSquad>(self)) clearEm.RemoveComponent<ChargeSquad>(self);
+                if (clearEm.HasComponent<IssueSquadCommand>(self)) clearEm.RemoveComponent<IssueSquadCommand>(self);
+                if (clearEm.HasComponent<InCombat>(self) || clearEm.HasComponent<FormationEngagedInRangedCombat>(self))
+                    clearEm.SetComponentEnabled<DisengageFromCombat>(self, true);
+            }
 
             int2 widthAndDepth = CalculateWidthAndDepth(unitCount, unitName);
             float spread = TabletopTavernData.Instance.GetUnitSpreadFromUnitName(unitName);
@@ -1131,9 +1154,32 @@ namespace Memori.SaveData
             SpawnSquadFromSaveData(summon, playerArmyCenter.rotation, _position, summon.UnitIndex);
             selectedTeam = previousTeam;
         }
+        /// <summary>
+        /// Raise Dead through the placement flow: the squad appears on exactly the points the player
+        /// drew, with the rotation and width they dragged out. No proximity shove - the player chose
+        /// the spot on purpose, and the preview already validated it.
+        /// </summary>
+        public void SummonSquad(UnitName _unitName, TJ.Spells.SpellPlacement placement)
+        {
+            EntityManager entityManager = World.DefaultGameObjectInjectionWorld.EntityManager;
+            if(UnitGPUAnimPrefabs.Find(entityManager, _unitName) == null)
+            {
+                Debug.LogError($"[ArmySpawnManager] Cannot summon {_unitName}, GPU anim prefabs were not preloaded for this battle.");
+                return;
+            }
+
+            SquadToLoad summon = new SquadToLoad(_unitName) { UnitIndex = SUMMON_UNIT_INDEX_BASE + summonsThisBattle };
+            summonedUniqueIds.Add(summon.UniqueID);
+            summonsThisBattle++;
+
+            Team previousTeam = selectedTeam;
+            selectedTeam = Team.Player;
+            SpawnSquadFromSaveData(summon, placement.Rotation, placement.Center, summon.UnitIndex, placement.WidthAndDepth, placement.Positions);
+            selectedTeam = previousTeam;
+        }
         #endregion
 
-        public void SpawnSquadFromSaveData(SquadToLoad squadToLoad, Quaternion rotation, Vector3 spawnPointTransform, int _spawnIndex, int2 widthAndDepth = default)
+        public void SpawnSquadFromSaveData(SquadToLoad squadToLoad, Quaternion rotation, Vector3 spawnPointTransform, int _spawnIndex, int2 widthAndDepth = default, List<float3> placedPositions = null)
         {
             // Debug.Log($"Spawning squad {squadToLoad.UnitName} at {spawnPointTransform} for team {selectedTeam}");
             EntityManager entityManager = World.DefaultGameObjectInjectionWorld.EntityManager;
@@ -1203,8 +1249,21 @@ namespace Memori.SaveData
                 enemyArmyContainsOutriders = true;
             }
 
+            // Placement flow (Raise Dead): the player drew these points, so they replace the generated
+            // formation, skip the proximity shove and skip the rotate-and-offset below. Noise is still
+            // applied so the squad does not stand on a perfect grid.
+            bool usePlacedPositions = placedPositions != null && placedPositions.Count >= unitCount;
+            if (placedPositions != null && !usePlacedPositions)
+                Debug.LogWarning($"[ArmySpawnManager] Placement for {squadToLoad.UnitName} has {placedPositions.Count} points for {unitCount} units; falling back to a generated formation.");
+            if (usePlacedPositions)
+            {
+                entityPositions = new List<float3>(unitCount);
+                for (int i = 0; i < unitCount; i++)
+                    entityPositions.Add(TabletopTavernData.Instance.GetNoiseFromUnitName(squadToLoad.UnitName, placedPositions[i]));
+            }
+
             //check if there are any squads within x distance of the spawn point
-            bool isNearOtherSquads = true;
+            bool isNearOtherSquads = !usePlacedPositions;
             int attempts = 4;
             while(isNearOtherSquads && attempts > 0)
             {
@@ -1233,6 +1292,7 @@ namespace Memori.SaveData
   
             for (int i = 0; i < entityPositions.Count; i++)
             {
+                if (usePlacedPositions) break; // already world points
                 if (isEnemyOutriders)
                 {
                     //rotate the rotation 180 degrees for outriders
