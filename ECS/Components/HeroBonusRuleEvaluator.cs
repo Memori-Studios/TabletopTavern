@@ -23,7 +23,7 @@ public static class HeroBonusRuleEvaluator
     }
 
     // Grants every attribute the hero's rules give this unit, straight onto the attribute set.
-    // Auto-resolve uses this; the live battle adds tag components per attribute in SquadManager.
+    // Used by auto-resolve and by UnitSetUpSystem; SquadManager does the same merge through HeroBonusManager.
     public static void ApplyHeroAttributes(ref SquadAttributes attributes, UnitName requestingUnit, int activeHeroID, SquadStats stats, Race enemyRace)
     {
         if (activeHeroID == -1 || _attributeRules == null) return;

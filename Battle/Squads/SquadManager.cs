@@ -387,17 +387,10 @@ public class SquadManager : MonoBehaviour
             speed += SumHeroBonus(UnitStat.Speed, speed);
             chargeImpactDamage += (int)SumHeroBonus(UnitStat.ChargeImpactDamage, chargeImpactDamage);
 
+            // Merge hero-granted attributes into the local stats so every tag check below sees them.
             foreach (var attributeBonus in HeroBonusManager.GetHeroAttributeBonus(squadStats.unitName, campaignSaveDataHolder.ActiveHeroID))
             {
-                switch (attributeBonus.UnitAttribute)
-                {
-                    case UnitAttribute.Terrifying: ecb.AddComponent<CausesTerrorTag>(squadEntity); break;
-                    case UnitAttribute.Stalwart: ecb.AddComponent<StalwartTag>(squadEntity); break;
-                    case UnitAttribute.Rage: ecb.AddComponent<RageApplicatorTag>(squadEntity); break;
-                    // Outrider is applied contextually in UnitSelectionManager (a deployment-time
-                    // position-validity check), not as a persistent squad tag - intentionally not
-                    // handled here.
-                }
+                TabletopTavernConstants.SetAttribute(ref squadStats.SquadAttributes, attributeBonus.UnitAttribute);
             }
         }
         int maxHealth = hitPointsPerUnit * initialSquadSize;

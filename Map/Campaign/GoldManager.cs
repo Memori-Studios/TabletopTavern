@@ -98,7 +98,7 @@ public class GoldManager : MonoBehaviour
         {
             var squad = campaignSaveManager.SaveData.playerArmy[i];
             if (squad.isEmptySquad) continue;
-            if (TabletopTavernData.Instance.GetSquadStats(squad.UnitName).SquadAttributes.DragonsHoard)
+            if (HeroBonusManager.UnitHasAttribute(squad.UnitName, campaignSaveManager.SaveData.heroID, UnitAttribute.DragonsHoard))
             {
                 bonus += 3;
             }

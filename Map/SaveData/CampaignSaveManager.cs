@@ -435,8 +435,7 @@ namespace TJ
             {
                 if (saveData.playerArmy[i].UnitIndex == -1) continue;
 
-                SquadAttributes attrs = TabletopTavernData.Instance.GetSquadStats(saveData.playerArmy[i].UnitName).SquadAttributes;
-                if (attrs.Unstoppable)
+                if (HeroBonusManager.UnitHasAttribute(saveData.playerArmy[i].UnitName, saveData.heroID, UnitAttribute.Unstoppable))
                 {
                     ModifySpecificUnitHealth(0.25f, saveData.playerArmy[i].UniqueID);
                 }
@@ -1560,7 +1559,7 @@ namespace TJ
                 SquadToLoad squadToCheck = saveData.playerArmy[i];
 
                 //check if it has the forge fury tempering attribute
-                if (!TabletopTavernData.Instance.GetSquadStats(squadToCheck.UnitName).SquadAttributes.ForgefuryTempering) continue;
+                if (!HeroBonusManager.UnitHasAttribute(squadToCheck.UnitName, saveData.heroID, UnitAttribute.ForgefuryTempering)) continue;
 
                 //try get squad kills stored for this unit
                 int killStoreIndex = saveData.HistoricalKillStore.FindIndex(x => x.SquadGUID == squadToCheck.UniqueID);

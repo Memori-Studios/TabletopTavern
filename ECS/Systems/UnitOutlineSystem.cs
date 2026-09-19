@@ -22,6 +22,9 @@ partial struct UnitOutlineSystem : ISystem
 
     public void OnUpdate(ref SystemState state)
     {
+#if !SPELLS
+        return;
+#endif
         // Units vanish without events on scene unload, so the counts restart with the next battle.
         if (_unitQuery.IsEmptyIgnoreFilter)
         {

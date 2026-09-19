@@ -428,7 +428,7 @@ namespace TJ
             GearModifierValue = GEAR_TOWERSHIELDS_MODIFIER,
         };
 
-        //Desc: "Reduces cost of recruiting from towns by {0} gold"
+        //Desc: "Recruiting from towns costs 5 in a Village, 10 in a Castle, 25 in a City" (TownPanel applies the per-size discount; GearModifierValue is unused)
         //Flavor: "No one wants them anyway"
         public static Gear JailersKey = new ()
         {

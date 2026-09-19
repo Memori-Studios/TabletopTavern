@@ -231,6 +231,10 @@ namespace TJ
                 UnitAttribute grantedTrait = BattleManager.Instance.SquadManager.GetSquadPrestigeTrait(squadEntity.SquadId);
                 if (grantedTrait != UnitAttribute.None)
                     TabletopTavernConstants.SetAttribute(ref squadStats.SquadAttributes, grantedTrait);
+                // Hero-granted attributes (Deep Quivers, Powder Reserves) need the same merge.
+                if (squadEntity.SquadId > 0)
+                    foreach (var attributeBonus in HeroBonusManager.GetHeroAttributeBonus(squadEntity.UnitName, HeroBonusManager.Instance.ActiveHeroID))
+                        TabletopTavernConstants.SetAttribute(ref squadStats.SquadAttributes, attributeBonus.UnitAttribute);
 
                 //Create Range Drawer for the squad
                 if (TabletopTavernConstants.FightsAtRange(unitType))

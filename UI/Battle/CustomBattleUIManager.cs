@@ -327,6 +327,9 @@ namespace TJ
             mapRegion = mapRegions[value];
             mapRegionDropdown.value = value;
             mapRegionDropdown.RefreshShownValue();
+            // Each region has its own weather and biome lists; stale labels index the wrong entry.
+            ResetWeatherDropdownOptions();
+            ResetBiomeDropdownOptions();
         }
         private void ResetBiomeDropdownOptions()
         {

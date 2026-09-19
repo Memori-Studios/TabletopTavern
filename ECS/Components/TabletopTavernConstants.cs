@@ -69,8 +69,8 @@ public static class TabletopTavernConstants
     public static readonly Color PLAYER_TRIANGLE_COLOR = new(1f, 0.75f, 0f, 1f);
     public static readonly Color ENEMY_TRIANGLE_COLOR = new(1f, 0f, 0f, 1f);
     public static readonly Color DISABLED_TRIANGLE_COLOR = new(0, 0, 0, 0);
-    public const int TRIANGLE_HOVER_BLOOM = 5;
-    public const int TRIANGLE_SELECTED_BLOOM = 10;
+    public const int TRIANGLE_HOVER_BLOOM = 3;
+    public const int TRIANGLE_SELECTED_BLOOM = 5;
 
     // Rendering-layer bits the outline renderer feature filters on; must stay clear of Volumetric Fog's bit 17.
     public const uint OUTLINE_LAYER_HOVER_PLAYER = 1u << 24;

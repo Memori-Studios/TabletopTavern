@@ -56,6 +56,9 @@ partial struct UnitSetUpSystem : ISystem
                 if (grantedTrait != UnitAttribute.None)
                     TabletopTavernConstants.SetAttribute(ref squadStats.SquadAttributes, grantedTrait);
             }
+            // Hero-granted attributes must land before the per-unit attribute checks below, same as prestige.
+            if (campaignSaveDataHolder.ActiveHeroID != -1 && unit.ValueRO.Team == Team.Player)
+                HeroBonusRuleEvaluator.ApplyHeroAttributes(ref squadStats.SquadAttributes, unit.ValueRO.unitName, campaignSaveDataHolder.ActiveHeroID, squadStats, campaignSaveDataHolder.EnemyRace);
 
             UnitAttributeSerialized unitAttributes = new();
 
