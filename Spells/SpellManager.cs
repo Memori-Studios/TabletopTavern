@@ -9,6 +9,7 @@ using Memori.Notifications;
 using Memori.SaveData;
 using Memori.Steamworks;
 using Unity.Entities;
+using Unity.Mathematics;
 using UnityEngine;
 
 namespace TJ.Spells
@@ -18,8 +19,20 @@ public class SpellManager : MonoBehaviour
     [SerializeField] private LayerMask validSpellCastLayerMask;
     //temp, only for testing
     [SerializeField] private SpellData[] defaultSpells;
+    [SerializeField] private SFXCue castSound;
+    [SerializeField] private SFXCue selectSound;
+    [SerializeField] private SFXCue targetHoverSound;
+    [SerializeField] private SFXCue targetHoverLoop;
+    [Header("Targeting cursor")]
+    [SerializeField] private Texture2D validTargetCursor;
+    [SerializeField] private Texture2D invalidTargetCursor;
+    // Which cursor is up, so SetCursor runs on a change and not every frame. Null = the default cursor.
+    private Texture2D activeCursor;
+    private bool targetHintValid;
+    private SpellData targetHintSpell;
+    // The one ActiveSpell prefab every cast starts from (AOE Spell); per-spell art is SpellData.SpellVisualPrefab.
+    [SerializeField] private ActiveSpell aoeSpellPrefab;
     [SerializeField] private SpellCastButton[] spellCastButtons;
-    [SerializeField] private SpellQuickCastMenu spellQuickCastMenu;
 
     [Header("Pre-Battle Browsing (custom battle only)")]
     // The pool the player can swap from is every registered spell (SpellRegistry.All). It used to be
@@ -39,6 +52,31 @@ public class SpellManager : MonoBehaviour
     private SpellSlotState[] slotStates;
     private int selectedSpellIndex = -1;
     private Entity targetedSquadSelfEntity = Entity.Null;
+
+    #region Mage spells
+    // A mage squad's spell armed through the caster rail or the Y menu. It shares the cursor,
+    // targeting feedback and click with the hotbar, but spends a charge instead of mana and casts
+    // through MageManualCastOrder / MageCastSystem rather than spawning the ActiveSpell here.
+    // 0 = no mage spell armed; then selectedSpellIndex says whether a hotbar spell is.
+    private int armedMageSquadId;
+    private SpellData armedMageSpell;
+    public bool MageSpellArmed => armedMageSquadId != 0;
+    public int ArmedMageSquadId => armedMageSquadId;
+    // How far inside casting range an out-of-range ground cast walks the mage, so it stops in range
+    // rather than exactly on the edge where the squad's own footprint can leave it short.
+    private const float APPROACH_RANGE_FRACTION = 0.9f;
+    #endregion
+
+    // Whatever is armed right now, from either source. Null when nothing is.
+    private SpellData ArmedSpell
+    {
+        get
+        {
+            if(armedMageSquadId != 0) return armedMageSpell;
+            if(selectedSpellIndex >= 0 && slotStates != null) return slotStates[selectedSpellIndex].SpellData;
+            return null;
+        }
+    }
 
     // Placement spells. Starstep first asks for a squad, then both it and Raise Dead draw a formation
     // on the cursor and resolve on the right-click that confirms it (right-drag rotates and widens,
@@ -68,10 +106,14 @@ public class SpellManager : MonoBehaviour
     private int browseHighlightSlot = -1;
 
     private bool validSpellCastPoint;
+    // The squad the hover audio last reacted to, so the one-shot fires once per new target.
+    private Entity hoverAudioTarget = Entity.Null;
     private Vector3 spellCursorOrigin;
     public Vector3 SpellCursorOrigin => spellCursorOrigin;
     public bool ValidSpellCastPoint => validSpellCastPoint;
-    public float SelectedSpellRadius => selectedSpellIndex >= 0 ? slotStates[selectedSpellIndex].SpellData.SpellRadius : 0f;
+    public float SelectedSpellRadius => ArmedSpell != null ? ArmedSpell.SpellRadius : 0f;
+    // The targeting star only marks single-target spells; an area spell's cursor is the ring alone.
+    public bool SelectedSpellShowsStar => ArmedSpell != null && ArmedSpell.SpellType == SpellType.SingleTarget;
     int spellsCast = 0;
     // Bitmask of slots cast at least once this battle, for the "Full Arsenal" achievement.
     int slotsCastMask = 0;
@@ -83,10 +125,8 @@ public class SpellManager : MonoBehaviour
 #if SPELLS
         BattleManager.Instance.OnCursorModeChanged += CursorModeChanged;
         BattleManager.Instance.OnGamePhaseChanged += GamePhaseChanged;
-        InputHandler.Instance.OnSelectSpell1 += SelectSpellHotkey1;
-        InputHandler.Instance.OnSelectSpell2 += SelectSpellHotkey2;
-        InputHandler.Instance.OnSelectSpell3 += SelectSpellHotkey3;
-        InputHandler.Instance.OnSelectSpell4 += SelectSpellHotkey4;
+        InputHandler.Instance.OnSpellMenuDigit -= OnSpellMenuDigit;
+        InputHandler.Instance.OnSpellMenuDigit += OnSpellMenuDigit;
         if(UnitSelectionManager.Instance != null)
         {
             UnitSelectionManager.Instance.OnSelectedSquadsChanged -= OnSelectedSquadsChangedForPlacement;
@@ -112,12 +152,14 @@ public class SpellManager : MonoBehaviour
     }
     public void LoadSpellManager(SpellData[] _spells = null)
     {
-        // Swapping is a pre-battle, custom-battle convenience only. It stays off for campaign battles.
-        browsingEnabled = BattleManager.Instance.BattleSaveManager.IsCustomBattle;
+        bool isCustomBattle = BattleManager.Instance.BattleSaveManager.IsCustomBattle;
+        // Swapping is a pre-battle, custom-battle convenience only. It stays off for campaign battles,
+        // and in test mode every spell is already on screen so there is nothing to swap for.
+        browsingEnabled = isCustomBattle && !SpellTestMode.Active;
 
         if(_spells != null) {
             defaultSpells = _spells;
-        } else if(!browsingEnabled) {
+        } else if(!isCustomBattle) {
             // Campaign battle: the loadout was chosen at run setup and persisted on the campaign
             // save. Custom battles keep the serialized inspector list, which the browse menu edits.
             SpellData[] campaignSpells = SaveDataHandler.GetCampaignSpells();
@@ -126,7 +168,10 @@ public class SpellManager : MonoBehaviour
 
         EnsureLoadoutCoversHotbar();
 
-        if(_spells == null && browsingEnabled) ApplySavedCustomBattleSpells();
+        if(_spells == null && isCustomBattle) ApplySavedCustomBattleSpells();
+
+        if(hotbarSlotCount < 0) hotbarSlotCount = spellCastButtons.Length;
+        if(SpellTestMode.Active) BuildTestGrid();
 
         // Two passes on purpose. State is fully populated before any View code runs, so a missing
         // serialized reference on a hotbar prefab throws ONCE and stays readable - filling and wiring
@@ -155,7 +200,7 @@ public class SpellManager : MonoBehaviour
             WireSlotButton(slotIndex, slotStates[i].SpellData);
             // Custom battles are a sandbox and bypass the unlock gate entirely - the browse pool
             // already ignores IsUnlocked - so slot locking is a campaign-only concern.
-            spellCastButtons[i].SetLocked(!browsingEnabled && SpellLoadout.IsSlotLocked(slotIndex));
+            spellCastButtons[i].SetLocked(!isCustomBattle && SpellLoadout.IsSlotLocked(slotIndex));
             // The picker's info panel describes a slot the moment it is hovered, so the button's own
             // floating tooltip stands down for as long as the picker is available.
             spellCastButtons[i].SetBrowseModeActive(browsingEnabled);
@@ -166,8 +211,6 @@ public class SpellManager : MonoBehaviour
         // After the wiring pass - LoadSpellUI resets each button's affordability to true.
         RefreshAffordability();
         OnManaChanged?.Invoke(manaRemaining, manaMax);
-
-        spellQuickCastMenu.Load(defaultSpells);
 
         if(browsingEnabled && spellBrowseMenu != null)
             spellBrowseMenu.Initialize(new List<SpellData>(SpellRegistry.All).ToArray(), SwapSpell, OnBrowseMenuHoverEnter, OnBrowseMenuHoverExit);
@@ -184,6 +227,55 @@ public class SpellManager : MonoBehaviour
         if(defaultSpells != null) Array.Copy(defaultSpells, resized, defaultSpells.Length);
         defaultSpells = resized;
     }
+    #region Spell test mode (Editor only)
+    // The scene hotbar's button count, so the custom-battle save and Full Arsenal never see the grid.
+    private int hotbarSlotCount = -1;
+    private RectTransform testGrid;
+
+    /// <summary>
+    /// Every registered spell not already on the hotbar gets a cloned hotbar button in a grid stacked
+    /// above the hotbar. The clones are appended to spellCastButtons and defaultSpells so the rest
+    /// of this class treats them as ordinary slots; hotkeys and the quick-cast menu still cover only
+    /// the real four. The grid dies with the scene, like the hotbar it copies.
+    /// </summary>
+    private void BuildTestGrid()
+    {
+        Debug.LogWarning($"[SpellTestMode] active: mana {SpellTestMode.ManaPool}, cooldowns {SpellTestMode.CooldownSeconds}s, every registered spell on the grid. Tabletop Tavern > Spell Test Mode to turn off.");
+
+        // A second load starts from the real hotbar so clones never stack.
+        if(testGrid != null) Destroy(testGrid.gameObject);
+        Array.Resize(ref spellCastButtons, hotbarSlotCount);
+        Array.Resize(ref defaultSpells, hotbarSlotCount);
+
+        List<SpellData> extras = new();
+        foreach(SpellData spell in SpellRegistry.All)
+            if(Array.IndexOf(defaultSpells, spell) < 0) extras.Add(spell);
+        if(extras.Count == 0) return;
+
+        SpellCastButton template = spellCastButtons[0];
+        if(template == null) {
+            Debug.LogError("SpellManager: spellCastButtons[0] is not assigned, so there is no button to clone for the test grid.");
+            return;
+        }
+        testGrid = SpellTestMode.CreateGrid(template.transform as RectTransform);
+
+        int first = hotbarSlotCount;
+        Array.Resize(ref spellCastButtons, first + extras.Count);
+        Array.Resize(ref defaultSpells, first + extras.Count);
+        for (int i = 0; i < extras.Count; i++) {
+            SpellCastButton clone = Instantiate(template, testGrid);
+            clone.name = $"Test Grid {extras[i].Spell}";
+            spellCastButtons[first + i] = clone;
+            defaultSpells[first + i] = extras[i];
+            // The army preload only read the real hotbar, so a summon on the grid preloads here.
+            if(extras[i].SummonsSquad)
+                BattleManager.Instance.UnitGPUAnimLoader.PreloadAdditionalUnit(extras[i].SummonedUnitName);
+        }
+    }
+
+    private static float CooldownFor(SpellData spellData)
+        => SpellTestMode.Active ? SpellTestMode.CooldownSeconds : spellData.SpellCooldown;
+    #endregion
     private void WireSlotButton(int slotIndex, SpellData spellData)
     {
         Action browseEnter = browsingEnabled ? () => OnButtonBrowseHoverEnter(slotIndex) : null;
@@ -215,8 +307,9 @@ public class SpellManager : MonoBehaviour
     /// </summary>
     public Spell[] GetEquippedSpellEnums()
     {
-        Spell[] equipped = new Spell[slotStates.Length];
-        for (int i = 0; i < slotStates.Length; i++)
+        // The test grid's clones sit past hotbarSlotCount and must not reach the save.
+        Spell[] equipped = new Spell[hotbarSlotCount];
+        for (int i = 0; i < hotbarSlotCount; i++)
             equipped[i] = slotStates[i].SpellData == null ? Spell.None : slotStates[i].SpellData.Spell;
         return equipped;
     }
@@ -351,7 +444,6 @@ public class SpellManager : MonoBehaviour
 
         WireSlotButton(slotIndex, newSpell);
         RefreshAffordability();
-        spellQuickCastMenu.Load(GetEquippedSpells());
 
         // Re-open rather than rebuild: rows keep their fixed order, this just refreshes which ones read
         // as equipped and repoints the info panel at what now occupies the slot.
@@ -407,19 +499,34 @@ public class SpellManager : MonoBehaviour
     }
     #endregion
 
-    private void SelectSpellHotkey1() => SelectSpellByHotkeyIndex(1);
-    private void SelectSpellHotkey2() => SelectSpellByHotkeyIndex(2);
-    private void SelectSpellHotkey3() => SelectSpellByHotkeyIndex(3);
-    private void SelectSpellHotkey4() => SelectSpellByHotkeyIndex(4);
-
-    public void SelectSpellByHotkeyIndex(int _hotkeyIndex)
+    /// <summary>
+    /// Y menu: digits 1..hotbarSlotCount are the hotbar, the rest are the selected mage squads in
+    /// selection order (5 is the mage nearest the hotbar). A digit past the last mage does nothing.
+    /// </summary>
+    private void OnSpellMenuDigit(int digit)
     {
-        if(slotStates == null) return;
+        if(slotStates == null || hotbarSlotCount < 0) return;
 
-        int slotIndex = _hotkeyIndex - 1;
-        if(slotIndex < 0 || slotIndex >= slotStates.Length) return;
-
-        SelectSpell(slotIndex);
+        if(digit <= hotbarSlotCount) {
+            SelectSpell(digit - 1);
+            return;
+        }
+        int mageIndex = digit - hotbarSlotCount - 1;
+        List<int> mages = GetSelectedMageSquadIds();
+        if(mageIndex < mages.Count) ArmMageSpell(mages[mageIndex]);
+    }
+    /// <summary>Selected player squads that still carry MageSquad (a spent mage is a melee body), in selection order.</summary>
+    public List<int> GetSelectedMageSquadIds()
+    {
+        List<int> mages = new();
+        EntityManager entityManager = World.DefaultGameObjectInjectionWorld.EntityManager;
+        foreach(int squadId in BattleManager.Instance.UnitSelectionManager.SelectedSquadIds) {
+            if(squadId <= 0) continue;
+            SquadEntity squad = BattleManager.Instance.SquadManager.GetSquadEntityFromId(squadId, true);
+            if(squad.SelfEntity == Entity.Null || !entityManager.HasComponent<MageSquad>(squad.SelfEntity)) continue;
+            mages.Add(squadId);
+        }
+        return mages;
     }
 
     public void SelectSpell(int slotIndex)
@@ -454,6 +561,8 @@ public class SpellManager : MonoBehaviour
             return;
         }
 
+        IAudioRequester.Instance.Play(selectSound, ignoreDucking: true);
+
         if(IsPlacementSpell(slotStates[slotIndex].SpellData)) {
             BeginPlacementFlow(slotIndex);
             return;
@@ -463,6 +572,9 @@ public class SpellManager : MonoBehaviour
         if(selectedSpellIndex >= 0 && selectedSpellIndex != slotIndex)
             spellCastButtons[selectedSpellIndex].SetSelected(false);
 
+        // Only one thing is ever armed.
+        armedMageSquadId = 0;
+        armedMageSpell = null;
         selectedSpellIndex = slotIndex;
         spellCastButtons[selectedSpellIndex].SetSelected(true);
         // Debug.Log($"SpellManager: Selected slot {slotIndex} ({slotStates[slotIndex].SpellData.name})");
@@ -470,6 +582,8 @@ public class SpellManager : MonoBehaviour
         if(BattleManager.Instance.CursorMode != CursorMode.CastSpell){
             BattleManager.Instance.SetCursorMode(CursorMode.CastSpell);
         }
+        // After the mode switch: any hop through Free on the way here un-ducks in CursorModeChanged.
+        IAudioRequester.Instance.SetDucked(true);
     }
 
     #region Placement spells (Starstep, Raise Dead)
@@ -512,6 +626,7 @@ public class SpellManager : MonoBehaviour
 
         if(BattleManager.Instance.CursorMode != CursorMode.CastSpell)
             BattleManager.Instance.SetCursorMode(CursorMode.CastSpell);
+        IAudioRequester.Instance.SetDucked(true);
     }
     // Subscribed to UnitSelectionManager.OnSelectedSquadsChanged. The only transition it owns is
     // "a player squad was picked while Starstep waits for one".
@@ -550,17 +665,21 @@ public class SpellManager : MonoBehaviour
         SpellData spell = slotStates[placementSlot].SpellData;
         PositionDrawer drawer = BattleManager.Instance.PositionDrawer;
 
+        List<float3> points = drawer.UnitPrefabPointPositions();
         SpellPlacement placement = new SpellPlacement {
-            Positions = drawer.UnitPrefabPointPositions(),
+            Positions = points,
             // Same convention as SpawnManager.SpawnFormation and TeleportUnits: the drawn parent's
             // yaw plus 90 is the squad's facing.
             Rotation = drawer.PositionsParent.rotation * Quaternion.Euler(0f, 90f, 0f),
             WidthAndDepth = spell.SummonsSquad ? drawer.Formation.GetWidthAndDepth(0) : default,
-            Center = drawer.PositionsParent.position
+            // The drawer's parent is the mouse anchor at the formation's edge; the visuals belong on the squad's centre.
+            Center = FormationCenter(points, drawer.PositionsParent.position)
         };
 
         int slot = placementSlot;
         bool teleport = spell.TeleportsSquad;
+        Vector3 departure = Vector3.zero;
+        bool hasDeparture = teleport && TryGetFirstSelectedSquadCenter(out departure);
         if(teleport)
         {
             // Apply the blink now, from the points on screen. TeleportUnits reads the drawer, turns it
@@ -578,6 +697,11 @@ public class SpellManager : MonoBehaviour
 
         CancelPlacement(false);
         CastPlacedSpell(slot, placement.Center, teleport ? null : placement, teleport);
+        // The blink reads at both ends: a second, visual-only instance marks where the squad left.
+        if(hasDeparture) {
+            ActiveSpell departureVisual = SpawnActiveSpell(departure);
+            if(departureVisual != null) departureVisual.Load(spell, departure, Entity.Null, Team.Player, 0, null, true);
+        }
         // A blinked squad stays selected, exactly as it would after a move order.
         bool squadsStillSelected = BattleManager.Instance.UnitSelectionManager.SelectedSquadIds.Count > 0;
         BattleManager.Instance.SetCursorMode(squadsStillSelected ? CursorMode.UnitsSelected : CursorMode.Free);
@@ -598,6 +722,27 @@ public class SpellManager : MonoBehaviour
     }
     // The cast itself for a placed spell: the same gates and bookkeeping as CastSpell, minus the
     // mouse-release wait (the confirming right-click has already been released).
+    private static Vector3 FormationCenter(List<float3> points, Vector3 fallback)
+    {
+        if(points == null || points.Count == 0) return fallback;
+        float3 sum = float3.zero;
+        foreach(float3 point in points) sum += point;
+        return sum / points.Count;
+    }
+    // The squad Starstep is about to move; false when nothing of the player's is selected.
+    private bool TryGetFirstSelectedSquadCenter(out Vector3 center)
+    {
+        center = Vector3.zero;
+        EntityManager entityManager = World.DefaultGameObjectInjectionWorld.EntityManager;
+        foreach(int squadId in BattleManager.Instance.UnitSelectionManager.SelectedSquadIds) {
+            if(squadId <= 0) continue;
+            SquadEntity squad = BattleManager.Instance.SquadManager.GetSquadEntityFromId(squadId, true);
+            if(squad.SelfEntity == Entity.Null || !entityManager.HasComponent<SquadMovementComponent>(squad.SelfEntity)) continue;
+            center = entityManager.GetComponentData<SquadMovementComponent>(squad.SelfEntity).SquadCenter;
+            return true;
+        }
+        return false;
+    }
     private void CastPlacedSpell(int slotIndex, Vector3 origin, SpellPlacement placement, bool effectHandledByCaster)
     {
         SpellSlotState slot = slotStates[slotIndex];
@@ -606,19 +751,16 @@ public class SpellManager : MonoBehaviour
             RejectCast(slotIndex, "failed re-check at placement time");
             return;
         }
-        if(slot.SpellData.SpellPrefab == null) {
-            Debug.LogError($"SpellManager: '{slot.SpellData.name}' has no SpellPrefab assigned and cannot be cast.", slot.SpellData);
-            return;
-        }
-
-        IAudioRequester.Instance.PlaySFX("cast-spell");
-        ActiveSpell spellInstance = Instantiate(slot.SpellData.SpellPrefab, origin, Quaternion.identity);
+        IAudioRequester.Instance.Play(castSound, ignoreDucking: true);
+        IAudioRequester.Instance.SetDucked(false);
+        ActiveSpell spellInstance = SpawnActiveSpell(origin);
+        if(spellInstance == null) return;
         spellInstance.Load(slot.SpellData, origin, Entity.Null, Team.Player, 0, placement, effectHandledByCaster);
 
         SpendMana(slot.SpellData.SpellManaCost);
         Debug.Log($"SpellManager: cast {slot.SpellData.name} (placed) for {slot.SpellData.SpellManaCost} mana, {manaRemaining}/{manaMax} remaining");
 
-        slot.CooldownDuration = slot.SpellData.SpellCooldown;
+        slot.CooldownDuration = CooldownFor(slot.SpellData);
         slot.CooldownRemaining = slot.CooldownDuration;
         spellCastButtons[slotIndex].RenderCooldown(1f, true);
 
@@ -633,6 +775,7 @@ public class SpellManager : MonoBehaviour
     /// </summary>
     private void CheckFullArsenal()
     {
+        if(SpellTestMode.Active) return;
         for (int i = 0; i < slotStates.Length; i++)
         {
             if(slotStates[i].SpellData == null) return;
@@ -642,6 +785,8 @@ public class SpellManager : MonoBehaviour
     }
     public void DeselectSpell()
     {
+        armedMageSquadId = 0;
+        armedMageSpell = null;
         if(selectedSpellIndex < 0) return;
 
         spellCastButtons[selectedSpellIndex].SetSelected(false);
@@ -650,14 +795,120 @@ public class SpellManager : MonoBehaviour
     public void AttemptCastSpell()
     {
         if(!validSpellCastPoint){
-            Debug.Log($"SpellManager: Cast failed, invalid cast point (selected slot {selectedSpellIndex}, cursor {spellCursorOrigin})");
+            Debug.Log($"SpellManager: Cast failed, invalid cast point (selected slot {selectedSpellIndex}, mage {armedMageSquadId}, cursor {spellCursorOrigin})");
             NotificationManager.Instance.ErrorNotification("Invalid Spell Cast Point");
             return;
         }
 
-        IAudioRequester.Instance.PlaySFX("cast-spell");
+        IAudioRequester.Instance.Play(castSound, ignoreDucking: true);
+        if(MageSpellArmed) {
+            CastMageSpell();
+            return;
+        }
         CastSpell();
     }
+
+    #region Mage spells
+    /// <summary>
+    /// Arms a selected mage squad's spell: same cursor and feedback as a hotbar spell, cast by the
+    /// squad itself. Charges are the only gate; a cast queued on cooldown fires when the timer ends.
+    /// </summary>
+    public void ArmMageSpell(int squadId)
+    {
+#if !SPELLS
+        return;
+#endif
+        if(BattleManager.Instance.GamePhase != GamePhase.Battle) {
+            NotificationManager.Instance.ErrorNotification(LocalizationManager.Instance.GetText("SpellsLockedUntilBattle"));
+            return;
+        }
+        SquadEntity squad = BattleManager.Instance.SquadManager.GetSquadEntityFromId(squadId, true);
+        EntityManager entityManager = World.DefaultGameObjectInjectionWorld.EntityManager;
+        if(squad.SelfEntity == Entity.Null || !entityManager.HasComponent<MageSquad>(squad.SelfEntity)) {
+            Debug.Log($"SpellManager: arm rejected, squad {squadId} is not a mage with charges left");
+            return;
+        }
+        if(entityManager.HasComponent<SquadAmmunition>(squad.SelfEntity)
+           && entityManager.GetComponentData<SquadAmmunition>(squad.SelfEntity).Value <= 0) {
+            Debug.Log($"SpellManager: arm rejected, squad {squadId} has no charges left");
+            return;
+        }
+        SpellData spell = TabletopTavernData.Instance.SquadAssetsDictionary[squad.UnitName].mageSpell;
+        if(spell == null) {
+            Debug.LogError($"SpellManager: {squad.UnitName} has no mageSpell assigned, nothing to arm.");
+            return;
+        }
+
+        IAudioRequester.Instance.Play(selectSound, ignoreDucking: true);
+        if(placementPhase != SpellPlacementPhase.None) CancelPlacement(false);
+        DeselectSpell();
+        armedMageSquadId = squadId;
+        armedMageSpell = spell;
+
+        if(BattleManager.Instance.CursorMode != CursorMode.CastSpell)
+            BattleManager.Instance.SetCursorMode(CursorMode.CastSpell);
+        IAudioRequester.Instance.SetDucked(true);
+    }
+    /// <summary>
+    /// The click: hands the cast point to the mage as a MageManualCastOrder. In range, MageCastSystem
+    /// casts on its next tick with the timer at zero. Out of range it is also given an approach order
+    /// (Attack for a squad target, Move to a point inside range for a ground target) and casts on
+    /// arrival. One cast per arm: the cursor drops back to the selection afterwards.
+    /// </summary>
+    private void CastMageSpell()
+    {
+        int squadId = armedMageSquadId;
+        SpellData spell = armedMageSpell;
+        SquadEntity squad = BattleManager.Instance.SquadManager.GetSquadEntityFromId(squadId, true);
+        EntityManager entityManager = World.DefaultGameObjectInjectionWorld.EntityManager;
+        Entity self = squad.SelfEntity;
+        bool castable = self != Entity.Null && entityManager.Exists(self)
+            && entityManager.HasComponent<MageManualCastOrder>(self)
+            && entityManager.HasComponent<MageSquad>(self)
+            && entityManager.HasComponent<SquadMovementComponent>(self)
+            && BattleManager.Instance.GamePhase == GamePhase.Battle;
+        if(!castable) {
+            Debug.Log($"SpellManager: mage cast dropped, squad {squadId} can no longer cast");
+            ExitMageCast();
+            return;
+        }
+
+        Entity target = spell.SpellTargetingType == SpellTargetingType.Squad ? targetedSquadSelfEntity : Entity.Null;
+        float3 castPoint = spellCursorOrigin;
+        entityManager.SetComponentData(self, new MageManualCastOrder { Position = castPoint, TargetSquadEntity = target });
+        entityManager.SetComponentEnabled<MageManualCastOrder>(self, true);
+
+        SquadMovementComponent movement = entityManager.GetComponentData<SquadMovementComponent>(self);
+        float range = entityManager.GetComponentData<MageSquad>(self).AttackRange;
+        float distance = math.distance(movement.SquadCenter, castPoint);
+        if(distance > range) {
+            // Same buffer QueueSquadCommand writes for a right-click order; a fresh order replaces
+            // whatever the squad was doing, as a player order always does.
+            DynamicBuffer<QueuedOrder> orders = entityManager.GetBuffer<QueuedOrder>(self);
+            orders.Clear();
+            if(target != Entity.Null) {
+                orders.Add(QueuedOrder.Attack(entityManager.GetComponentData<SquadEntity>(target).SquadId));
+            } else {
+                float3 direction = math.normalizesafe(castPoint - movement.SquadCenter);
+                float3 goal = castPoint - direction * (range * APPROACH_RANGE_FRACTION);
+                // Move goals are authored on the ground plane, as QueueSquadCommand does.
+                goal.y = 0f;
+                QueuedOrder move = QueuedOrder.Move(goal, movement.SquadRotation);
+                move.WidthAndDepth = movement.SquadWidthAndDepth;
+                orders.Add(move);
+            }
+        }
+        Debug.Log($"SpellManager: mage {squadId} ordered to cast {spell.name} at {castPoint} (distance {distance:F0}, range {range:F0}{(distance > range ? ", approaching" : "")})");
+        ExitMageCast();
+    }
+    private void ExitMageCast()
+    {
+        IAudioRequester.Instance.SetDucked(false);
+        // Leaving CastSpell runs CursorModeChanged, which clears the armed mage through DeselectSpell.
+        bool squadsStillSelected = BattleManager.Instance.UnitSelectionManager.SelectedSquadIds.Count > 0;
+        BattleManager.Instance.SetCursorMode(squadsStillSelected ? CursorMode.UnitsSelected : CursorMode.Free);
+    }
+    #endregion
     public IEnumerator GetMouseCursorPosition()
     {
         while(BattleManager.Instance.CursorMode == CursorMode.CastSpell)
@@ -676,8 +927,8 @@ public class SpellManager : MonoBehaviour
                 AttemptCastSpell();
             }
 
-            if(selectedSpellIndex < 0) { yield return null; continue; }
-            SpellData selectedSpellData = slotStates[selectedSpellIndex].SpellData;
+            SpellData selectedSpellData = ArmedSpell;
+            if(selectedSpellData == null) { yield return null; continue; }
 
             Vector3 castPoint = MouseWorldPosition.Instance.GetWorldPosition() + (Vector3.up*10f);
             targetedSquadSelfEntity = Entity.Null;
@@ -697,9 +948,11 @@ public class SpellManager : MonoBehaviour
                     if(validTarget) {
                         SquadEntity hoveredSquad = BattleManager.Instance.SquadManager.GetSquad(hoveredSquadIndex);
                         EntityManager entityManager = World.DefaultGameObjectInjectionWorld.EntityManager;
+                        // A broken squad is already leaving the field and cannot be targeted.
                         if(hoveredSquad.SelfEntity != Entity.Null &&
                             entityManager.Exists(hoveredSquad.SelfEntity) &&
-                            entityManager.HasComponent<SquadMovementComponent>(hoveredSquad.SelfEntity)) {
+                            entityManager.HasComponent<SquadMovementComponent>(hoveredSquad.SelfEntity) &&
+                            !entityManager.HasComponent<BrokenSquadTag>(hoveredSquad.SelfEntity)) {
                             castPoint = entityManager.GetComponentData<SquadMovementComponent>(hoveredSquad.SelfEntity).SquadCenter;
                             targetedSquadSelfEntity = hoveredSquad.SelfEntity;
                         } else {
@@ -710,7 +963,9 @@ public class SpellManager : MonoBehaviour
 
                 validSpellCastPoint = validTarget;
                 spellCursorOrigin = validTarget ? castPoint : MouseWorldPosition.Instance.GetWorldPosition();
+                UpdateTargetHoverAudio(validTarget ? targetedSquadSelfEntity : Entity.Null);
             } else if (selectedSpellData.SpellTargetingType == SpellTargetingType.World) {
+                UpdateTargetHoverAudio(Entity.Null);
 
                 if(Physics.Raycast(castPoint, Vector3.down, 20, validSpellCastLayerMask)) {
                     validSpellCastPoint = true;
@@ -720,11 +975,64 @@ public class SpellManager : MonoBehaviour
                 spellCursorOrigin = MouseWorldPosition.Instance.GetWorldPosition();
             }
 
+            UpdateTargetingFeedback(selectedSpellData, validSpellCastPoint);
             yield return null;
         }
     }
+    // Cursor and the label above the unit cards. Runs every frame in cast mode; only writes on a change.
+    private void UpdateTargetingFeedback(SpellData spell, bool valid)
+    {
+        Texture2D cursor = valid ? validTargetCursor : invalidTargetCursor;
+        if(cursor != activeCursor) {
+            activeCursor = cursor;
+            Cursor.SetCursor(cursor, Vector2.zero, UnityEngine.CursorMode.Auto);
+        }
+        if(targetHintSpell == spell && targetHintValid == valid) return;
+        targetHintSpell = spell;
+        targetHintValid = valid;
+        LocalizationManager loc = LocalizationManager.Instance;
+        string message = valid
+            ? loc.GetText("SpellTargetCastHint")
+            : $"<color=#E04040>{loc.GetText("SpellTargetInvalid")}</color> {string.Format(loc.GetText("SpellTargetValidTargets"), ValidTargetsLabel(spell))}";
+        BattleManager.Instance.UIManager.ShowSpellTargetHint(cursor, message);
+    }
+    private static string ValidTargetsLabel(SpellData spell)
+    {
+        LocalizationManager loc = LocalizationManager.Instance;
+        if(spell.SpellTargetingType != SpellTargetingType.Squad) return loc.GetText("SpellTargetsGround");
+        switch(spell.TargetTeam) {
+            case Team.Player: return loc.GetText("SpellTargetsFriendly");
+            case Team.Enemy: return loc.GetText("Enemy");
+            default: return loc.GetText("SpellTargetsAny");
+        }
+    }
+    private void ClearTargetingFeedback()
+    {
+        if(activeCursor != null) {
+            activeCursor = null;
+            Cursor.SetCursor(null, Vector2.zero, UnityEngine.CursorMode.Auto);
+        }
+        targetHintSpell = null;
+        BattleManager.Instance.UIManager.HideSpellTargetHint();
+    }
+    // Squad-targeted spells only: a World spell's valid point is the whole ground, so it would never stop.
+    private void UpdateTargetHoverAudio(Entity target)
+    {
+        if(target == hoverAudioTarget) return;
+        hoverAudioTarget = target;
+        if(target == Entity.Null) {
+            IAudioRequester.Instance.StopLoop();
+            return;
+        }
+        IAudioRequester.Instance.Play(targetHoverSound, ignoreDucking: true);
+        IAudioRequester.Instance.PlayLoop(targetHoverLoop);
+    }
     public async void CastSpell()
     {
+        if(MageSpellArmed) {
+            CastMageSpell();
+            return;
+        }
         if(selectedSpellIndex < 0) {
             Debug.Log("SpellManager: Cast failed, no spell selected");
             return;
@@ -743,21 +1051,19 @@ public class SpellManager : MonoBehaviour
             return;
         }
 
-        // Null prefab would throw here. Only the browse menu guarded against it before.
-        if(slot.SpellData.SpellPrefab == null) {
-            Debug.LogError($"SpellManager: '{slot.SpellData.name}' has no SpellPrefab assigned and cannot be cast.", slot.SpellData);
+        ActiveSpell spellInstance = SpawnActiveSpell(spellCursorOrigin);
+        if(spellInstance == null) {
             BattleManager.Instance.SetCursorMode(CursorMode.Free);
             return;
         }
-
-        ActiveSpell spellInstance = Instantiate(slot.SpellData.SpellPrefab, spellCursorOrigin, Quaternion.identity);
         spellInstance.Load(slot.SpellData, spellCursorOrigin, targetedSquadSelfEntity);
         // Debug.Log($"SpellManager: Cast succeeded, {slot.SpellData.name} at {spellCursorOrigin} (targeting={slot.SpellData.SpellTargetingType}, targetSquad={targetedSquadSelfEntity})");
 
         SpendMana(slot.SpellData.SpellManaCost);
+        IAudioRequester.Instance.SetDucked(false);
         Debug.Log($"SpellManager: cast {slot.SpellData.name} for {slot.SpellData.SpellManaCost} mana, {manaRemaining}/{manaMax} remaining");
 
-        slot.CooldownDuration = slot.SpellData.SpellCooldown;
+        slot.CooldownDuration = CooldownFor(slot.SpellData);
         slot.CooldownRemaining = slot.CooldownDuration;
         spellCastButtons[selectedSpellIndex].RenderCooldown(1f, true);
 
@@ -791,15 +1097,19 @@ public class SpellManager : MonoBehaviour
             Debug.LogError($"SpellManager: squad {sourceSquadId} requested a cast with no SpellData assigned.");
             return;
         }
-        // Same guard the hotbar needs: 'Iron Legion Spell 1 - IL.asset' is an unauthored stub whose
-        // SpellPrefab is null, and Instantiate would throw rather than log anything useful.
-        if(spellData.SpellPrefab == null) {
-            Debug.LogError($"SpellManager: '{spellData.name}' has no SpellPrefab assigned and cannot be cast by squad {sourceSquadId}.", spellData);
-            return;
-        }
-
-        ActiveSpell spellInstance = Instantiate(spellData.SpellPrefab, position, Quaternion.identity);
+        ActiveSpell spellInstance = SpawnActiveSpell(position);
+        if(spellInstance == null) return;
         spellInstance.Load(spellData, position, targetSquadEntity, sourceTeam, sourceSquadId);
+    }
+    // Every cast in the game starts from the one shared prefab; per-spell art rides in as
+    // SpellData.SpellVisualPrefab, which ActiveSpell.Load spawns underneath.
+    private ActiveSpell SpawnActiveSpell(Vector3 position)
+    {
+        if(aoeSpellPrefab == null) {
+            Debug.LogError("SpellManager: aoeSpellPrefab is not assigned, nothing can be cast.", this);
+            return null;
+        }
+        return Instantiate(aoeSpellPrefab, position, Quaternion.identity);
     }
     public void CursorModeChanged(CursorMode _cursorMode)
     {
@@ -810,11 +1120,19 @@ public class SpellManager : MonoBehaviour
             // over) also ends a placement in progress. Nothing was spent yet.
             if(placementPhase != SpellPlacementPhase.None) CancelPlacement(false);
             DeselectSpell();
+            IAudioRequester.Instance.SetDucked(false);
+            UpdateTargetHoverAudio(Entity.Null);
+            ClearTargetingFeedback();
         }
     }
     private void OnDestroy()
     {
 #if SPELLS
+        if(IAudioRequester.HasInstance)
+        {
+            IAudioRequester.Instance.SetDucked(false);
+            IAudioRequester.Instance.StopLoop();
+        }
         if(BattleManager.HasInstance)
         {
             BattleManager.Instance.OnCursorModeChanged -= CursorModeChanged;
@@ -822,10 +1140,7 @@ public class SpellManager : MonoBehaviour
         }
         if(InputHandler.HasInstance)
         {
-            InputHandler.Instance.OnSelectSpell1 -= SelectSpellHotkey1;
-            InputHandler.Instance.OnSelectSpell2 -= SelectSpellHotkey2;
-            InputHandler.Instance.OnSelectSpell3 -= SelectSpellHotkey3;
-            InputHandler.Instance.OnSelectSpell4 -= SelectSpellHotkey4;
+            InputHandler.Instance.OnSpellMenuDigit -= OnSpellMenuDigit;
         }
         if(UnitSelectionManager.Instance != null)
             UnitSelectionManager.Instance.OnSelectedSquadsChanged -= OnSelectedSquadsChangedForPlacement;

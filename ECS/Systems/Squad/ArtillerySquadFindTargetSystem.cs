@@ -120,6 +120,8 @@ partial struct ArtillerySquadFindTargetSystem : ISystem
                 }
                 else if(distance > rangedSquad.ValueRO.AttackRange) {
                     // Debug.Log($"SquadTargettingSystem: squad {squad.ValueRO.SquadId} is out of range");
+                    // An InProgress order left here blocks re-targeting until that squad dies.
+                    queuedOrders.Clear();
                     entityCommandBuffer.AddComponent(squad.ValueRO.SelfEntity, new HaltCommandTag { DropTarget = true });
                 }
                 

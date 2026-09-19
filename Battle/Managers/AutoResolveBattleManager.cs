@@ -26,9 +26,44 @@ namespace TJ.Engagement
         // and there is nothing to scale.
         public float damageTakenMultiplier;
     }
+    // The hero inputs the live battle reads from CampaignSaveDataHolder, as plain data so the
+    // difficulty sim can supply them without a campaign. default(...) means no hero.
+    public readonly struct AutoResolveHeroContext
+    {
+        public readonly bool HasHero;
+        public readonly int HeroID;
+        public readonly Race HeroRace;
+        public readonly Race EnemyRace;
+        // The live Bushido Discipline gate: every player squad is Sakura Dynasty.
+        public readonly bool OnlySakuraUnits;
+
+        public AutoResolveHeroContext(int heroID, Race heroRace, Race enemyRace, bool onlySakuraUnits)
+        {
+            HasHero = heroID != -1;
+            HeroID = heroID;
+            HeroRace = heroRace;
+            EnemyRace = enemyRace;
+            OnlySakuraUnits = onlySakuraUnits;
+        }
+
+        public static AutoResolveHeroContext None => default;
+
+        // Same inputs BattleCleanUpManager derives for the live battle, from the same arrays.
+        public static AutoResolveHeroContext From(int heroID, SquadToLoad[] playerArmy, SquadToLoad[] enemyArmy)
+        {
+            if (heroID == -1) return None;
+            Race enemyRace = enemyArmy != null && enemyArmy.Length > 0
+                ? TabletopTavernData.Instance.GetRaceFromUnitName(enemyArmy[0].UnitName)
+                : Race.Special;
+            bool onlySakura = playerArmy != null && playerArmy.Length > 0;
+            if (onlySakura)
+                foreach (SquadToLoad squad in playerArmy)
+                    if (TabletopTavernData.Instance.GetRaceFromUnitName(squad.UnitName) != Race.SakuraDynasty) { onlySakura = false; break; }
+            return new AutoResolveHeroContext(heroID, HeroData.GetRaceFromHero(heroID), enemyRace, onlySakura);
+        }
+    }
     public class AutoResolveBattleManager : MonoBehaviour
     {
-        public static float CHANCE_TO_HIT = 0.35f;
         // [SerializeField] private float turnTickRate = 1f, meleeMultiplier = 1f, rangedMultiplier = 1f;
         [Header("Testing")]
         [SerializeField] private ArmySaveData testPlayerArmySaveData;
@@ -223,17 +258,18 @@ namespace TJ.Engagement
             // Debug.Log($"[AutoResolve] Cache MISS — running simulation. Cache size: {_resultCache.Count}");
             PredictAutoResolve();
         }
-    internal static AutoResolveSquad GenerateAutoResolveSquadStats(SquadToLoad _squadToLoad, int _squadIndex, Team _team, CampaignSaveManager campaignSaveManager = null, bool allowGearModifiers = true)
+    internal static AutoResolveSquad GenerateAutoResolveSquadStats(SquadToLoad _squadToLoad, int _squadIndex, Team _team, CampaignSaveManager campaignSaveManager = null, bool allowGearModifiers = true, AutoResolveHeroContext hero = default)
     {
         bool useCampaign = allowGearModifiers && campaignSaveManager != null;
         return GenerateAutoResolveSquadStats(_squadToLoad, _squadIndex, _team,
             useCampaign ? (Func<GearID, bool>)campaignSaveManager.CheckForGear : null,
-            useCampaign && campaignSaveManager.SaveData.battleFieldPreset.weather == Weather.Rain);
+            useCampaign && campaignSaveManager.SaveData.battleFieldPreset.weather == Weather.Rain,
+            hero);
     }
-    // Gear and weather as plain inputs. The game passes them from the campaign save through the
-    // overload above; the difficulty sim (Tests.Editor) passes a gear set and a weather flag as
-    // data, because it has no campaign. A null hasGear means no gear at all.
-    internal static AutoResolveSquad GenerateAutoResolveSquadStats(SquadToLoad _squadToLoad, int _squadIndex, Team _team, Func<GearID, bool> hasGear, bool rain)
+    // Gear, weather and hero as plain inputs. The game passes them from the campaign save through
+    // the overload above; the difficulty sim (Tests.Editor) passes them as data, because it has no
+    // campaign. A null hasGear means no gear at all; a default hero means no hero.
+    internal static AutoResolveSquad GenerateAutoResolveSquadStats(SquadToLoad _squadToLoad, int _squadIndex, Team _team, Func<GearID, bool> hasGear, bool rain, AutoResolveHeroContext hero = default)
     {
         SquadStats squadStats = TabletopTavernData.Instance.GetSquadStats(_squadToLoad.UnitName);
         UnitType unitType = TabletopTavernData.Instance.GetUnitTypeFromUnitName(_squadToLoad.UnitName);
@@ -253,6 +289,33 @@ namespace TJ.Engagement
         float shieldBlockChance = 0;
 
         if (rain) accuracyMultiplier *= 0.5f;
+
+        // Hero rules, player squads only, ahead of gear as in UnitSetUpSystem. Each stat lands on
+        // the same local the rest of this method reads, so a rule reaches the simulation the way
+        // it reaches the live battle. Accuracy rules are in percent points; this method holds a
+        // fraction.
+        if (hero.HasHero && _team == Team.Player)
+        {
+            float HeroBonus(UnitStat stat, float current)
+            {
+                float total = HeroBonusRuleEvaluator.SumHeroStatBonus(stat, _squadToLoad.UnitName, hero.HeroID, squadStats, hero.EnemyRace, current);
+                if (hero.OnlySakuraUnits)
+                    total += HeroBonusRuleEvaluator.SumFactionStatBonus(stat, hero.HeroRace, current);
+                return total;
+            }
+
+            meleeAttack += (int)HeroBonus(UnitStat.MeleeAttack, meleeAttack);
+            meleeDefense += (int)HeroBonus(UnitStat.MeleeDefense, meleeDefense);
+            accuracy += HeroBonus(UnitStat.Accuracy, accuracy * 100f) / 100f;
+            WeaponStrength += (int)HeroBonus(UnitStat.WeaponStrength, WeaponStrength);
+            squadStats.Armor += (int)HeroBonus(UnitStat.Armor, squadStats.Armor);
+            range += HeroBonus(UnitStat.Range, range);
+            missileStrength += (int)HeroBonus(UnitStat.MissileStrength, missileStrength);
+            ChargeBonus += (int)HeroBonus(UnitStat.ChargeBonus, ChargeBonus);
+            squadStats.Leadership += HeroBonus(UnitStat.Leadership, squadStats.Leadership);
+            squadStats.Ammunition += (int)HeroBonus(UnitStat.Ammunition, squadStats.Ammunition);
+            HeroBonusRuleEvaluator.ApplyHeroAttributes(ref squadStats.SquadAttributes, _squadToLoad.UnitName, hero.HeroID, squadStats, hero.EnemyRace);
+        }
 
         if(hasGear != null)
         {
@@ -382,8 +445,10 @@ namespace TJ.Engagement
         playerArmyIsDefeated = false;
         enemyArmyIsDefeated = false;
 
+        AutoResolveHeroContext hero = AutoResolveHeroContext.From(
+            CampaignManager.Instance.CampaignSaveManager.SaveData.heroID, playerArmy, enemyArmy);
         for (int i = 0; i < playerArmy.Length; i++) {
-            playerAutoResolveStats[i] = GenerateAutoResolveSquadStats(playerArmy[i], i, Team.Player, CampaignManager.Instance.CampaignSaveManager);
+            playerAutoResolveStats[i] = GenerateAutoResolveSquadStats(playerArmy[i], i, Team.Player, CampaignManager.Instance.CampaignSaveManager, hero: hero);
             // Debug.Log($"Squad {playerArmy[i].UnitName} has {playerAutoResolveStats[i].UnitsAlive} units alive");
         }
         for (int i = 0; i < enemyArmy.Length; i++) {
@@ -927,8 +992,10 @@ namespace TJ.Engagement
             // int unitsAttacking = Mathf.Min(_attackingSquad.UnitsAlive, formationWidth);
             // Debug.Log($"unitsAttacking: {unitsAttacking}");
             float attacks = _attackingSquad.UnitsAlive;
-            float chanceToHit = CHANCE_TO_HIT + (0.04f * (_attackingSquad.squadStats.MeleeAttack - _targetSquad.squadStats.MeleeDefense));
-            chanceToHit = math.clamp(chanceToHit, 0.1f, 0.9f);
+            // Same roll as MeleeUnitAttackSystem, taken as an expected value instead of a dice roll.
+            float chanceToHit = (TabletopTavernConstants.MELEE_BASE_HIT_CHANCE
+                + TabletopTavernConstants.MELEE_HIT_CHANCE_PER_POINT * (_attackingSquad.squadStats.MeleeAttack - _targetSquad.squadStats.MeleeDefense)) / 100f;
+            chanceToHit = math.clamp(chanceToHit, TabletopTavernConstants.MELEE_HIT_CHANCE_MIN / 100f, TabletopTavernConstants.MELEE_HIT_CHANCE_MAX / 100f);
             // Debug.Log($"Chance to hit: {chanceToHit}");
             float hits = chanceToHit * attacks;
 

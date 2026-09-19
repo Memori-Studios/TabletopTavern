@@ -68,10 +68,18 @@ namespace TJ.Spells
         // strike point, rather than on every unit inside SpellRadius. Author the full per-hit damage in
         // SpellModifierValue; the 0.25 melee modifier still applies like every other spell.
         public bool HitsSingleUnit;
-        public SFXReference warmupSound;
-        public SFXReference hitSound;
+        public SFXCue warmupSound;
+        public SFXCue hitSound;
         public Team TargetTeam;
-        public ActiveSpell SpellPrefab;
+        // Optional art spawned under the shared AOE Spell instance (SpellManager.aoeSpellPrefab) at cast.
+        // A SpellVisualAddon on its root gets its warm-up and cast objects switched on at the right moments.
+        public GameObject SpellVisualPrefab;
+
+        [Header("Status Icon")]
+        // Shows SpellSprite above the health bar of every squad this spell is in effect on, for as long
+        // as it lasts. Only lasting effects have anything to show: tags (Mark, Shieldwall), timed bonuses
+        // and zone ticks write the squad's SpellStatusBufferElement; one-off bursts never do.
+        public bool ShowsStatusIcon;
 
         [Header("Battlefield Bonus")]
         public bool GrantsBattlefieldBonus;

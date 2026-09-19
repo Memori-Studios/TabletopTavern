@@ -21,8 +21,9 @@ namespace TJ
         [Header("Status Effect Icons")]
         [SerializeField] private GameObject fireAtWillGO;
         [SerializeField] private GameObject chargeGO, terrifiedGO, exhaustedGO, weaponStrengthGO, armorSunderedGO, isTakingFlankingDamageGO, isFlankingGO, isOnFireGO, defensiveStanceGO, bracedGO, outOfAmmoGO;
-        // Hunter's Mark: shows while the squad carries HuntersMarkTag (see SquadFlagGameObject.HandleHuntersMark).
-        [SerializeField] private GameObject huntersMarkGO;
+        [Header("Spell Status Icons")]
+        // Filled in cast order from the squad's SpellStatusBufferElement (see SquadFlagGameObject.HandleSpellStatus).
+        [SerializeField] private Image[] spellStatusSlots;
 
         [Header("Prestige Icons")]
         [SerializeField] private GameObject prestige1GO;
@@ -31,8 +32,6 @@ namespace TJ
         public bool IsExhausted => _isExhausted;
         private bool _weaponStrengthBonusActive = false;
         public bool WeaponStrengthBonusActive => _weaponStrengthBonusActive;
-        private bool _huntersMarkActive = false;
-        public bool HuntersMarkActive => _huntersMarkActive;
         private bool _armorSunderedActive = false;
         public bool ArmorSunderedActive => _armorSunderedActive;
         private bool _isTakingFlankingDamage = false;
@@ -89,7 +88,7 @@ namespace TJ
             exhaustedGO.SetActive(false);
             weaponStrengthGO.SetActive(false);
             armorSunderedGO.SetActive(false);
-            if (huntersMarkGO != null) huntersMarkGO.SetActive(false);
+            SetSpellStatus(null, 0);
             isTakingFlankingDamageGO.SetActive(false);
             isFlankingGO.SetActive(false);
             isOnFireGO.SetActive(false);
@@ -138,11 +137,27 @@ namespace TJ
             if(armorSunderedGO != null)
             armorSunderedGO.SetActive(isActive);
         }
-        public void SetHuntersMarkActive(bool isActive)
+        // Shows the first spellStatusSlots.Length entries of active and hides the rest. Sprites are resolved
+        // here, not by the caller, so the poller only compares ids.
+        public int SpellStatusSlotCount => spellStatusSlots == null ? 0 : spellStatusSlots.Length;
+        public void SetSpellStatus(int[] activeSpellIds, int activeCount)
         {
-            _huntersMarkActive = isActive;
-            if (huntersMarkGO != null)
-            huntersMarkGO.SetActive(isActive);
+            if (spellStatusSlots == null) return;
+            for (int i = 0; i < spellStatusSlots.Length; i++)
+            {
+                Image slot = spellStatusSlots[i];
+                if (slot == null) continue;
+                Sprite sprite = null;
+                Color color = Color.white;
+                bool show = activeSpellIds != null && i < activeCount
+                    && TJ.Spells.SpellStatusIcons.TryGet(activeSpellIds[i], out sprite, out color);
+                if (show)
+                {
+                    slot.sprite = sprite;
+                    slot.color = color;
+                }
+                slot.gameObject.SetActive(show);
+            }
         }
         public void SetTakingFlankingDamageActive(bool isActive)
         {

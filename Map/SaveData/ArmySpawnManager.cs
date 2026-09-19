@@ -477,8 +477,15 @@ namespace Memori.SaveData
                         continue;
                     }
                     int hitPoints = TabletopTavernData.Instance.GetHitPointsPerUnit(playerArmyLoaded[i].UnitName);
-                    // Debug.Log($"getting squad {playerArmyLoaded[i].UniqueID} with id {squadId} and {squadIdToUnitCount[squadId]*hitPoints} units");
-                    playerArmyLoaded[i].SquadCurrentHealth = squadIdToUnitCount[squadId] * hitPoints;
+                    // A squad that left the field can be missing from squadIdToUnitCount.
+                    if (!squadIdToUnitCount.TryGetValue(squadId, out int playerUnitCount))
+                    {
+                        Debug.LogWarning($"No unit count for player squad {squadId} ({playerArmyLoaded[i].UniqueID}) at battle end. Leaving its health as loaded.");
+                    }
+                    else
+                    {
+                        playerArmyLoaded[i].SquadCurrentHealth = playerUnitCount * hitPoints;
+                    }
                     
                 }
             }
@@ -503,7 +510,15 @@ namespace Memori.SaveData
                 {
                     // Debug.Log($"Squad {enemyArmyLoaded[i].UniqueID} has {squadIdToUnitCount[squadId]} units");
                     int hitPoints = TabletopTavernData.Instance.GetHitPointsPerUnit(enemyArmyLoaded[i].UnitName);
-                    enemyArmyLoaded[i].SquadCurrentHealth = squadIdToUnitCount[squadId] * hitPoints;
+                    // A routed enemy squad has no withdrawn-squad check, so it can be missing here too.
+                    if (!squadIdToUnitCount.TryGetValue(squadId, out int enemyUnitCount))
+                    {
+                        Debug.LogWarning($"No unit count for enemy squad {squadId} ({enemyArmyLoaded[i].UniqueID}) at battle end. Leaving its health as loaded.");
+                    }
+                    else
+                    {
+                        enemyArmyLoaded[i].SquadCurrentHealth = enemyUnitCount * hitPoints;
+                    }
                     int killCount = 0;
                     if (squadIdKillCounter.TryGetValue(squadId, out killCount))
                     {
@@ -678,6 +693,11 @@ namespace Memori.SaveData
 
             if (widthAndDepth.x == 0) widthAndDepth = CalculateWidthAndDepth(unitCount, squad.UnitName);
 
+            // The saved grid can be smaller than the squad is now (healed since the save); units past it were skipped.
+            int maxUnitsForFormation = widthAndDepth.x * widthAndDepth.y;
+            if (unitCount > maxUnitsForFormation)
+                widthAndDepth.y += Mathf.CeilToInt((unitCount - maxUnitsForFormation) / (float)widthAndDepth.x);
+
             float spread = TabletopTavernData.Instance.GetUnitSpreadFromUnitName(squad.UnitName);
             List<float3> positions = BattleManager.Instance.PositionDrawer.Formation
                 .GeneratePositionsForSquad(widthAndDepth, unitCount, spread);
@@ -723,6 +743,9 @@ namespace Memori.SaveData
             }
 
             query.Dispose();
+
+            // Record the grid actually laid out, as hand placement does.
+            BattleManager.Instance.SquadManager.AssignWidthAndDepthToSquad(widthAndDepth, squadId);
         }
 
         // Iltharion's Starstep: blink a live squad to an arbitrary point mid-battle. Reuses the exact

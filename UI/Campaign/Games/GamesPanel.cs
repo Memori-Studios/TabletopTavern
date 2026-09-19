@@ -37,7 +37,6 @@ namespace TJ.Games
         [SerializeField] private Light _spotlight;
         private TavernThemeHideMe objectToHide;
         private TavernCheer[] _tavernCheers;
-        private bool _isOpen;
 
         private CampaignSaveManager campaignSaveManager;
         private MapSceneUIManager mapSceneUIManager;
@@ -101,7 +100,6 @@ namespace TJ.Games
             foreach (GamesButton button in buttons)
                 button.DeactivateButton();
 
-            _isOpen = true;
             diceRolled = false;
             if (_spotlight != null) _spotlight.enabled = true;
             await CampaignManager.Instance.MapCamera.EnterGamesScene();
@@ -121,6 +119,8 @@ namespace TJ.Games
                 IAudioRequester.Instance.PlaySFX(SFXData.EventOptionLoad);
                 await Task.Delay(100);
             }
+
+            UpdateAffordability(0); // argument unused; buttons read gold live
         }
         private void UpdateAffordability(int _goldAmount)
         {
@@ -316,7 +316,6 @@ namespace TJ.Games
         public override async void ClosePanel()
         {
             CloseFeedback();
-            _isOpen = false;
 
             SceneHandler.Instance.TranstionCameras(
                 CampaignManager.Instance.MapCamera.GamesCamera,

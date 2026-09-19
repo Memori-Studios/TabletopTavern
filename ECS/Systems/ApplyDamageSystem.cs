@@ -209,7 +209,8 @@ namespace TJ
                 // Debug.Log($"ApplyDamageSystem: Applying damage to {damageReceivingEntity} with {totalHitPoints}");
 
                 health.ValueRW.Value += totalHitPoints;
-                health.ValueRW.Value = math.min(health.ValueRO.Value, maxHealth.Value);
+                // Clamp at 0 too: an overkilled unit's negative health is summed into the army total for a frame.
+                health.ValueRW.Value = math.clamp(health.ValueRO.Value, 0, maxHealth.Value);
                 health.ValueRW.onHealthChanged = true;
 
                 if (damageHitPoints > 0 && maxDamageSquadId == 100)

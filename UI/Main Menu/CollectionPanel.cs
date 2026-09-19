@@ -236,6 +236,9 @@ namespace TJ.MainMenu
                 potionsCards[i].LoadConsumableCard(consumables[i], isCollected, acknowledged, this);
                 if (isCollected) collectedCount++;
             }
+            // The scene carries a card for every enum member; a build that gates one out must not show a blank card.
+            for (int i = consumables.Length; i < potionsCards.Length; i++)
+                potionsCards[i].gameObject.SetActive(false);
             potionsCountText.text = $"{collectedCount}/{consumables.Length}";
         }
 

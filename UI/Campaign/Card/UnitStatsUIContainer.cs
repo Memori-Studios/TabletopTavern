@@ -52,5 +52,11 @@ public class UnitStatsUIContainer : MonoBehaviour
     {
         LayoutRebuilder.ForceRebuildLayoutImmediate(unitAttributesParent as RectTransform);
     }
+    // The stat's root Image is what the tooltip trigger receives pointer events through.
+    public void DisableTooltips()
+    {
+        foreach (UnitStatUI stat in unitAttributesParent.GetComponentsInChildren<UnitStatUI>())
+            stat.GetComponent<Image>().raycastTarget = false;
+    }
 }
 }

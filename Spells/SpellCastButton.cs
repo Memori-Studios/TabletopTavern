@@ -131,7 +131,10 @@ public class SpellCastButton : MonoBehaviour, IPointerEnterHandler, IPointerExit
             LocalizationManager.Instance.GetText("SpellManaCostLine"), spellData.SpellManaCost);
         if(manaCostText != null) manaCostText.text = spellData.SpellManaCost.ToString();
 
-        string localizedSpellName = LocalizationManager.Instance.GetText(spellData.Spell.ToString()) + " (" + GetHotkeyLabel(hotkeyNumber) + ")";
+        string localizedSpellName = LocalizationManager.Instance.GetText(spellData.Spell.ToString());
+        // Slots past the ten menu digits (the spell test grid) have no key to show.
+        string hotkeyLabel = GetHotkeyLabel(hotkeyNumber);
+        if(hotkeyLabel.Length > 0) localizedSpellName += " (" + hotkeyLabel + ")";
         // Cost leads the description. A player deciding whether to arm this spell needs the price
         // before the flavour, and the hotbar numeral is optional so this is the only guaranteed place.
         string localizedSpellDescription = localizedCost + "\n\n" + spellData.GetLocalizedSpellDescription();
@@ -139,22 +142,16 @@ public class SpellCastButton : MonoBehaviour, IPointerEnterHandler, IPointerExit
         tooltipTrigger.SetUpToolTip(localizedSpellName, localizedSpellDescription);
     }
 
-    private string GetHotkeyLabel(int hotkeyNumber)
+    // "Y+3": the spell menu key from its binding (rebindable), then the slot's digit (0 stands for 10).
+    public static string GetHotkeyLabel(int hotkeyNumber)
     {
-        InputAction hotkeyAction = hotkeyNumber switch
-        {
-            1 => InputHandler.Instance.GameControls.Battle.SelectSpell1,
-            2 => InputHandler.Instance.GameControls.Battle.SelectSpell2,
-            3 => InputHandler.Instance.GameControls.Battle.SelectSpell3,
-            4 => InputHandler.Instance.GameControls.Battle.SelectSpell4,
-            _ => null
-        };
-        if (hotkeyAction == null) return "";
+        if (hotkeyNumber < 1 || hotkeyNumber > 10) return "";
 
-        return InputControlPath.ToHumanReadableString(
-            hotkeyAction.bindings[0].effectivePath,
+        string menuKey = InputControlPath.ToHumanReadableString(
+            InputHandler.Instance.GameControls.Battle.SpellMenu.bindings[0].effectivePath,
             InputControlPath.HumanReadableStringOptions.OmitDevice
         );
+        return menuKey + "+" + (hotkeyNumber % 10);
     }
 
     /// <summary>

@@ -16,10 +16,12 @@ public class MeshTextureUpdater : MonoBehaviour
     private const int dustCloudPoolSize = 200;
     private const float DustCloudLifetime = 3f;
     private Stack<GameObject> _dustCloudPool = new();
-    private Texture2D workingTexture;
+    // Splats are stamped on the GPU into this copy of the ground texture; the CPU never touches pixels.
+    private RenderTexture workingTexture;
+    // Per-renderer override; writing the RenderTexture into the shared material asset blanks its slot on any save.
+    private MaterialPropertyBlock splatPropertyBlock;
+    private Material splatStampMaterial;
     private List<Vector3> splatPoints = new List<Vector3>();
-    private Color[] cachedSplatPixels;
-    private Color[] cachedTargetPixels;
     private struct Triangle
     {
         public Vector3 v0, v1, v2;
@@ -27,14 +29,14 @@ public class MeshTextureUpdater : MonoBehaviour
         public Bounds bounds;
     }
     private List<Triangle> triangles;
+    // Triangle indices bucketed by XZ cell so a splat only tests the triangles under it.
+    private const float TriangleCellSize = 4f;
+    private Dictionary<long, List<int>> triangleCells;
     Coroutine splatCoroutine;
 
     private void Awake()
     {
-        // Initialize cached arrays for splat and target pixels
-        int maxSplatSize = Mathf.FloorToInt(splatSize * 128 * 1.25f); // Adjust based on max texture size
-        cachedSplatPixels = new Color[maxSplatSize * maxSplatSize];
-        cachedTargetPixels = new Color[maxSplatSize * maxSplatSize];
+        splatStampMaterial = new Material(Resources.Load<Shader>("Shaders/TTSplatStamp"));
 
         for (int i = 0; i < dustCloudPoolSize; i++)
         {
@@ -49,19 +51,28 @@ public class MeshTextureUpdater : MonoBehaviour
         meshFilter = targetObject.GetComponent<MeshFilter>();
         meshRenderer = targetObject.GetComponent<MeshRenderer>();
 
-        if (workingTexture != null)
-            Destroy(workingTexture);
+        ReleaseWorkingTexture();
 
         try
         {
-            workingTexture = CreateReadableTexture(baseTexture);
-            meshRenderer.sharedMaterial.SetTexture("_MainTex", workingTexture);
-            // meshRenderer.sharedMaterial.SetTexture("_BaseMap ", workingTexture);
+            workingTexture = new RenderTexture(baseTexture.width, baseTexture.height, 0, RenderTextureFormat.ARGB32)
+            {
+                name = "Battlefield Splat Texture",
+                wrapMode = TextureWrapMode.Repeat,
+                filterMode = FilterMode.Bilinear,
+                useMipMap = false
+            };
+            workingTexture.Create();
+            Graphics.Blit(baseTexture, workingTexture);
+            splatPropertyBlock ??= new MaterialPropertyBlock();
+            meshRenderer.GetPropertyBlock(splatPropertyBlock);
+            splatPropertyBlock.SetTexture("_MainTex", workingTexture);
+            meshRenderer.SetPropertyBlock(splatPropertyBlock);
             Debug.Log("Working texture initialized successfully.");
         }
         catch (System.Exception e)
         {
-            Debug.LogError($"Failed to create readable texture: {e.Message}");
+            Debug.LogError($"Failed to create working texture: {e.Message}");
         }
 
         // Preprocess mesh after setting meshFilter
@@ -72,19 +83,17 @@ public class MeshTextureUpdater : MonoBehaviour
         splatCoroutine = StartCoroutine(ProcessSplats());
     }
 
-    private Texture2D CreateReadableTexture(Texture2D source)
+    private void ReleaseWorkingTexture()
     {
-        RenderTexture tempRT = RenderTexture.GetTemporary(
-            source.width, source.height, 0, RenderTextureFormat.ARGB32
-        );
-        Graphics.Blit(source, tempRT);
-        Texture2D readableTex = new Texture2D(source.width, source.height, TextureFormat.RGBA32, false);
-        RenderTexture.active = tempRT;
-        readableTex.ReadPixels(new Rect(0, 0, source.width, source.height), 0, 0);
-        readableTex.Apply();
-        RenderTexture.active = null;
-        RenderTexture.ReleaseTemporary(tempRT);
-        return readableTex;
+        if (meshRenderer != null && splatPropertyBlock != null)
+        {
+            splatPropertyBlock.Clear();
+            meshRenderer.SetPropertyBlock(splatPropertyBlock);
+        }
+        if (workingTexture == null) return;
+        workingTexture.Release();
+        Destroy(workingTexture);
+        workingTexture = null;
     }
 
     private void PreprocessMesh()
@@ -107,6 +116,7 @@ public class MeshTextureUpdater : MonoBehaviour
         }
 
         triangles = new List<Triangle>();
+        triangleCells = new Dictionary<long, List<int>>();
         for (int i = 0; i < indices.Length; i += 3)
         {
             Vector3 v0 = vertices[indices[i]];
@@ -122,9 +132,25 @@ public class MeshTextureUpdater : MonoBehaviour
                 uv0 = uvs[indices[i]], uv1 = uvs[indices[i + 1]], uv2 = uvs[indices[i + 2]],
                 bounds = bounds
             });
+            int triangleIndex = triangles.Count - 1;
+            int minX = CellCoord(bounds.min.x), maxX = CellCoord(bounds.max.x);
+            int minZ = CellCoord(bounds.min.z), maxZ = CellCoord(bounds.max.z);
+            for (int cx = minX; cx <= maxX; cx++)
+                for (int cz = minZ; cz <= maxZ; cz++)
+                {
+                    long key = CellKey(cx, cz);
+                    if (!triangleCells.TryGetValue(key, out List<int> cell))
+                    {
+                        cell = new List<int>();
+                        triangleCells[key] = cell;
+                    }
+                    cell.Add(triangleIndex);
+                }
         }
-        // Debug.Log($"Preprocessed {triangles.Count} triangles. UV sample: {uvs[0]}, {uvs[1]}, {uvs[2]}");
     }
+
+    private static int CellCoord(float v) => Mathf.FloorToInt(v / TriangleCellSize);
+    private static long CellKey(int cx, int cz) => ((long)cx << 32) ^ (uint)cz;
 
     public void ApplySplatAtPoint(Vector3 worldPoint, Vector2? overrideUV = null)
     {
@@ -160,102 +186,53 @@ public class MeshTextureUpdater : MonoBehaviour
             if (splatPoints.Count > 0 && workingTexture != null)
             {
                 int pointsToProcess = Mathf.Min(splatPoints.Count, 5);
+                RenderTexture previous = RenderTexture.active;
+                Graphics.SetRenderTarget(workingTexture);
+                GL.PushMatrix();
+                GL.LoadPixelMatrix(0, workingTexture.width, 0, workingTexture.height);
                 for (int i = 0; i < pointsToProcess; i++)
                 {
-                    Vector3 worldPoint = splatPoints[0];
-                    ApplySingleSplat(worldPoint);
-                    splatPoints.RemoveAt(0);
+                    StampSplat(splatPoints[i]);
                 }
-                workingTexture.Apply();
-                // Debug.Log("Applied texture changes.");
+                GL.PopMatrix();
+                RenderTexture.active = previous;
+                splatPoints.RemoveRange(0, pointsToProcess);
             }
             yield return null;
         }
     }
 
-    private void ApplySingleSplat(Vector3 worldPoint)
+    // Caller has the working texture bound and a pixel-space GL matrix loaded.
+    private void StampSplat(Vector3 worldPoint)
     {
-        if (workingTexture == null || meshFilter == null)
-        {
-            Debug.LogWarning("Cannot apply splat: workingTexture or meshFilter is null.");
-            return;
-        }
+        if (meshFilter == null || splatTextures.Length == 0) return;
 
-        // Add random offset
         worldPoint += new Vector3(Random.Range(-0.5f, 0.5f), 0, Random.Range(-0.5f, 0.5f));
         Vector3 localPoint = transform.InverseTransformPoint(worldPoint);
         Vector2 uv = GetUVAtPoint(localPoint);
-
-        // Debug.Log($"World point: {worldPoint}, Local point: {localPoint}, Computed UV: ({uv.x}, {uv.y})");
-
-        // Log UVs before clamping
-        Vector2 rawUV = uv;
         uv.x = Mathf.Clamp01(uv.x);
         uv.y = Mathf.Clamp01(uv.y);
-        if (rawUV != uv)
-        {
-            Debug.LogWarning($"UVs clamped from ({rawUV.x}, {rawUV.y}) to ({uv.x}, {uv.y})");
-        }
 
-        int centerX = Mathf.FloorToInt(uv.x * workingTexture.width);
-        int centerY = Mathf.FloorToInt(uv.y * workingTexture.height);
+        float centerX = uv.x * workingTexture.width;
+        float centerY = uv.y * workingTexture.height;
         float randomSize = Random.Range(0.75f, 1.25f);
 
-        // Normalize splat size
+        // Same size rule as the old CPU stamp so the splats look the same.
         int referenceTexSize = Mathf.Min(splatTextures[0].width, splatTextures[0].height);
         int splatPixelSize = Mathf.FloorToInt(splatSize * workingTexture.width * randomSize);
-        splatPixelSize = Mathf.Clamp(splatPixelSize, 16, referenceTexSize); // Increased min size
-        splatPixelSize /= 10;
-        int halfSize = splatPixelSize / 2;
-
-        if (splatTextures.Length == 0)
-        {
-            Debug.LogWarning("No splat textures assigned!");
-            return;
-        }
+        splatPixelSize = Mathf.Clamp(splatPixelSize, 16, referenceTexSize) / 10;
+        float half = splatPixelSize * 0.5f;
 
         Texture2D splatTexture = splatTextures[Random.Range(0, splatTextures.Length)];
-        Color[] splatSourcePixels = splatTexture.GetPixels();
-
-        float texWidthRatio = splatTexture.width / (float)referenceTexSize;
-        float texHeightRatio = splatTexture.height / (float)referenceTexSize;
-        for (int y = 0; y < splatPixelSize; y++)
-        {
-            for (int x = 0; x < splatPixelSize; x++)
-            {
-                int splatX = Mathf.FloorToInt(x * texWidthRatio * (splatTexture.width / (float)splatPixelSize));
-                int splatY = Mathf.FloorToInt(y * texHeightRatio * (splatTexture.height / (float)splatPixelSize));
-                if (splatX >= 0 && splatX < splatTexture.width && splatY >= 0 && splatY < splatTexture.height)
-                {
-                    cachedSplatPixels[y * splatPixelSize + x] = splatSourcePixels[splatY * splatTexture.width + splatX];
-                }
-                else
-                {
-                    cachedSplatPixels[y * splatPixelSize + x] = Color.clear;
-                }
-            }
-        }
-
-        int startX = Mathf.Clamp(centerX - halfSize, 0, workingTexture.width);
-        int startY = Mathf.Clamp(centerY - halfSize, 0, workingTexture.height);
-        int width = Mathf.Min(splatPixelSize, workingTexture.width - startX);
-        int height = Mathf.Min(splatPixelSize, workingTexture.height - startY);
-
-        if (width <= 0 || height <= 0)
-        {
-            Debug.LogWarning($"Invalid splat region: startX={startX}, startY={startY}, width={width}, height={height}");
-            return;
-        }
-
-        Color[] basePixels = workingTexture.GetPixels(startX, startY, width, height);
-        for (int i = 0; i < basePixels.Length; i++)
-        {
-            Color splatColor = cachedSplatPixels[i];
-            basePixels[i] = Color.Lerp(basePixels[i], splatColor, splatColor.a);
-        }
-
-        workingTexture.SetPixels(startX, startY, width, height, basePixels);
-        // Debug.Log($"Applied splat at UV ({uv.x}, {uv.y}), pixel ({centerX}, {centerY}), size {splatPixelSize}");
+        splatStampMaterial.mainTexture = splatTexture;
+        splatStampMaterial.SetPass(0);
+        GL.Begin(GL.QUADS);
+        GL.Color(Color.white);
+        GL.TexCoord2(0f, 0f); GL.Vertex3(centerX - half, centerY - half, 0f);
+        GL.TexCoord2(0f, 1f); GL.Vertex3(centerX - half, centerY + half, 0f);
+        GL.TexCoord2(1f, 1f); GL.Vertex3(centerX + half, centerY + half, 0f);
+        GL.TexCoord2(1f, 0f); GL.Vertex3(centerX + half, centerY - half, 0f);
+        GL.End();
     }
 
     private Vector2 GetUVAtPoint(Vector3 localPoint)
@@ -270,8 +247,12 @@ public class MeshTextureUpdater : MonoBehaviour
             return closestUV;
         }
 
-        foreach (var tri in triangles)
+        List<int> candidates = null;
+        if (triangleCells != null) triangleCells.TryGetValue(CellKey(CellCoord(localPoint.x), CellCoord(localPoint.z)), out candidates);
+        int candidateCount = candidates == null ? 0 : candidates.Count;
+        for (int c = 0; c < candidateCount; c++)
         {
+            Triangle tri = triangles[candidates[c]];
             if (!tri.bounds.Contains(localPoint)) continue;
 
             Vector3 pointOnTriangle = ClosestPointOnTriangle(tri.v0, tri.v1, tri.v2, localPoint);
@@ -426,8 +407,8 @@ public class MeshTextureUpdater : MonoBehaviour
 
     private void OnDestroy()
     {
-        if (workingTexture != null)
-            Destroy(workingTexture);
+        ReleaseWorkingTexture();
+        if (splatStampMaterial != null) Destroy(splatStampMaterial);
         _dustCloudPool.Clear();
     }
 }

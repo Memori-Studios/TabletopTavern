@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using UnityEngine;
+using UnityEngine.UnityConsent;
 using Unity.Services.Core;
 using UnityAnalytics = Unity.Services.Analytics;
 
@@ -11,7 +12,7 @@ namespace TabletopTavern.Analytics
     //     (Event Manager) or it is dropped server-side.
     //   - Initialization is async; events recorded before it finishes are dropped. Our only
     //     event (RunEnded) fires at the end of a run, long after startup, so this is fine.
-    //   - Consent maps onto Start/StopDataCollection, UGS's GDPR gate.
+    //   - Consent goes through EndUserConsent (Unity Developer Data framework); the SDK activates on Granted.
     //
     // Uses the CustomEvent + RecordEvent path (com.unity.services.analytics 6.x) - the same API
     // the project's earlier (now-removed) commented-out analytics used.
@@ -27,7 +28,7 @@ namespace TabletopTavern.Analytics
             {
                 await UnityServices.InitializeAsync();
                 IsInitialized = true;
-                if (m_consent) UnityAnalytics.AnalyticsService.Instance.StartDataCollection();
+                if (m_consent) ApplyConsent(true);
             }
             catch (Exception e)
             {
@@ -52,8 +53,15 @@ namespace TabletopTavern.Analytics
             m_consent = granted;
             if (!IsInitialized) return;
 
-            if (granted) UnityAnalytics.AnalyticsService.Instance.StartDataCollection();
-            else UnityAnalytics.AnalyticsService.Instance.StopDataCollection();
+            ApplyConsent(granted);
+        }
+
+        private static void ApplyConsent(bool granted)
+        {
+            EndUserConsent.SetConsentState(new ConsentState
+            {
+                AnalyticsIntent = granted ? ConsentStatus.Granted : ConsentStatus.Denied
+            });
         }
 
         public void Flush()

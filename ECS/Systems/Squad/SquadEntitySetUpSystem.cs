@@ -40,6 +40,7 @@ partial struct SquadEntitySetUpSystem : ISystem
             entityCommandBuffer.AddComponent(entity, new SquadCameraDistanceComponent());
             entityCommandBuffer.AddBuffer<BattlefieldBonusBufferElement>(entity);
             entityCommandBuffer.AddComponent(entity, new BattlefieldBonusSeenMask());
+            entityCommandBuffer.AddBuffer<SpellStatusBufferElement>(entity);
             // Blacklist of abandoned kiting targets; seeded here so GetBuffer is always valid and the
             // pursuit-watchdog give-up path never triggers a structural add. Harmless on player squads.
             entityCommandBuffer.AddBuffer<TargetBlacklistElement>(entity);

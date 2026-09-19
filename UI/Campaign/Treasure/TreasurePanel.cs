@@ -90,7 +90,7 @@ namespace TJ.Treasure
             campaignSaveManager = _campaignSaveManager;
             mapSceneUIManager = _mapSceneUIManager;
         }
-        public async void LoadTreasurePanelFromMapNode(int count = 3, bool loadConsumable = false)
+        public void LoadTreasurePanelFromMapNode(int count = 3, bool loadConsumable = false)
         {
             panelLoadedFrom = PanelLoadedFrom.Map;
 

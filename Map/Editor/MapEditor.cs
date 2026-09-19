@@ -18,7 +18,7 @@ public class MapEditor : Editor
 			mapGenerator.ClearMap();
 		}
 		if (GUILayout.Button ("Generate Map")) {
-			mapGenerator.GenerateMap(1);
+			_ = mapGenerator.GenerateMap(1);
 		}
 
         if (DrawDefaultInspector ()) {

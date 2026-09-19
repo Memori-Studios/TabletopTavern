@@ -25,13 +25,7 @@ namespace TJ.Map
                 case ConsumableEnum.MinorHealth:
                 {
                     SquadToLoad targetedSquad = CampaignManager.Instance.CampaignSaveManager.SaveData.playerArmy.Where(squad => squad.UniqueID == targetUnitGuid).FirstOrDefault();
-                    float amountToHeal = 0.5f;
-
-                    //The Light of Nytherial: Units recieve 2x Healing from all sources,
-                    if (HeroBonusManager.Instance.ActiveHeroID == 8)
-                        amountToHeal = 1;
-
-                    CampaignManager.Instance.CampaignSaveManager.ModifySpecificUnitHealth(amountToHeal, targetUnitGuid);
+                    CampaignManager.Instance.CampaignSaveManager.ModifySpecificUnitHealth(0.5f, targetUnitGuid);
                     break;
                 }
                 case ConsumableEnum.MajorHealth:
@@ -110,6 +104,12 @@ namespace TJ.Map
                     // Arm a persisted guarantee for the next dice roll of any type. Lives in save data so it
                     // survives main-menu exit and battle entry (the old transient panel flags did not).
                     CampaignManager.Instance.CampaignSaveManager.ArmFateshineElixir();
+                    break;
+                }
+                case ConsumableEnum.ManaDraught:
+                {
+                    // Same persisted-arm pattern as Fateshine: the battle scene reads the count off the save.
+                    CampaignManager.Instance.CampaignSaveManager.ArmManaDraught();
                     break;
                 }
                 case ConsumableEnum.Alchemist:
@@ -221,7 +221,7 @@ namespace TJ.Map
             int drinkValue = SaveDataHandler.IsMetaprogressionNodeUnlocked(_consumableSellValueMetaprogressionModel) ? 10 : 5;
             consumableDescriptionLocalized = string.Format(consumableDescriptionLocalized, drinkValue);
         }
-        return consumableDescriptionLocalized;
+        return ConsumableData.FormatDescription(_consumable, consumableDescriptionLocalized);
     }
 }
 }

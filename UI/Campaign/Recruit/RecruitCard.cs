@@ -9,7 +9,6 @@ using Memori.Audio;
 using Memori.Utilities;
 using MoreMountains.Feedbacks;
 using Memori.Localization;
-using System.Threading.Tasks;
 
 namespace TJ.Recruit
 {
@@ -18,7 +17,7 @@ namespace TJ.Recruit
         typeof(UnitAttributesUIContainer),
         typeof(UnitStatsUIContainer)
     )]//, typeof(MemoriTooltipTrigger))]
-    public class RecruitCard : MonoBehaviour, IPointerEnterHandler, IPointerExitHandler
+    public class RecruitCard : MonoBehaviour, IPointerEnterHandler, IPointerExitHandler, IPointerDownHandler, IPointerUpHandler
     {
         [SerializeField] private Image iconHighlight, tierGradient, tierGradientBack1, tierGradientBack2;
         [SerializeField] private ParticleSystem _tierParticleSystem1, _tierParticleSystem2, _tierParticleSystem3, _tierParticleSystem4;
@@ -26,6 +25,8 @@ namespace TJ.Recruit
         [SerializeField] private MemoriTooltipTrigger unitCountTooltip, maxHealthTooltip;
         [SerializeField] private GameObject purceasedGO, cardBackGO, canCombineGO;//costGO
         [SerializeField] private Transform cardParentTransform;
+        [Tooltip("Scaled, lifted and breathed on hover. Nothing else may animate its scale or position.")]
+        [SerializeField] private RectTransform cardContentRect;
         [SerializeField] private Image recruitUnitTypeImage1, recruitUnitTypeImage2;
         [SerializeField] private ImageHighlighter imageHighlighter;
         [SerializeField] private RawImage recruitImageRaw;
@@ -57,12 +58,29 @@ namespace TJ.Recruit
         bool canCombine = false;
         public bool CanCombine => canCombine;
         bool isPurchased = false;
+        bool isPointerOver = false;
+
+        #region Hover motion fields
+        public enum HoverMotion { Idle, Hovered, Neighbour, Pressed }
+        const float HoverScale = 1.15f, NeighbourScale = 0.92f, PressedScale = 0.9f;
+        const float HoverLift = 20f;
+        const float HoverInDuration = 0.1f, HoverOutDuration = 0.08f, PressDuration = 0.03f;
+        const float BreathAmplitude = 4f, BreathPeriod = 1.8f, BreathStagger = 0.3f;
+        // Inset of the hit box from the card edge, so a hover needs the cursor well onto the card.
+        const float HitBoxInset = 20f;
+        HoverMotion hoverMotion = HoverMotion.Idle;
+        bool motionActive = false;
+        bool motionSettled = true;
+        float motionStartTime, motionDuration, startScale, targetScale, startY, targetY;
+        float breathClock;
+        #endregion
 
         public void SetUp(SquadStats _squadData, RecruitPanel _recruitPanel, int _index, RenderTexture _recruitImage, bool _isPurchased)
         {
             squadStats = _squadData;
             recruitPanel = _recruitPanel;
             index = _index;
+            if (cardContentRect == null) Debug.LogError("RecruitCard: cardContentRect is not assigned", this);
             iconHighlight.enabled = false;
             canvas = GetComponent<Canvas>();
             graphicRaycaster = GetComponent<GraphicRaycaster>();
@@ -84,6 +102,7 @@ namespace TJ.Recruit
 
             unitStatsUIContainer = GetComponent<UnitStatsUIContainer>();
             unitStatsUIContainer.Load(squadStats.unitName, true, 0);
+            unitStatsUIContainer.DisableTooltips();
 
             // Before the refreshes below: the block sizes itself to its description, and the card's
             // ContentSizeFitter has to sum a settled height.
@@ -111,7 +130,18 @@ namespace TJ.Recruit
             recruitUnitTypeImage2.sprite = sprite;
             
 
-            GetComponent<Image>().raycastTarget = false;
+            // The root is the hit box: static and identical on every card, while the children move and tilt.
+            Image rootImage = GetComponent<Image>();
+            rootImage.enabled = true;
+            rootImage.raycastTarget = true;
+            rootImage.raycastPadding = Vector4.one * HitBoxInset;
+
+            // Only the root's inset hit box may start a hover; graphics that carry a tooltip keep their own raycast.
+            foreach (Graphic graphic in GetComponentsInChildren<Graphic>(true))
+            {
+                if (graphic.gameObject == gameObject || graphic.GetComponent<MemoriTooltipTrigger>() != null) continue;
+                graphic.raycastTarget = false;
+            }
 
             isPurchased = _isPurchased;
             RefreshCombineState();
@@ -215,6 +245,7 @@ namespace TJ.Recruit
         }
         public void CompletePurchase()
         {
+            StopHoverMotion();
             purchaseMMF.PlayFeedbacks();
             graphicRaycaster.enabled = false;
             OnPointerExit(null);
@@ -223,26 +254,37 @@ namespace TJ.Recruit
 
             TutorialManager.Instance.LoadStepsFromRandomSpot(new TutorialStep[2] { TutorialData.ReorderUnits, TutorialData.DisbandUnit });
         }
-        Task bloomTask;
         public void OnPointerEnter(PointerEventData eventData)
         {
+            // Remembered through the flip so the card can start hovered the moment it becomes interactive.
+            isPointerOver = true;
             if(!canInteract) return;
-
+            BeginHover();
+        }
+        void BeginHover()
+        {
             iconHighlight.enabled = true;
-            bloomTask = MemoriUI.BloomItemScale(transform, 1.25f, 0.15f);
             IAudioRequester.Instance.PlaySFX(SFXData.LightMouseOver);
             canvas.sortingOrder = 2;
+            recruitPanel.SetHoveredCard(this);
         }
-        public async void OnPointerExit(PointerEventData eventData)
+        public void OnPointerExit(PointerEventData eventData)
         {
+            isPointerOver = false;
             iconHighlight.enabled = false;
-            if (bloomTask != null && !bloomTask.IsCompleted)
-            {
-                await bloomTask; // Wait for the bloom task to complete if it's still running
-            }
-            if (this == null) return; // Check if the object has been destroyed
-            MemoriUI.BloomItemScale(transform, 1f, 0.1f);
             canvas.sortingOrder = 1;
+            if (recruitPanel != null) recruitPanel.SetHoveredCard(null);
+        }
+        public void OnPointerDown(PointerEventData eventData)
+        {
+            if (!canInteract) return;
+            SetHoverMotion(HoverMotion.Pressed);
+        }
+        public void OnPointerUp(PointerEventData eventData)
+        {
+            // Leaving the card while pressed already fires OnPointerExit, so Pressed here means still over it.
+            if (hoverMotion != HoverMotion.Pressed) return;
+            recruitPanel.SetHoveredCard(this);
         }
         public void SelectCard()
         {
@@ -266,10 +308,14 @@ namespace TJ.Recruit
                 _tierParticleSystem4.gameObject.SetActive(true);
             }
             canInteract = true;
+            StartHoverMotion();
+            if (isPointerOver) BeginHover();
+            else recruitPanel.ReapplyHoveredCard();
         }
         public void DarkenCard()
         {
             OnPointerExit(null);
+            StopHoverMotion();
             //this is triggered on all cards that are not selected, should get every text and image and set it to it's current color but slightly darker
             Color darkenColor = new Color(0.5f, 0.5f, 0.5f, 1f);
             Image[] images = GetComponentsInChildren<Image>();
@@ -295,10 +341,80 @@ namespace TJ.Recruit
         {
             if (!focus)
             {
-                iconHighlight.enabled = false;
-                MemoriUI.BloomItemScale(transform, 1f, 0.1f);
-                canvas.sortingOrder = 1;
+                OnPointerExit(null);
             }
         }
-}
+
+        #region Hover motion
+        // All motion goes on Card Content so the root's hit box never scales, lifts or tilts.
+        void StartHoverMotion()
+        {
+            motionActive = true;
+            motionSettled = true;
+            hoverMotion = HoverMotion.Idle;
+            breathClock = -index * BreathStagger;
+        }
+        void StopHoverMotion()
+        {
+            if (!motionActive) return;
+            motionActive = false;
+            cardContentRect.localScale = Vector3.one;
+            SetCardY(0f);
+        }
+        public void SetHoverMotion(HoverMotion state)
+        {
+            if (!motionActive || hoverMotion == state) return;
+            hoverMotion = state;
+            startScale = cardContentRect.localScale.x;
+            startY = cardContentRect.anchoredPosition.y;
+            switch (state)
+            {
+                case HoverMotion.Hovered:
+                    targetScale = HoverScale; targetY = HoverLift; motionDuration = HoverInDuration; break;
+                case HoverMotion.Neighbour:
+                    targetScale = NeighbourScale; targetY = 0f; motionDuration = HoverInDuration; break;
+                case HoverMotion.Pressed:
+                    targetScale = PressedScale; targetY = 0f; motionDuration = PressDuration; break;
+                default:
+                    // Breath restarts from the bottom, each card waiting its stagger before rising.
+                    targetScale = 1f; targetY = -BreathAmplitude; motionDuration = HoverOutDuration;
+                    breathClock = -index * BreathStagger; break;
+            }
+            motionStartTime = Time.unscaledTime;
+            motionSettled = false;
+        }
+        void Update()
+        {
+            if (!motionActive) return;
+            if (!motionSettled)
+            {
+                float p = Mathf.Clamp01((Time.unscaledTime - motionStartTime) / motionDuration);
+                float e = hoverMotion == HoverMotion.Hovered ? BackOut(p) : p;
+                cardContentRect.localScale = Vector3.one * Mathf.LerpUnclamped(startScale, targetScale, e);
+                SetCardY(Mathf.LerpUnclamped(startY, targetY, e));
+                if (p >= 1f) motionSettled = true;
+                return;
+            }
+            if (hoverMotion != HoverMotion.Idle) return;
+            breathClock += Time.unscaledDeltaTime;
+            float y = breathClock < 0f
+                ? -BreathAmplitude
+                : -BreathAmplitude * Mathf.Cos(breathClock / BreathPeriod * 2f * Mathf.PI);
+            SetCardY(y);
+        }
+        void SetCardY(float y)
+        {
+            Vector2 pos = cardContentRect.anchoredPosition;
+            pos.y = y;
+            cardContentRect.anchoredPosition = pos;
+        }
+        // Overshoots the target by about a tenth of the travel before settling.
+        static float BackOut(float p)
+        {
+            const float s = 1.70158f;
+            p -= 1f;
+            return 1f + p * p * ((s + 1f) * p + s);
+        }
+        #endregion
+    }
 }

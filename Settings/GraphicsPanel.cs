@@ -20,6 +20,7 @@ public class GraphicsPanel : MonoBehaviour
     [SerializeField] private TMP_Dropdown shadowQualityDropdown;
     [SerializeField] private TMP_Dropdown renderScaleDropdown;
     [SerializeField] private TMP_Dropdown textureQualityDropdown;
+    [SerializeField] private TMP_Dropdown fpsLimitDropdown;
 
     [Header("Toggles")]
     [SerializeField] private Toggle fullscreenToggle;
@@ -39,11 +40,15 @@ public class GraphicsPanel : MonoBehaviour
     [SerializeField] private GameObject fpsObject;
 
     // Shadow quality tiers: Off / Low / Medium / High / Ultra
-    static readonly float[] ShadowDistances = { 0f, 30f, 80f, 150f, 250f };
-    static readonly int[]   ShadowCascades  = { 1,  1,   2,   4,    4   };
-    static readonly int[]   ShadowResolutions = { 256, 512, 1024, 2048, 4096 };
+    // Two cascades cap the shadow caster passes; every unit is drawn once per cascade.
+    static readonly float[] ShadowDistances = { 0f, 30f, 80f, 120f, 150f };
+    static readonly int[]   ShadowCascades  = { 1,  1,   2,   2,    2   };
+    static readonly int[]   ShadowResolutions = { 256, 512, 1024, 2048, 2048 };
 
     static readonly float[] RenderScaleValues = { 0.5f, 0.75f, 1.0f };
+
+    // Index 0 is Unlimited; -1 is Unity's "no cap" value for targetFrameRate
+    static readonly int[] FpsLimitValues = { -1, 30, 60, 90, 120, 144, 165, 240 };
 
     enum HardwareTier { Low, Medium, High, Ultra }
 
@@ -62,13 +67,14 @@ public class GraphicsPanel : MonoBehaviour
         ambientOcclusionToggle.isOn = PlayerPrefs.GetInt("AmbientOcclusion", 1) == 1;
         bloomToggle.isOn = PlayerPrefs.GetInt("Bloom", 1) == 1;
 
-        antiAliasingDropdown.value = PlayerPrefs.GetInt("AntiAliasing", 2);
+        antiAliasingDropdown.value = PlayerPrefs.GetInt("MSAA", 0);
         resolutionDropdown.value = PlayerPrefs.GetInt("Resolution", resolutionDropdown.options.Count - 1);
         graphicsQualityDropdown.value = PlayerPrefs.GetInt("GraphicsQuality", graphicsQualityDropdown.options.Count - 1);
         refreshRateDropdown.value = PlayerPrefs.GetInt("RefreshRate", refreshRateDropdown.options.Count - 1);
         shadowQualityDropdown.value = PlayerPrefs.GetInt("ShadowQuality", 3);
         renderScaleDropdown.value = PlayerPrefs.GetInt("RenderScale", 2);
         textureQualityDropdown.value = PlayerPrefs.GetInt("TextureQuality", 0);
+        fpsLimitDropdown.value = PlayerPrefs.GetInt("FPSLimit", 0);
 
         resolutionDropdown.RefreshShownValue();
         antiAliasingDropdown.RefreshShownValue();
@@ -77,6 +83,7 @@ public class GraphicsPanel : MonoBehaviour
         shadowQualityDropdown.RefreshShownValue();
         renderScaleDropdown.RefreshShownValue();
         textureQualityDropdown.RefreshShownValue();
+        fpsLimitDropdown.RefreshShownValue();
 
         ToggleFPSCounter(fpsToggle.isOn);
         fpsToggle.onValueChanged.AddListener(delegate {
@@ -92,13 +99,11 @@ public class GraphicsPanel : MonoBehaviour
             int resolutionWidth = int.Parse(res[0]);
             int resolutionHeight = int.Parse(res[1]);
             fullScreenMode = fullscreenToggle.isOn ? FullScreenMode.FullScreenWindow : FullScreenMode.Windowed;
-            QualitySettings.vSyncCount = vsyncToggle.isOn ? 1 : 0;
-            QualitySettings.antiAliasing = AAIndexToValue(antiAliasingDropdown.value);
+            ApplyMsaa(antiAliasingDropdown.value);
             QualitySettings.SetQualityLevel(graphicsQualityDropdown.value);
+            ApplyVSyncAndFpsLimit(vsyncToggle.isOn, fpsLimitDropdown.value);
             Screen.SetResolution(resolutionWidth, resolutionHeight, fullScreenMode, refreshRateObj);
             Cursor.lockState = fullscreenToggle.isOn ? CursorLockMode.Confined : CursorLockMode.None;
-            if (!vsyncToggle.isOn)
-                Application.targetFrameRate = (int)refreshRateObj.numerator;
 
             ApplyShadowQuality(shadowQualityDropdown.value);
             ApplyAmbientOcclusion(ambientOcclusionToggle.isOn);
@@ -144,7 +149,7 @@ public class GraphicsPanel : MonoBehaviour
                 PlayerPrefs.SetInt("Bloom",            0); // Off
                 PlayerPrefs.SetInt("RenderScale",      0); // 50%
                 PlayerPrefs.SetInt("TextureQuality",   1); // Half
-                PlayerPrefs.SetInt("AntiAliasing",     0); // Off
+                PlayerPrefs.SetInt("MSAA",             0); // Off, SMAA is always on
                 break;
             case HardwareTier.Medium:
                 PlayerPrefs.SetInt("ShadowQuality",    2); // Medium
@@ -152,7 +157,7 @@ public class GraphicsPanel : MonoBehaviour
                 PlayerPrefs.SetInt("Bloom",            1); // On
                 PlayerPrefs.SetInt("RenderScale",      1); // 75%
                 PlayerPrefs.SetInt("TextureQuality",   0); // Full
-                PlayerPrefs.SetInt("AntiAliasing",     1); // 2x
+                PlayerPrefs.SetInt("MSAA",             1); // 2x
                 break;
             case HardwareTier.High:
                 PlayerPrefs.SetInt("ShadowQuality",    3); // High
@@ -160,7 +165,7 @@ public class GraphicsPanel : MonoBehaviour
                 PlayerPrefs.SetInt("Bloom",            1); // On
                 PlayerPrefs.SetInt("RenderScale",      2); // 100%
                 PlayerPrefs.SetInt("TextureQuality",   0); // Full
-                PlayerPrefs.SetInt("AntiAliasing",     1); // 2x
+                PlayerPrefs.SetInt("MSAA",             2); // 4x
                 break;
             case HardwareTier.Ultra:
                 PlayerPrefs.SetInt("ShadowQuality",    4); // Ultra
@@ -168,7 +173,7 @@ public class GraphicsPanel : MonoBehaviour
                 PlayerPrefs.SetInt("Bloom",            1); // On
                 PlayerPrefs.SetInt("RenderScale",      2); // 100%
                 PlayerPrefs.SetInt("TextureQuality",   0); // Full
-                PlayerPrefs.SetInt("AntiAliasing",     2); // 4x
+                PlayerPrefs.SetInt("MSAA",             2); // 4x
                 break;
         }
     }
@@ -192,6 +197,7 @@ public class GraphicsPanel : MonoBehaviour
         shadowQualityDropdown.ClearOptions();
         renderScaleDropdown.ClearOptions();
         textureQualityDropdown.ClearOptions();
+        fpsLimitDropdown.ClearOptions();
 
         // Resolution dropdown
         foreach(var res in Screen.resolutions){
@@ -221,7 +227,7 @@ public class GraphicsPanel : MonoBehaviour
 
         // Anti-aliasing dropdown
         antiAliasingDropdown.AddOptions(new List<string>(){ "Off", "2x", "4x", "8x" });
-        antiAliasingDropdown.value = AAValueToIndex(QualitySettings.antiAliasing);
+        antiAliasingDropdown.value = PlayerPrefs.GetInt("MSAA", 0);
         antiAliasingDropdown.RefreshShownValue();
 
         // Graphics quality dropdown
@@ -245,6 +251,12 @@ public class GraphicsPanel : MonoBehaviour
 
         // Texture quality dropdown
         textureQualityDropdown.AddOptions(new List<string>(){ "Full", "Half", "Quarter" });
+
+        // FPS limit dropdown, one option per FpsLimitValues entry
+        var fpsOptions = new List<string>(){ LocalizationManager.Instance.GetText("Unlimited") };
+        for (int i = 1; i < FpsLimitValues.Length; i++)
+            fpsOptions.Add(FpsLimitValues[i].ToString());
+        fpsLimitDropdown.AddOptions(fpsOptions);
     }
 
     public void ApplyVideoSettings()
@@ -257,14 +269,12 @@ public class GraphicsPanel : MonoBehaviour
         uint refreshRateNumerator = uint.Parse(refreshRateDropdown.options[refreshRateDropdown.value].text.Split(' ')[0]);
         refreshRateObj = new(){ numerator = refreshRateNumerator, denominator = 1};
 
-        QualitySettings.vSyncCount = vsyncToggle.isOn ? 1 : 0;
-        QualitySettings.antiAliasing = AAIndexToValue(antiAliasingDropdown.value);
+        ApplyMsaa(antiAliasingDropdown.value);
         QualitySettings.SetQualityLevel(graphicsQualityDropdown.value);
+        ApplyVSyncAndFpsLimit(vsyncToggle.isOn, fpsLimitDropdown.value);
         Screen.SetResolution(resolutionWidth, resolutionHeight, fullScreenMode, refreshRateObj);
         Cursor.lockState = fullscreenToggle.isOn ? CursorLockMode.Confined : CursorLockMode.None;
         StartCoroutine(ForceCanvasRebuildNextFrame());
-        if (!vsyncToggle.isOn)
-            Application.targetFrameRate = (int)refreshRateObj.numerator;
 
         ApplyShadowQuality(shadowQualityDropdown.value);
         ApplyAmbientOcclusion(ambientOcclusionToggle.isOn);
@@ -287,12 +297,13 @@ public class GraphicsPanel : MonoBehaviour
         resolutionDropdown.value = resolutionDropdown.options.Count - 1;
         refreshRateDropdown.value = refreshRateDropdown.options.Count - 1;
         graphicsQualityDropdown.value = graphicsQualityDropdown.options.Count - 1;
+        fpsLimitDropdown.value = 0;
 
         // Re-detect hardware and write tier defaults to PlayerPrefs
         ApplyTierDefaults(DetectHardwareTier());
 
         // Read tier defaults back into UI
-        antiAliasingDropdown.value   = PlayerPrefs.GetInt("AntiAliasing", 1);
+        antiAliasingDropdown.value   = PlayerPrefs.GetInt("MSAA", 0);
         shadowQualityDropdown.value  = PlayerPrefs.GetInt("ShadowQuality", 3);
         renderScaleDropdown.value    = PlayerPrefs.GetInt("RenderScale", 2);
         textureQualityDropdown.value = PlayerPrefs.GetInt("TextureQuality", 0);
@@ -308,9 +319,9 @@ public class GraphicsPanel : MonoBehaviour
         Cursor.lockState = fullscreenToggle.isOn ? CursorLockMode.Confined : CursorLockMode.None;
         StartCoroutine(ForceCanvasRebuildNextFrame());
 
-        QualitySettings.vSyncCount = 1;
-        QualitySettings.antiAliasing = AAIndexToValue(antiAliasingDropdown.value);
+        ApplyMsaa(antiAliasingDropdown.value);
         QualitySettings.SetQualityLevel(graphicsQualityDropdown.value);
+        ApplyVSyncAndFpsLimit(true, 0);
 
         ApplyShadowQuality(shadowQualityDropdown.value);
         ApplyAmbientOcclusion(ambientOcclusionToggle.isOn);
@@ -325,6 +336,7 @@ public class GraphicsPanel : MonoBehaviour
         shadowQualityDropdown.RefreshShownValue();
         renderScaleDropdown.RefreshShownValue();
         textureQualityDropdown.RefreshShownValue();
+        fpsLimitDropdown.RefreshShownValue();
 
         SaveSettings();
     }
@@ -339,7 +351,7 @@ public class GraphicsPanel : MonoBehaviour
     {
         PlayerPrefs.SetInt("VSync", vsyncToggle.isOn ? 1 : 0);
         PlayerPrefs.SetInt("Fullscreen", fullscreenToggle.isOn ? 1 : 0);
-        PlayerPrefs.SetInt("AntiAliasing", antiAliasingDropdown.value);
+        PlayerPrefs.SetInt("MSAA", antiAliasingDropdown.value);
         PlayerPrefs.SetInt("Resolution", resolutionDropdown.value);
         PlayerPrefs.SetInt("RefreshRate", refreshRateDropdown.value);
         PlayerPrefs.SetInt("GraphicsQuality", graphicsQualityDropdown.value);
@@ -349,7 +361,15 @@ public class GraphicsPanel : MonoBehaviour
         PlayerPrefs.SetInt("RenderScale", renderScaleDropdown.value);
         PlayerPrefs.SetInt("TextureQuality", textureQualityDropdown.value);
         PlayerPrefs.SetInt("Bloom", bloomToggle.isOn ? 1 : 0);
+        PlayerPrefs.SetInt("FPSLimit", fpsLimitDropdown.value);
         PlayerPrefs.Save();
+    }
+
+    // Set after SetQualityLevel: a quality level carries its own vSyncCount. VSync on overrides the cap.
+    private void ApplyVSyncAndFpsLimit(bool vsyncOn, int fpsLimitIndex)
+    {
+        QualitySettings.vSyncCount = vsyncOn ? 1 : 0;
+        Application.targetFrameRate = FpsLimitValues[fpsLimitIndex];
     }
 
     public void SetGraphicsPreset()
@@ -408,8 +428,12 @@ public class GraphicsPanel : MonoBehaviour
         }
     }
 
-    // QualitySettings.antiAliasing uses values 0/2/4/8; dropdown indices are 0/1/2/3
-    private static int AAValueToIndex(int aaValue) => aaValue == 0 ? 0 : aaValue == 2 ? 1 : aaValue == 4 ? 2 : 3;
-    private static int AAIndexToValue(int index) => index == 0 ? 0 : 1 << index;
+    // URP reads MSAA from its asset, not QualitySettings.antiAliasing; dropdown indices 0/1/2/3 are 1/2/4/8 samples.
+    private void ApplyMsaa(int index)
+    {
+        var urpAsset = GraphicsSettings.defaultRenderPipeline as UniversalRenderPipelineAsset;
+        if (urpAsset == null) return;
+        urpAsset.msaaSampleCount = index == 0 ? 1 : 1 << index;
+    }
 }
 }

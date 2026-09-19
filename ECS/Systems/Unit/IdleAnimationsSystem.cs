@@ -58,7 +58,7 @@ partial struct UnitIdleSystem : ISystem
             if (random.NextFloat() < 0.05f && entityManager.HasBuffer<SFXBufferElement>(entity))
             {
                 DynamicBuffer<SFXBufferElement> sfxBuffer = SystemAPI.GetBuffer<SFXBufferElement>(entity);
-                sfxBuffer.Add(new SFXBufferElement { UnitName = unit.ValueRO.unitName, SFXEntityType = Memori.Audio.SFXEntityType.Idle, MaxDistance = 20f });
+                sfxBuffer.Add(new SFXBufferElement { UnitName = unit.ValueRO.unitName, SFXEntityType = Memori.Audio.SFXEntityType.Idle, MaxDistance = 30f });
             }
         }
     }

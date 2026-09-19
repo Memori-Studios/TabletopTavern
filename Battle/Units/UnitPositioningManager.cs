@@ -183,7 +183,7 @@ public class UnitPositioningManager : MonoBehaviour
             {
                 if (!chargeSFXPlayed)
                 {
-                    IAudioRequester.Instance.PlaySFX(TabletopTavernData.Instance.GetRandomChargeSFX(squadEntity.UnitName));
+                    IAudioRequester.Instance.PlayVoice(TabletopTavernData.Instance.GetRandomChargeSFX(squadEntity.UnitName));
                     chargeSFXPlayed = true;
                 }
                 queuedOrder = new ()
@@ -358,7 +358,10 @@ public class UnitPositioningManager : MonoBehaviour
         bool ownEcb = !externalEcb.HasValue;
         var entityCommandBuffer = externalEcb ?? new EntityCommandBuffer(Allocator.Temp);
 
-        if (!entityManager.Exists(_targetSquadEntity))
+        // A squad flagged DestroyEntityTag still exists this frame; accepting it leaves a dead TargetSquadEntity.
+        if (!entityManager.Exists(_targetSquadEntity) ||
+            (entityManager.HasComponent<DestroyEntityTag>(_targetSquadEntity) &&
+             entityManager.IsComponentEnabled<DestroyEntityTag>(_targetSquadEntity)))
         {
             if (ownEcb) entityCommandBuffer.Dispose();
             return;
@@ -495,7 +498,7 @@ public class UnitPositioningManager : MonoBehaviour
 
         if (!skirmishRetreat)
         {
-            IAudioRequester.Instance.PlaySFX(
+            IAudioRequester.Instance.PlayVoice(
                 TabletopTavernData.Instance.GetRandomRetreatSFX(_squadEntity.UnitName)
             );
         }
@@ -573,7 +576,7 @@ public class UnitPositioningManager : MonoBehaviour
         // Debug.Log($"Issuing squad move command with _generateNoise={_generateNoise} and _addToQueue={_addToQueue}");
         if(unitSelectionManager.SelectedSquadIds.Count != 0)
         {
-            IAudioRequester.Instance.PlaySFX(
+            IAudioRequester.Instance.PlayVoice(
                 TabletopTavernData.Instance.GetRandomBarkSFX(
                     unitSelectionManager.SelectedSquadUnitNames[0]
             ));

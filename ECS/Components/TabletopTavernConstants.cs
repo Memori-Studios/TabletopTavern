@@ -29,6 +29,12 @@ public static class TabletopTavernConstants
     public const int CAVALRY_DEATH_ANIMATION_ID = 2;
 
     // Combat
+    // One melee hit roll for the live battle and auto-resolve: base percent, points per MeleeAttack
+    // minus MeleeDefense, clamped. Shared so the auto-resolve prediction cannot drift from live.
+    public const int MELEE_BASE_HIT_CHANCE = 35;
+    public const int MELEE_HIT_CHANCE_PER_POINT = 2;
+    public const int MELEE_HIT_CHANCE_MIN = 10;
+    public const int MELEE_HIT_CHANCE_MAX = 90;
     public const int TIME_REQUIRED_FOR_CHARGE_BONUS = 2;
     public const int TIME_TO_REMOVE_CHARGE_BONUS = 6;
     public const float TERROR_RADIUS = 20f;
@@ -66,6 +72,12 @@ public static class TabletopTavernConstants
     public const int TRIANGLE_HOVER_BLOOM = 5;
     public const int TRIANGLE_SELECTED_BLOOM = 10;
 
+    // Rendering-layer bits the outline renderer feature filters on; must stay clear of Volumetric Fog's bit 17.
+    public const uint OUTLINE_LAYER_HOVER_PLAYER = 1u << 24;
+    public const uint OUTLINE_LAYER_HOVER_ENEMY = 1u << 25;
+    public const uint OUTLINE_LAYER_SELECTED = 1u << 26;
+    public const uint OUTLINE_LAYER_ALL = OUTLINE_LAYER_HOVER_PLAYER | OUTLINE_LAYER_HOVER_ENEMY | OUTLINE_LAYER_SELECTED;
+
     // Damage Modifiers
     public const float MELEE_TOTAL_DAMAGE_MODIFIER = 0.25f;
     public const float RANGED_TOTAL_DAMAGE_MODIFIER = 1.0f;
@@ -90,6 +102,9 @@ public static class TabletopTavernConstants
     // four spells, so they always get the largest pool a campaign can reach (act 3 with both Arcane
     // Reserves nodes) regardless of the account's Renown. Keep this equal to that maximum.
     public const int SPELL_MANA_POOL_CUSTOM_BATTLE = 20;
+    // Extra mana one Mana Draught adds to the next fought campaign battle. Draughts stack, so keep this
+    // at half a base pool: one or two extra casts per draught.
+    public const int SPELL_MANA_POOL_DRAUGHT = 5;
 
     // Campaign
     public const float RESERVES_HEAL_AMOUNT = 0.5f;

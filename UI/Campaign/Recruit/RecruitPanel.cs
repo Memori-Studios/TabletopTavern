@@ -45,6 +45,7 @@ namespace TJ.Recruit
 
         List<GearCard> gearCards = new List<GearCard>();
         List<RecruitCard> recruitCards = new List<RecruitCard>();
+        RecruitCard hoveredCard;
         bool hasSelectedRecruitCard = false;
         CancellationTokenSource _cardLoadCts;
         public enum RecruitmentType { Shop, Town, Battle, Conscription }
@@ -202,6 +203,23 @@ namespace TJ.Recruit
                 await Task.Delay(200);
             }
         }
+        // One hovered card grows and lifts; the rest shrink. Null returns every card to its breath.
+        public void SetHoveredCard(RecruitCard hovered)
+        {
+            hoveredCard = hovered;
+            for (int i = 0; i < recruitCards.Count; i++)
+            {
+                RecruitCard.HoverMotion state = hovered == null ? RecruitCard.HoverMotion.Idle
+                    : recruitCards[i] == hovered ? RecruitCard.HoverMotion.Hovered
+                    : RecruitCard.HoverMotion.Neighbour;
+                recruitCards[i].SetHoverMotion(state);
+            }
+        }
+        // Cards flip in one at a time; a late card has to join a hover that is already underway.
+        public void ReapplyHoveredCard()
+        {
+            SetHoveredCard(hoveredCard);
+        }
         public async void AttemptToPurchaseRecruit(SquadStats _squadStats, RecruitCard _recruitCard)
         {
             if(hasSelectedRecruitCard) {
@@ -352,6 +370,7 @@ namespace TJ.Recruit
             } 
             recruitCards.Clear();
             gearCards.Clear();
+            hoveredCard = null;
             skipButton.gameObject.SetActive(false);
             CloseFeedback();
         }

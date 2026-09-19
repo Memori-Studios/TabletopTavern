@@ -353,9 +353,10 @@ public class SquadManager : MonoBehaviour
         }
         averagePosition /= _entities.Count;
         int initialSquadSize = squadStats.baseUnitCount;
-        int maxHealth = squadStats.HitPointsPerUnit * initialSquadSize;
-        int currentHealth = _entities.Count * squadStats.HitPointsPerUnit;
-        // Debug.Log($"Registering squad {squadId} with {initialSquadSize} entities and {maxHealth} max health");
+        // Must match the per-unit MaxHitPoints UnitSetUpSystem writes, or the health bar scale is off.
+        int hitPointsPerUnit = squadStats.HitPointsPerUnit;
+        float speed = squadStats.Speed;
+        int chargeImpactDamage = squadStats.ChargeImactDamage;
         float leadership = squadStats.Leadership;
         // Mages take Leadership prestige alongside melee units: a one-model squad breaks easily,
         // and Leadership plus Range is the whole of what prestige buys a caster.
@@ -371,11 +372,20 @@ public class SquadManager : MonoBehaviour
         // other races.
         if(_enemyData.Team == Team.Player && campaignSaveDataHolder.ActiveHeroID != -1)
         {
-            foreach (var bonus in HeroBonusManager.GetHeroStatBonus(UnitStat.Leadership, squadStats.unitName, campaignSaveDataHolder.ActiveHeroID, leadership))
-                leadership += bonus.Value;
-            if (campaignSaveDataHolder.OnlySakuraUnits)
-                foreach (var bonus in HeroBonusManager.GetFactionBonusForHero(UnitStat.Leadership, campaignSaveDataHolder.ActiveHeroID))
-                    leadership += bonus.Value;
+            float SumHeroBonus(UnitStat stat, float currentValue)
+            {
+                float total = 0f;
+                foreach (var bonus in HeroBonusManager.GetHeroStatBonus(stat, squadStats.unitName, campaignSaveDataHolder.ActiveHeroID, currentValue))
+                    total += bonus.Value;
+                if (campaignSaveDataHolder.OnlySakuraUnits)
+                    foreach (var bonus in HeroBonusManager.GetFactionBonusForHero(stat, campaignSaveDataHolder.ActiveHeroID))
+                        total += bonus.Value;
+                return total;
+            }
+            leadership += SumHeroBonus(UnitStat.Leadership, leadership);
+            hitPointsPerUnit += (int)SumHeroBonus(UnitStat.HitPoints, hitPointsPerUnit);
+            speed += SumHeroBonus(UnitStat.Speed, speed);
+            chargeImpactDamage += (int)SumHeroBonus(UnitStat.ChargeImpactDamage, chargeImpactDamage);
 
             foreach (var attributeBonus in HeroBonusManager.GetHeroAttributeBonus(squadStats.unitName, campaignSaveDataHolder.ActiveHeroID))
             {
@@ -390,6 +400,9 @@ public class SquadManager : MonoBehaviour
                 }
             }
         }
+        int maxHealth = hitPointsPerUnit * initialSquadSize;
+        int currentHealth = _entities.Count * hitPointsPerUnit;
+        ecb.AddComponent(squadEntity, new SquadChargeImpactDamage { Value = chargeImpactDamage });
 
         // Debug.Log($"Registering squad {squadId} with {_entities.Count} entities, {initialSquadSize} initial size, {maxHealth} max health, and {leadership} leadership");
         ecb.AddComponent(squadEntity, new SquadEntity
@@ -630,9 +643,6 @@ public class SquadManager : MonoBehaviour
 
         ecb.AddComponent<DefensiveStanceTag>(squadEntity);
         ecb.SetComponentEnabled<DefensiveStanceTag>(squadEntity, false);
-
-        //getting speed 
-        float speed = squadStats.Speed;
 
         for (int i = 0; i < _entities.Count; i++)
         {
@@ -1212,6 +1222,9 @@ public class SquadManager : MonoBehaviour
         {
             foreach (var bonus in HeroBonusManager.GetHeroStatBonus(UnitStat.Ammunition, _squadEntity.UnitName, HeroBonusManager.Instance.ActiveHeroID, ammunition))
                 ammunition += (int)bonus.Value;
+            if (BattleManager.Instance.OnlySakuraUnits)
+                foreach (var bonus in HeroBonusManager.GetFactionBonusForHero(UnitStat.Ammunition, HeroBonusManager.Instance.ActiveHeroID))
+                    ammunition += (int)bonus.Value;
         }
         SquadFlagGameObject flag = flagInstance.GetComponent<SquadFlagGameObject>();
         flag.SetUp(flagMaterial, _squadId, unitSize, _moraleComponent, _squadEntity.SelfEntity, ammunition, _squadEntity.UnitName);

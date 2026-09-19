@@ -40,7 +40,7 @@ namespace TJ
             // Share the same list instances with the Components-assembly evaluator so
             // Systems-assembly ECS code (which can't reference this main-assembly class) reads
             // identical, already-overridden data - see HeroBonusRuleEvaluator.
-            HeroBonusRuleEvaluator.SetRules(_statRules, _factionRules);
+            HeroBonusRuleEvaluator.SetRules(_statRules, _factionRules, _attributeRules);
         }
 
         private void Start()
@@ -149,6 +149,21 @@ namespace TJ
             }
 
             return unitAttributeBonuses;
+        }
+        // Allocation-free for per-frame callers; base stats count too, so modded attributes are honored.
+        public static bool UnitHasAttribute(UnitName _requestingUnit, int activeHeroID, UnitAttribute attribute)
+        {
+            SquadStats stats = TabletopTavernData.Instance.GetSquadStats(_requestingUnit);
+            if (TabletopTavernConstants.GetAttribute(stats.SquadAttributes, attribute)) return true;
+            if (activeHeroID == -1) return false;
+
+            EnsureRulesLoaded();
+            foreach (var rule in _attributeRules)
+            {
+                if (rule.HeroID != activeHeroID || rule.GrantedAttribute != attribute) continue;
+                if (rule.Condition.Matches(_requestingUnit, stats, enemyRace)) return true;
+            }
+            return false;
         }
         public static string GetLocalizedHeroUnlockDescription(Hero _hero, UnlockCondition _unlockCondition)
         {

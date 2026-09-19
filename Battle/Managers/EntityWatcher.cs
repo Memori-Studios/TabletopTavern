@@ -46,6 +46,8 @@ namespace TJ
         private Entity _balanceEntity; // cache for fast access
         private readonly Dictionary<int, SquadSFXManager> _squadSFXManagers = new();
         private readonly Dictionary<int, int> _barkCounts = new(); // per-frame accumulator, avoids allocation
+        // Every idle bark carries the same authored range; the last one seen is the burst's.
+        private float _barkMaxDistance = 30f;
 
         // Squads whose rejected-command log has already been written. A player who keeps clicking
         // a broken squad would otherwise flood the log with one line per click.
@@ -149,6 +151,9 @@ namespace TJ
             _entityManager.CompleteAllTrackedJobs();
 
             var ecb = new EntityCommandBuffer(Allocator.Temp);
+            // A throw in any region must still reach the Playback, or that region re-fires every frame.
+            try
+            {
 
             #region Updating UI for Squad Unit Count changes
             if(!_updatedSquadUnitCountQuery.IsEmptyIgnoreFilter)
@@ -249,6 +254,9 @@ namespace TJ
                     {
                         foreach (var bonus in HeroBonusManager.GetHeroStatBonus(UnitStat.Ammunition, squadEntity.UnitName, HeroBonusManager.Instance.ActiveHeroID, ammunition))
                             ammunition += (int)bonus.Value;
+                        if (squadEntity.SquadId > 0 && BattleManager.Instance.OnlySakuraUnits)
+                            foreach (var bonus in HeroBonusManager.GetFactionBonusForHero(UnitStat.Ammunition, HeroBonusManager.Instance.ActiveHeroID))
+                                ammunition += (int)bonus.Value;
                     }
                     ecb.AddComponent(entity, new RangedSquad()
                     {
@@ -284,6 +292,9 @@ namespace TJ
                     {
                         foreach (var bonus in HeroBonusManager.GetHeroStatBonus(UnitStat.Ammunition, squadEntity.UnitName, HeroBonusManager.Instance.ActiveHeroID, ammunition))
                             ammunition += (int)bonus.Value;
+                        if (squadEntity.SquadId > 0 && BattleManager.Instance.OnlySakuraUnits)
+                            foreach (var bonus in HeroBonusManager.GetFactionBonusForHero(UnitStat.Ammunition, HeroBonusManager.Instance.ActiveHeroID))
+                                ammunition += (int)bonus.Value;
                     }
                     ecb.AddComponent(entity, new RangedSquad() { });
                     ecb.AddComponent(entity, new SquadAmmunition() { Value = ammunition });
@@ -316,6 +327,10 @@ namespace TJ
                     // cast is already a large swing.
                     int charges = squadStats.Ammunition + TabletopTavernConstants.PRESTIGE_AMMO_BONUS_MAGE * BattleManager.Instance.SquadManager.GetSquadPrestige(squadEntity.SquadId);
                     ecb.AddComponent(entity, new SquadAmmunition() { Value = charges });
+
+                    // Added disabled so a player-directed cast is an enable, not a structural change.
+                    ecb.AddComponent<MageManualCastOrder>(entity);
+                    ecb.SetComponentEnabled<MageManualCastOrder>(entity, false);
 
                     BattleManager.Instance.SquadManager.CreateArcherRangeDrawer(squadEntity);
 
@@ -585,9 +600,10 @@ namespace TJ
             foreach (Entity entity in queryEndBattleEntities)
             {
                 BattleOver battleOver = _entityManager.GetComponentData<BattleOver>(entity);
-                EndBattle(battleOver.PlayerWon);
+                // Destroy before EndBattle so a throw in there cannot leave the entity to re-fire next frame.
                 ecb.DestroyEntity(entity);
                 Debug.Log($"Destroyed BattleHasNotEnded entity");
+                EndBattle(battleOver.PlayerWon);
             }
             queryEndBattleEntities.Dispose();
             #endregion
@@ -634,11 +650,13 @@ namespace TJ
                         // Accumulate bark events per squad and dispatch as a burst after the loop
                         _barkCounts.TryGetValue(unit.squadId, out int n);
                         _barkCounts[unit.squadId] = n + 1;
+                        _barkMaxDistance = evt.MaxDistance;
                     }
                     else
                     {
                         AudioClip clip = TabletopTavernData.Instance.GetBattlefieldAudio(evt.UnitName, evt.SFXEntityType);
-                        squadSFXManager.PlaySFX(clip, unitPos);
+                        AudioChannel channel = evt.SFXEntityType == SFXEntityType.Death ? AudioChannel.Voices : AudioChannel.Effects;
+                        squadSFXManager.PlaySFX(clip, unitPos, evt.MaxDistance, channel);
                     }
                 }
                 sfxBuffer.Clear();
@@ -648,7 +666,7 @@ namespace TJ
             foreach (KeyValuePair<int, int> kvp in _barkCounts)
             {
                 if (_squadSFXManagers.TryGetValue(kvp.Key, out SquadSFXManager manager) && manager != null)
-                    manager.PlayBarks(kvp.Value, manager.transform.position);
+                    manager.PlayBarks(kvp.Value, manager.transform.position, _barkMaxDistance);
             }
 
             sfxEntities.Dispose();
@@ -911,7 +929,16 @@ namespace TJ
             }
             #endregion
 
-            ecb.Playback(_entityManager);
+            }
+            catch (System.Exception e)
+            {
+                Debug.LogError($"EntityWatcher.Update threw. Commands buffered this frame are still played back.");
+                Debug.LogException(e);
+            }
+            finally
+            {
+                ecb.Playback(_entityManager);
+            }
         }
         private void OnGateDestroyed(int gateIndex)
         {
@@ -954,9 +981,21 @@ namespace TJ
                 Debug.LogError($"Cannot end battle, EntityWatcher is not set up.");
                 return;
             }
+            // Cleared before any work so the battle can only end once, whatever throws below.
+            setup = false;
+
             if (!BattleManager.Instance.BattleSaveManager.IsCustomBattle)
             {
-                BattleManager.Instance.ArmySpawnManager.MapSquadsToKillsAndWithdrwanSquads(playerWon);
+                // A failed post-battle save must not stop the battle from ending.
+                try
+                {
+                    BattleManager.Instance.ArmySpawnManager.MapSquadsToKillsAndWithdrwanSquads(playerWon);
+                }
+                catch (System.Exception e)
+                {
+                    Debug.LogError($"Post-battle save failed (playerWon: {playerWon}). Ending the battle anyway.");
+                    Debug.LogException(e);
+                }
             }
 
             BattleManager.Instance.EndBattle(playerWon);
@@ -974,7 +1013,6 @@ namespace TJ
             simulationSystemGroup.Enabled = false;
             var initializationSystemGroup = defaultWorld.GetExistingSystemManaged<InitializationSystemGroup>();
             initializationSystemGroup.Enabled = false;
-            setup = false;
         }
 
         private async void SetupArtilleryCrewAsync(Entity grandparentEntity, Entity parentEntity, int squadId, UnitName unitName)

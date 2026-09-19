@@ -91,6 +91,9 @@ public struct ApplyBiomeBonusTag : IComponentData { public BattlefieldBonusEnum 
     // 0 = never expires (default for world fixtures). Otherwise the World.Time.ElapsedTime
     // value at which BattlefieldBonusSystem force-removes this bonus regardless of distance.
     public double ExpiresAtTime;
+    // Spell ordinal written to the squad's SpellStatusBufferElement when this lands; 0 = no icon
+    // (every world fixture, and any spell with ShowsStatusIcon off).
+    public int StatusSpellId;
 }
 [InternalBufferCapacity(8)] // Optional: set the internal buffer capacity
 [System.Serializable] public struct BattlefieldBonusBufferElement : IBufferElementData {

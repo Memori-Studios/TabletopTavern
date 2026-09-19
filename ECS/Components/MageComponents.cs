@@ -70,6 +70,22 @@ public struct MageSquad : IComponentData
     public MageTargetPriority TargetPriority;
 }
 
+/// <summary>
+/// One player-directed cast, written by SpellManager when the player arms a mage's spell and clicks
+/// a target. Added disabled to every mage squad at registration so a cast is a SetComponentData plus
+/// an enable, never a structural change mid-battle. MageCastSystem casts it the moment the squad is
+/// in range with its timer at zero, then disables it; MageSquadFindTargetSystem leaves the squad
+/// alone while it is enabled so the auto loop cannot re-target a mage walking to a manual cast.
+/// </summary>
+public struct MageManualCastOrder : IComponentData, IEnableableComponent
+{
+    /// <summary>Cast point. For a squad target this is refreshed from the target's centre at cast time.</summary>
+    public float3 Position;
+
+    /// <summary>Entity.Null for a ground-targeted spell.</summary>
+    public Entity TargetSquadEntity;
+}
+
 #endregion
 
 #region Event stream

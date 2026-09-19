@@ -22,7 +22,7 @@ public class PotionRewardsItem : MemoriButtonV2
         consumable = ConsumableData.GetConsumable(_consumableEnum);
         icon.sprite = SpriteData.GetSprite(_consumableEnum.ToString());
         lableText.text= LocalizationManager.Instance.GetText(consumable.ConsumableEnum.ToString()+"Name");
-        tooltipTrigger.SetUpToolTip(_description: LocalizationManager.Instance.GetText(consumable.ConsumableEnum.ToString()+"Desc"));
+        tooltipTrigger.SetUpToolTip(_description: ConsumableData.FormatDescription(consumable.ConsumableEnum, LocalizationManager.Instance.GetText(consumable.ConsumableEnum.ToString()+"Desc")));
     }
 }
 }

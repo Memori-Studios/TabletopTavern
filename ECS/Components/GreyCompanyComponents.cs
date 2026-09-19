@@ -279,6 +279,8 @@ public struct SpellEntity : IComponentData {
     // Iaijutsu Flash: the blast hits exactly ONE unit - the one nearest the strike point - instead of
     // everything inside SpellRadius. The radius then only decides how far the strike may reach.
     public bool HitsSingleUnit;
+    // Spell ordinal to write into SpellStatusBufferElement on each squad hit; 0 = no status icon.
+    public int StatusSpellId;
 }
 // public struct UnitHitBySpell : IComponentData { public float3 SpellPosition; public float SpellForce; public float3 InitHitLocation;}
 public struct BattleOver : IComponentData {public bool PlayerWon; }
@@ -377,3 +379,5 @@ public struct QueuedOrder : IBufferElementData
 }
 public struct CompleteQueuedOrderTag : IComponentData, IEnableableComponent { }
 public struct UpdatedSquadUnitCount : IComponentData { public int SquadId; public int2 UnitCount; }
+// Per-squad charge impact with hero and faction bonuses folded in; the blob value is base only.
+public struct SquadChargeImpactDamage : IComponentData { public int Value; }

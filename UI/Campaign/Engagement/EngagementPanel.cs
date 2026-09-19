@@ -163,6 +163,7 @@ namespace TJ.Engagement
         private bool _engagementRunComplete;
         private int _engagementRetryCount;
         private const float ENGAGEMENT_WATCHDOG_TIMEOUT = 5f;
+        private bool _engagementResultWon;
         private const int ENGAGEMENT_MAX_RETRIES = 2;
 
         // A run can also finish "successfully" and still strand the player: ShowEngagementResult activates
@@ -515,7 +516,7 @@ namespace TJ.Engagement
             if (!_showedEngagementResult) return;
 
             // Won runs put the action buttons on endBattleCanvasGroup; lost runs put them on runLostCanvasGroup.
-            MemoriCanvasGroup group = campaignSaveManager.SaveData.playerWonBattle ? endBattleCanvasGroup : runLostCanvasGroup;
+            MemoriCanvasGroup group = _engagementResultWon ? endBattleCanvasGroup : runLostCanvasGroup;
             if (group == null || group.canvasGroup == null) return;
             if (group.canvasGroup.alpha > 0f) return;
 
@@ -535,6 +536,18 @@ namespace TJ.Engagement
                 isLoadingEnemyCompany = false; // don't leave OnArmyStructureChanged permanently blocked
                 return;
             }
+
+            // First enemy artillery: tell the player the army holds position instead of charging.
+            if (!campaignSaveManager.SaveData.battleCompleted)
+            {
+                foreach (SquadToLoad squad in campaignSaveManager.SaveData.enemyArmy)
+                {
+                    if (TabletopTavernData.Instance.GetUnitTypeFromUnitName(squad.UnitName) != UnitType.Artillery) continue;
+                    TutorialManager.Instance.LoadStepsFromRandomSpot(new TutorialStep[1] { TutorialData.EnemyArtillery });
+                    break;
+                }
+            }
+
             foreach (SquadToLoad squad in campaignSaveManager.SaveData.enemyArmy)
             {
                 // Debug.Log($"squad: {squad.UnitName} - {squad.currentUnitCount}");
@@ -927,6 +940,7 @@ namespace TJ.Engagement
             string defeatedLocalized = LocalizationManager.Instance.GetText("Defeated");
 
             bool battleWon = campaignSaveManager.SaveData.playerWonBattle;
+            _engagementResultWon = battleWon; // a lost run erases SaveData below, so the watchdog cannot re-read it
             if(garrisonFight)
             {
                 battleOutcomeText.text = battleWon ? townGarrisonLocalized + " " + defeatedLocalized : companyShatteredLocalized;

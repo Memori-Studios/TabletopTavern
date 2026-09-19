@@ -55,6 +55,9 @@ namespace Memori.SaveData
         // type (event, gamble, or battle initiative). Persisted here so it survives main-menu exit and
         // battle entry - see ConsumableManager / EventPanel / GamesPanel / BattleDiceRollPanel.
         public bool fateshineElixirArmed;
+        // Mana Draughts drunk since the last fought battle. GetSpellManaPool adds SPELL_MANA_POOL_DRAUGHT
+        // per draught; SaveSquadsPostBattle clears it. Auto-resolve has no mana pool and leaves it alone.
+        public int manaDraughtsArmed;
         public int signatureUnitPacksPurchased;
         public int townsSacked;
         public bool archerUsedInBattle;
@@ -501,10 +504,10 @@ namespace Memori.SaveData
             saveData.enemyArmy = _enemySquads;
             saveData.battleCompleted = true;
             saveData.playerWonBattle = _playerWon;
+            saveData.manaDraughtsArmed = 0;
             saveData.SquadKillsStore = _squadIdKillCounter;
 
             saveData.HistoricalKillStore = AddToHistoricalKills(saveData.HistoricalKillStore, _squadIdKillCounter);
-            RecordUnitNameKills(_playerSquads, _squadIdKillCounter);
             saveData.SquadLossesStore = _squadIdLossCounter;
             if(saveData.townData == null) {
                 saveData.townData = new TownSaveData();
@@ -522,6 +525,35 @@ namespace Memori.SaveData
             }
             UnityEngine.Debug.Log($"Total enemies slain in battle: {totalKills}");
             saveData.RunStats.enemiesSlain += totalKills;
+
+            //achievement tracking - archer used in battle
+            for (int i = 0; i < 10; i++)
+            {
+                if (saveData.playerArmy[i].UnitIndex == -1) continue;
+
+                // Hybrids shoot, so they disqualify the No Archers run just like a dedicated shooter.
+                if (TabletopTavernConstants.FightsAtRange(TabletopTavernData.Instance.GetSquadStats(saveData.playerArmy[i].UnitName).unitType))
+                {
+                    saveData.archerUsedInBattle = true;
+                    break;
+                }
+            }
+
+            // "Uh, pause..." - carry the battle-scene pause flag into the run save, then clear it.
+            if (PauseUsedThisBattle)
+            {
+                saveData.RunStats.pauseUsed = true;
+                PauseUsedThisBattle = false;
+            }
+
+            // The battle result goes to disk before any stats or achievement work so a failure below
+            // cannot leave the map treating this battle as unfought.
+            SaveCampaign(saveData);
+
+            //update the last snapshot to overwrite the snapshot of the pre battle state since the battle is now completed
+            SaveCampaignSnapshot(saveData);
+
+            RecordUnitNameKills(_playerSquads, _squadIdKillCounter);
 
             //achievement check - cav only
             bool cavOnly = true;
@@ -557,31 +589,6 @@ namespace Memori.SaveData
                 if (ArmyLossesSufferedThisBattle) SteamAchievements.Unlock(AchievementId.AgainstAllOdds);
             }
             ArmyLossesSufferedThisBattle = false;
-
-            //achievement tracking - archer used in battle
-            for (int i = 0; i < 10; i++)
-            {
-                if (saveData.playerArmy[i].UnitIndex == -1) continue;
-
-                // Hybrids shoot, so they disqualify the No Archers run just like a dedicated shooter.
-                if (TabletopTavernConstants.FightsAtRange(TabletopTavernData.Instance.GetSquadStats(saveData.playerArmy[i].UnitName).unitType))
-                {
-                    saveData.archerUsedInBattle = true;
-                    break;
-                }
-            }
-
-            // "Uh, pause..." - carry the battle-scene pause flag into the run save, then clear it.
-            if (PauseUsedThisBattle)
-            {
-                saveData.RunStats.pauseUsed = true;
-                PauseUsedThisBattle = false;
-            }
-
-            SaveCampaign(saveData);
-
-            //update the last snapshot to overwrite the snapshot of the pre battle state since the battle is now completed
-            SaveCampaignSnapshot(saveData);
         }
         public static void SavePlayerSaveData(PlayerSaveData toSave)
         {
@@ -833,19 +840,24 @@ namespace Memori.SaveData
         /// CampaignSaveManager - the same reason GetCampaignSpells lives here.
         ///
         /// Base pool, plus SPELL_MANA_POOL_PER_ACT for every act after the first, plus the Renown
-        /// bonus. The act is read off the campaign save on disk because this runs in the battle scene.
-        /// A custom battle has no act and ignores Renown: it always gets the fixed sandbox maximum.
-        /// The pool is granted whole at the start of every battle and does not regenerate or carry
-        /// over, so this is the only place its size is decided.
+        /// bonus, plus SPELL_MANA_POOL_DRAUGHT per Mana Draught armed on the save. The act and the
+        /// draughts are read off the campaign save on disk because this runs in the battle scene.
+        /// A custom battle has no act and ignores Renown and draughts: it always gets the fixed
+        /// sandbox maximum. The pool is granted whole at the start of every battle and does not
+        /// regenerate or carry over, so this is the only place its size is decided. This is a pure
+        /// read; the draughts are spent by SaveSquadsPostBattle, not here.
         /// </summary>
         public static int GetSpellManaPool()
         {
+            if (SpellTestMode.Active) return SpellTestMode.ManaPool;
             if (IsCustomBattle()) return TabletopTavernConstants.SPELL_MANA_POOL_CUSTOM_BATTLE;
 
-            int act = Math.Max(1, Load().bookNumber);
+            CampaignSaveData save = Load();
+            int act = Math.Max(1, save.bookNumber);
             return TabletopTavernConstants.SPELL_MANA_POOL_BASE
                  + (act - 1) * TabletopTavernConstants.SPELL_MANA_POOL_PER_ACT
-                 + SpellLoadout.GetManaBonus();
+                 + SpellLoadout.GetManaBonus()
+                 + save.manaDraughtsArmed * TabletopTavernConstants.SPELL_MANA_POOL_DRAUGHT;
         }
         public static Race GetEnemyRace()
         {

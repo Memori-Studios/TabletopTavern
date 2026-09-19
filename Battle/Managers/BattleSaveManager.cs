@@ -23,9 +23,9 @@ namespace TJ.Battle
             CampaignSaveData saveData = SaveDataHandler.Load();
             seed = saveData.seed + saveData.GetSelectedNodeIndex();
 
+            // Both dev-boot custom paths must mark the player save, or weather and SpellTestMode read a stale campaign flag.
             if (SceneHandler.Instance.EditorOverride == SceneHandler.EditorOverrides.TavernBattle
-                && !SceneHandler.Instance.EditorLoadCampaignBattle
-                && !SceneHandler.Instance.EditorLoadCustomBattleSaveData)
+                && !SceneHandler.Instance.EditorLoadCampaignBattle)
             {
                 editorCustomBattle = true;
                 SetCustomBattle();

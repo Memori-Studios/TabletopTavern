@@ -9,13 +9,13 @@ public class FireplaceSFX : MonoBehaviour
     private void Start()
     {
         fireplaceAudioSource = GetComponent<AudioSource>();
-        IAudioRequester.Instance.ambienceVolume.OnValueChanged += FireplaceSFXLevelChange;
-        FireplaceSFXLevelChange(IAudioRequester.Instance.ambienceVolume.GetValue());
+        IAudioRequester.Instance.effectsVolume.OnValueChanged += FireplaceSFXLevelChange;
+        FireplaceSFXLevelChange(IAudioRequester.Instance.effectsVolume.GetValue());
     }
     private void OnDestroy() 
     {
         if (IAudioRequester.HasInstance)
-            IAudioRequester.Instance.ambienceVolume.OnValueChanged -= FireplaceSFXLevelChange;
+            IAudioRequester.Instance.effectsVolume.OnValueChanged -= FireplaceSFXLevelChange;
     }
     private void FireplaceSFXLevelChange(float volume) 
     {

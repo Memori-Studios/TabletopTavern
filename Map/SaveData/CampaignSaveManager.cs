@@ -442,21 +442,30 @@ namespace TJ
                 }
             }
         }
+        // Skrix: a random Kobold prestiges after a battle once the army holds this many (starting army has 4).
+        public const int SKRIX_HERO_ID = 15;
+        public const int SKRIX_KOBOLD_THRESHOLD = 5;
+        public int CountKoboldUnits()
+        {
+            if (saveData == null || saveData.playerArmy == null) return 0;
+            int koboldCount = 0;
+            for (int i = 0; i < saveData.playerArmy.Length; i++)
+            {
+                if (saveData.playerArmy[i].UnitName == UnitName.KoboldBrawlers || saveData.playerArmy[i].UnitName == UnitName.ScalebowKobolds)
+                    koboldCount++;
+            }
+            return koboldCount;
+        }
         public void HandleSpecialSquadsOnBattleEnd()
         {
             if(saveData == null) return;
             
-            if(saveData.heroID == 15) //Skrix the Swarmcaller: If your army contains 5 or more Kobold units, a random Kobold will prestige on turn end
+            if(saveData.heroID == SKRIX_HERO_ID) //Skrix the Swarmcaller: If your army contains 5 or more Kobold units, a random Kobold will prestige on turn end
             {
-                int koboldCount = 0;
-                for (int i = 0; i < saveData.playerArmy.Length; i++)
-                {
-                    if (saveData.playerArmy[i].UnitName == UnitName.KoboldBrawlers || saveData.playerArmy[i].UnitName == UnitName.ScalebowKobolds)
-                    {
-                        koboldCount++;
-                    }
-                }
-                if(koboldCount >= 5) {
+                int koboldCount = CountKoboldUnits();
+                if(koboldCount < SKRIX_KOBOLD_THRESHOLD)
+                    Debug.Log($"[Hero] Skrix bonus skipped: {koboldCount}/{SKRIX_KOBOLD_THRESHOLD} Kobold units");
+                if(koboldCount >= SKRIX_KOBOLD_THRESHOLD) {
                     List<int> koboldIndexes = new List<int>();
                     for (int i = 0; i < saveData.playerArmy.Length; i++)
                     {
@@ -479,12 +488,6 @@ namespace TJ
         {
             float modifiedHealAmount = healAmount;
 
-            //The Light of Nytherial: Units recieve 2x Healing from all sources,
-            if (HeroBonusManager.Instance.ActiveHeroID == 8)
-            {
-                modifiedHealAmount *= 2f;
-            }
-            
             //DifficultyMod 11
             if(CampaignManager.Instance.CampaignSaveManager.SaveData.difficultyLevel >= TT_Difficulty.King) {
                 modifiedHealAmount *= 0.5f;
@@ -498,13 +501,20 @@ namespace TJ
 
             ModifyTroopHealth(modifiedHealAmount);
         }
+        // Serendael (hero 8): every heal is doubled here, so no caller may double it as well.
+        public static float ApplyHealingBonus(float _modificationAmount)
+        {
+            if (_modificationAmount > 0 && HeroBonusManager.Instance.ActiveHeroID == 8)
+                return _modificationAmount * 2f;
+            return _modificationAmount;
+        }
         /// <summary>
         /// Modifies the health of all troops in the player's army by total health * _modificationAmount.
         /// </summary>
         /// <param name="_modificationAmount"></param>
         public void ModifyTroopHealth(float _modificationAmount)
         {
-            float modificationAmount = _modificationAmount;
+            float modificationAmount = ApplyHealingBonus(_modificationAmount);
             for (int i = 0; i < saveData.playerArmy.Length; i++)
                 {
                     if (saveData.playerArmy[i].UnitIndex == -1) continue;
@@ -519,7 +529,7 @@ namespace TJ
         }
         public void ModifyGruntkinTroopHealth(float _modificationAmount)
         {
-            float modificationAmount = _modificationAmount;
+            float modificationAmount = ApplyHealingBonus(_modificationAmount);
             for (int i = 0; i < saveData.playerArmy.Length; i++)
             {
                 if (saveData.playerArmy[i].UnitIndex == -1) continue;
@@ -537,7 +547,7 @@ namespace TJ
         }
         public void ModifyTroopHealth(float _modificationAmount, Race race)
         {
-            float modificationAmount = _modificationAmount;
+            float modificationAmount = ApplyHealingBonus(_modificationAmount);
             for (int i = 0; i < saveData.playerArmy.Length; i++)
                 {
                     if (saveData.playerArmy[i].UnitIndex == -1) continue;
@@ -564,7 +574,7 @@ namespace TJ
                 SquadToLoad squadToModify = Array.Find(saveData.playerArmy, x => x.UniqueID == _uniqueID);
                 if (squadToModify.UniqueID == null) return;
 
-                int healthToChange = (int)(_modificationAmount * squadToModify.SquadMaxHealth);
+                int healthToChange = (int)(ApplyHealingBonus(_modificationAmount) * squadToModify.SquadMaxHealth);
                 int clampedTroops = math.clamp(squadToModify.SquadCurrentHealth + healthToChange, 0, squadToModify.SquadMaxHealth);
                 Debug.Log($"Modifying {squadToModify.UnitName} health from {squadToModify.SquadCurrentHealth} to {clampedTroops}");
                 squadToModify.SquadCurrentHealth = clampedTroops;
@@ -1332,6 +1342,11 @@ namespace TJ
         public bool FateshineElixirArmed => saveData.fateshineElixirArmed;
         public void ArmFateshineElixir()     { saveData.fateshineElixirArmed = true;  SaveCampaign(); }
         public void ConsumeFateshineElixir() { saveData.fateshineElixirArmed = false; SaveCampaign(); }
+
+        // Persisted Mana Draught count. Read by SaveDataHandler.GetSpellManaPool in the battle scene and
+        // cleared by SaveSquadsPostBattle, so there is no consume method on this side.
+        public int ManaDraughtsArmed => saveData.manaDraughtsArmed;
+        public void ArmManaDraught() { saveData.manaDraughtsArmed++; SaveCampaign(); }
         #endregion
 
         #region Healing
@@ -1346,7 +1361,8 @@ namespace TJ
                 if(onlyHalf) healthRecovery /= 2;
                 healthRecovery *= ReservesHealMultiplier;
                 if(CampaignManager.Instance.GearManager.CheckForGear(GearID.ChugJug)) healthRecovery*=2;
-        
+                healthRecovery = (int)ApplyHealingBonus(healthRecovery);
+
                 playerSquadsSaveData[i].SquadCurrentHealth = math.min(
                     playerSquadsSaveData[i].SquadCurrentHealth + healthRecovery, playerSquadsSaveData[i].SquadMaxHealth
                 );

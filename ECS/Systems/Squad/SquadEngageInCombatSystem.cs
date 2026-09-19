@@ -166,7 +166,9 @@ partial struct SquadEngageInCombatSystem : ISystem
                         KnockbackSquadTeam = squad.ValueRO.Team,
                         KnockbackRange = knockbackRange,
                         KnockbackForce = knockbackForce,
-                        KnockbackInitialDamage = squadStats.ChargeImactDamage,
+                        KnockbackInitialDamage = entityManager.HasComponent<SquadChargeImpactDamage>(squad.ValueRO.SelfEntity)
+                            ? entityManager.GetComponentData<SquadChargeImpactDamage>(squad.ValueRO.SelfEntity).Value
+                            : squadStats.ChargeImactDamage,
                     });
                     // Debug.Log($"SquadEngageInCombatSystem: squad {squad.ValueRO.SquadId} is engaging in combat with a smaller squad {squad.ValueRO.TargetSquadEntity.Index} and applying knockback to unit {entity}");
                 }

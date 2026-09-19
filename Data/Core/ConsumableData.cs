@@ -3,7 +3,7 @@ using System.Collections.Generic;
 
 namespace TJ
 {
-    public enum ConsumableEnum { MinorHealth, MajorHealth, Prestige, Duplicate, NewUnit, Alchemist, Rewind, TrialofGrasses, FateshineElixir, RunewellNectar, LambSauce }
+    public enum ConsumableEnum { MinorHealth, MajorHealth, Prestige, Duplicate, NewUnit, Alchemist, Rewind, TrialofGrasses, FateshineElixir, RunewellNectar, LambSauce, ManaDraught }
     public enum ConsumableRarity { Common, Uncommon, Rare, Legendary }
     [System.Serializable] public struct Consumable
     {
@@ -38,6 +38,7 @@ namespace TJ
                 ConsumableEnum.FateshineElixir => FateshineElixir,
                 ConsumableEnum.RunewellNectar => RunewellNectar,
                 ConsumableEnum.LambSauce => LambSauce,
+                ConsumableEnum.ManaDraught => ManaDraught,
 
                 _ => new Consumable(),
             };
@@ -108,6 +109,12 @@ namespace TJ
             // ConsumableDescription = "Creates a signature unit for your hero",
             ConsumableRarity = ConsumableRarity.Legendary
         };
+        public static Consumable ManaDraught = new ()
+        {
+            ConsumableEnum = ConsumableEnum.ManaDraught,
+            // ConsumableDescription = "Adds SPELL_MANA_POOL_DRAUGHT mana to the pool of the next battle you fight",
+            ConsumableRarity = ConsumableRarity.Uncommon,
+        };
 
         public static ConsumableEnum[] GetAllConsumableEnums()
         {
@@ -118,6 +125,11 @@ namespace TJ
                 ConsumableEnum.MajorHealth,//Uncommon
                 ConsumableEnum.FateshineElixir,//Uncommon
                 ConsumableEnum.NewUnit,//Uncommon
+#if SPELLS
+                // Every offer site and the Collection read this list, so this one gate hides the draught
+                // wherever mana does not exist.
+                ConsumableEnum.ManaDraught,//Uncommon
+#endif
                 ConsumableEnum.RunewellNectar,//Rare
                 ConsumableEnum.Prestige,//Rare
                 ConsumableEnum.Duplicate,//Rare
@@ -184,6 +196,7 @@ namespace TJ
                     ConsumableEnum.Alchemist        => 20f, // Common
                     ConsumableEnum.MajorHealth      => 15f, // Uncommon
                     ConsumableEnum.FateshineElixir  => 12f, // Uncommon
+                    ConsumableEnum.ManaDraught      => 12f, // Uncommon
                     ConsumableEnum.NewUnit          => 12f, // Uncommon
                     ConsumableEnum.Prestige         => 8f,  // Rare
                     ConsumableEnum.RunewellNectar   => 6f,  // Rare
@@ -199,6 +212,7 @@ namespace TJ
                     ConsumableEnum.Alchemist        => 15f, // Common
                     ConsumableEnum.MajorHealth      => 18f, // Uncommon
                     ConsumableEnum.FateshineElixir  => 15f, // Uncommon
+                    ConsumableEnum.ManaDraught      => 15f, // Uncommon
                     ConsumableEnum.NewUnit          => 15f, // Uncommon
                     ConsumableEnum.Prestige         => 12f, // Rare
                     ConsumableEnum.RunewellNectar   => 10f, // Rare
@@ -214,6 +228,7 @@ namespace TJ
                     ConsumableEnum.Alchemist        => 8f,  // Common
                     ConsumableEnum.MajorHealth      => 18f, // Uncommon
                     ConsumableEnum.FateshineElixir  => 15f, // Uncommon
+                    ConsumableEnum.ManaDraught      => 15f, // Uncommon
                     ConsumableEnum.NewUnit          => 15f, // Uncommon
                     ConsumableEnum.Prestige         => 16f, // Rare
                     ConsumableEnum.RunewellNectar   => 14f, // Rare
@@ -232,6 +247,7 @@ namespace TJ
                         ConsumableEnum.Alchemist        => 8f,  // Common
                         ConsumableEnum.MajorHealth      => 18f, // Uncommon
                         ConsumableEnum.FateshineElixir  => 15f, // Uncommon
+                        ConsumableEnum.ManaDraught      => 15f, // Uncommon
                         ConsumableEnum.NewUnit          => 15f, // Uncommon
                         ConsumableEnum.Prestige         => 16f, // Rare
                         ConsumableEnum.RunewellNectar   => 14f, // Rare
@@ -259,6 +275,14 @@ namespace TJ
         {
             return ConsumableCost(_consumableRarity) / 2;
         }
+        // Fills the {0} in ManaDraughtDesc from the constant, so a tuning change never needs a re-translation.
+        // Static because the Collection panel and reward tooltips read the key with no ConsumableManager.
+        public static string FormatDescription(ConsumableEnum _consumableEnum, string _localizedDescription)
+        {
+            if (_consumableEnum == ConsumableEnum.ManaDraught)
+                return string.Format(_localizedDescription, TabletopTavernConstants.SPELL_MANA_POOL_DRAUGHT);
+            return _localizedDescription;
+        }
         public static bool ConsumableRequiresTarget(ConsumableEnum _consumableEnum)
         {
             return _consumableEnum switch
@@ -274,6 +298,7 @@ namespace TJ
                 ConsumableEnum.FateshineElixir => false,
                 ConsumableEnum.RunewellNectar => false,
                 ConsumableEnum.LambSauce => false,
+                ConsumableEnum.ManaDraught => false,
                 _ => false,
             };
         }

@@ -215,7 +215,7 @@ namespace TJ
             int healthRecovery = (int)(squad.SquadMaxHealth * TabletopTavernConstants.RESERVES_HEAL_AMOUNT);
             if(CampaignManager.HasInstance) healthRecovery *= CampaignManager.Instance.CampaignSaveManager.ReservesHealMultiplier;
             if(CampaignManager.HasInstance && CampaignManager.Instance.GearManager.CheckForGear(GearID.ChugJug)) healthRecovery*=2;
-            return healthRecovery;
+            return (int)CampaignSaveManager.ApplyHealingBonus(healthRecovery);
         }
         public override void SelectSquadButtonClicked()
         {

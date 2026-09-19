@@ -30,7 +30,7 @@ namespace TJ
             GearIDs = filtered.ToArray();
         }
 
-        [MenuItem("TJ/Player Save Data Editor")]
+        [MenuItem("Tabletop Tavern/Player Save Data Editor")]
         static void Open() => GetWindow<PlayerSaveDataEditor>("Player Save Data");
 
         void OnEnable() => Load();

@@ -54,13 +54,11 @@ namespace TJ.Event
         Quaternion originalRotation;
         float originalFOV;
         Vector3 _cameraBaseLocalPosition;
-        bool _isOpen;
 
         [Header("Startlit Guidance")]
         [SerializeField] private GameObject startLitGuidance;
         [SerializeField] private TMP_Text startLitGuidanceOutcomeText, starlitGuidanceCostText;
         [SerializeField] private MemoriTooltipTrigger startLitGuidanceTooltip;
-        bool startLitGuidanceActive = false;
         Button startlitGuidanceButton;
 
         [Header("Claimed by Destiny")]
@@ -142,7 +140,6 @@ namespace TJ.Event
             menuCameraRotator.enabled = true;
             menuCameraRotator.transform.rotation = Quaternion.identity;
             _cameraBaseLocalPosition = eventCamera.transform.localPosition;
-            _isOpen = true;
             physicsDie.gameObject.SetActive(true);
             diceRollAnimator.gameObject.SetActive(false);
             physicsDie.PreSpinDie();
@@ -166,7 +163,6 @@ namespace TJ.Event
                     starlitGuidanceCostText.color = (Color)ColorData.HexToRgba(ColorData.Error);
                 }
                 starlitGuidanceCostText.text += " <sprite name=GoldSprite>";
-                startLitGuidanceActive = false;
                 startLitGuidance.SetActive(true);
                 startLitGuidanceOutcomeText.text = "?";
                 startLitGuidanceTooltip.SetUpToolTip(
@@ -397,7 +393,6 @@ namespace TJ.Event
         public override async void ClosePanel()
         {
             Debug.Log("[Map] Closing EventPanel");
-            _isOpen = false;
             eventCamera.transform.localPosition = _cameraBaseLocalPosition;
             eventRewardsDisplay.CollectRemainingEventRewards();
             SceneHandler.Instance.TranstionCameras(

@@ -5,34 +5,34 @@ using Memori.Audio;
 using Unity.Mathematics;
 using Unity.Entities;
 using Shapes;
-using TJ.Shapes;
+using UnityEngine.Serialization;
 
 namespace TJ.Spells
 {
 public class ActiveSpell : MonoBehaviour
 {
-    [Header("Visual Effect")]
-    [SerializeField] private GameObject spellWarmupEffect;
-    [SerializeField] private GameObject spellVisualEffect;
-
-    [Header("Battlefield Bonus Display")]
-    [SerializeField] private Disc disc1;
-    [SerializeField] private Disc disc2;
-    [SerializeField] private ParticleSystem particleSystemTransform, particleSystem2, particleSystem3;
-    [SerializeField] private Color positiveColor, positiveInnerColor;
-    [SerializeField] private Color negativeColor, negativeInnerColor;
-    [SerializeField] private AnimationCurve radiusCurve = AnimationCurve.EaseInOut(0f, 0f, 1f, 1f);
-    [SerializeField] private AnimationCurve cleanUpRadiusCurve = AnimationCurve.EaseInOut(0f, 1f, 1f, 0f);
+    [Header("Area Display")]
+    // Everything here takes the spell's race colour, the same one its cast button and bar icon use.
+    // areaScaleRoot is scaled to SpellRadius (the dust and edge particles sit under it). areaDisc is a
+    // soft radial band whose outer edge sits on SpellRadius and whose colour ramps up over the outer
+    // bandFraction of the radius. The whole set grows in on load, pulses between flashMinScale and full
+    // (radius, band, particle ring and alpha together) for the last flashWarningDuration seconds and
+    // shrinks out. Either may be unassigned on a prefab.
+    [SerializeField] private Transform areaScaleRoot;
+    [SerializeField] private Disc areaDisc;
+    [SerializeField, Range(0.05f, 1f)] private float bandFraction = 0.25f;
+    [SerializeField] private AnimationCurve growCurve = AnimationCurve.EaseInOut(0f, 0f, 1f, 1f);
+    [SerializeField] private AnimationCurve shrinkCurve = AnimationCurve.EaseInOut(0f, 1f, 1f, 0f);
     [SerializeField] private float radiusAnimationDuration = 0.5f;
     [SerializeField] private float flashWarningDuration = 1f;
-    [SerializeField] private float minFlashThickness = 0.01f;
-    [SerializeField] private float maxFlashThickness = 0.1f;
+    [SerializeField, FormerlySerializedAs("flashMinThicknessScale")] private float flashMinScale = 0.4f;
     [SerializeField] private float flashSpeed = 10f;
 
-    // Keyed on the prefab, not on GrantsBattlefieldBonus: Lesser Mending shares the AOE Buff prefab
-    // with the stat auras but is a healing zone, and gating on the bonus flag left its discs at
-    // whatever radius and colour the prefab was saved with. Only the two AOE Buff prefabs have discs.
-    private bool HasBonusDiscs => disc1 != null && disc2 != null;
+    private Color areaColor;
+    // The spell's own art from SpellData.SpellVisualPrefab, spawned under this root in Load.
+    private SpellVisualAddon visualAddon;
+    private ParticleSystem[] areaParticles = System.Array.Empty<ParticleSystem>();
+    private ParticleSystem.Particle[] particleScratch;
 
     private SpellData spellData;
     private Entity targetSquadEntity = Entity.Null;
@@ -49,6 +49,13 @@ public class ActiveSpell : MonoBehaviour
     // been applied by SpellManager at placement time and only plays the visuals here.
     private SpellPlacement placement;
     private bool effectHandledByCaster;
+
+    // Snare Trap: the cast visuals wait for SnareTrapSystem to spring the trap. The entity vanishing
+    // before its armed time is up means it sprung; the spell then lingers TrapSprungLinger seconds.
+    private Entity trapEntity = Entity.Null;
+    private float trapArmedUntil;
+    private const float TrapSprungLinger = 2f;
+    private Coroutine cleanUpCoroutine;
 
     /// <summary>
     /// TargetTeam on a SpellData is authored from the caster's point of view - Enemy means "whoever
@@ -77,53 +84,99 @@ public class ActiveSpell : MonoBehaviour
         effectHandledByCaster = _effectHandledByCaster;
         transform.position = position;
 
-        if(HasBonusDiscs) SetDisplayOfBonus(spellData.SpellModifierValue, spellData.SpellRadius);
+        if (spellData.SpellVisualPrefab != null)
+        {
+            GameObject visual = Instantiate(spellData.SpellVisualPrefab, transform);
+            visual.transform.localPosition = Vector3.zero;
+            visualAddon = visual.GetComponent<SpellVisualAddon>();
+            if (visualAddon != null)
+            {
+                if (visualAddon.warmupEffect != null) visualAddon.warmupEffect.SetActive(false);
+                if (visualAddon.castEffect != null) visualAddon.castEffect.SetActive(false);
+                if (visualAddon.authoredRadius > 0f) visual.transform.localScale = Vector3.one * (spellData.SpellRadius / visualAddon.authoredRadius);
+            }
+        }
+        SetAreaDisplay(spellData.SpellRadius);
 
         StartCoroutine(WarmUpSpell());
     }
-    private void SetDisplayOfBonus(int value, float range)
+    private void SetAreaDisplay(float range)
     {
-        bool isPositive = value >= 0;
-
-        if(disc1.TryGetComponent(out ShapesBloom bloom)) bloom.Bloom(isPositive ? positiveColor : negativeColor);
-
-        disc2.ColorOuter = isPositive ? positiveInnerColor : negativeInnerColor;
-        var mainModule = particleSystemTransform.main;
-        mainModule.startColor = isPositive ? positiveColor : negativeColor;
-        var mainModule2 = particleSystem2.main;
-        mainModule2.startColor = isPositive ? positiveColor : negativeColor;
-        var mainModule3 = particleSystem3.main;
-        mainModule3.startColor = isPositive ? positiveColor : negativeColor;
-        disc1.Radius = range;
-        disc2.Radius = range;
-        particleSystemTransform.transform.localScale = new Vector3(range, range, range);
+        areaColor = ColorData.GetRaceDisplayColor(spellData.Race);
+        areaParticles = GetComponentsInChildren<ParticleSystem>(true);
+        if (visualAddon != null && visualAddon.keepOwnColors)
+            areaParticles = Array.FindAll(areaParticles, p => !p.transform.IsChildOf(visualAddon.transform));
+        if (areaDisc != null)
+        {
+            areaDisc.Type = DiscType.Ring;
+            areaDisc.ColorInner = new Color(areaColor.r, areaColor.g, areaColor.b, 0f);
+        }
+        ApplyAreaState(range, 0f);
+        StartCoroutine(AnimateAreaSize(range, growCurve));
     }
-    private IEnumerator AnimateDiscRadius(float range, AnimationCurve curve)
+    // One t for everything so the disc edge, the band, the particle ring and the alpha always agree:
+    // disc radius and thickness, the root scale and the alpha of the disc and every particle.
+    private void ApplyAreaState(float range, float t)
+    {
+        float alpha = Mathf.Clamp01(t);
+        if (areaDisc != null)
+        {
+            float thickness = range * bandFraction * t;
+            areaDisc.Thickness = thickness;
+            areaDisc.Radius = range * t - thickness * 0.5f;
+            areaDisc.ColorOuter = new Color(areaColor.r, areaColor.g, areaColor.b, alpha);
+        }
+        if (areaScaleRoot != null)
+        {
+            float scale = range * t;
+            areaScaleRoot.localScale = new Vector3(scale, scale, scale);
+        }
+        SetParticleAlpha(alpha);
+    }
+    // startColor only reaches particles emitted from now on, so the live ones are rewritten too.
+    private void SetParticleAlpha(float alpha)
+    {
+        Color color = new Color(areaColor.r, areaColor.g, areaColor.b, alpha);
+        foreach (ParticleSystem particleSystem in areaParticles)
+        {
+            var main = particleSystem.main;
+            main.startColor = color;
+            int count = particleSystem.particleCount;
+            if (count == 0) continue;
+            if (particleScratch == null || particleScratch.Length < count) particleScratch = new ParticleSystem.Particle[Mathf.Max(count, 256)];
+            int live = particleSystem.GetParticles(particleScratch);
+            for (int i = 0; i < live; i++) particleScratch[i].startColor = color;
+            particleSystem.SetParticles(particleScratch, live);
+        }
+    }
+    private IEnumerator AnimateAreaSize(float range, AnimationCurve curve)
     {
         float elapsed = 0f;
-        while(elapsed < radiusAnimationDuration)
+        while (elapsed < radiusAnimationDuration)
         {
             elapsed += Time.deltaTime;
-            float t = Mathf.Clamp01(elapsed / radiusAnimationDuration);
-            float radius = curve.Evaluate(t) * range;
-            disc1.Radius = radius;
-            disc2.Radius = radius;
-            particleSystemTransform.transform.localScale = new Vector3(radius, radius, radius);
+            ApplyAreaState(range, curve.Evaluate(Mathf.Clamp01(elapsed / radiusAnimationDuration)));
             yield return null;
         }
-        float finalRadius = curve.Evaluate(1f) * range;
-        disc1.Radius = finalRadius;
-        disc2.Radius = finalRadius;
-        particleSystemTransform.transform.localScale = new Vector3(finalRadius, finalRadius, finalRadius);
+        ApplyAreaState(range, curve.Evaluate(1f));
     }
-    private IEnumerator FlashDiscThickness()
+    // Pulses from full size down and back, starting at 1 so the first frame is continuous with the
+    // steady state, and once releaseFlash is set ends on the next full-size pass so the shrink that
+    // follows starts from 1 as well.
+    private bool releaseFlash;
+    private IEnumerator FlashArea(float range)
     {
         float elapsed = 0f;
-        while(true)
+        while (true)
         {
             elapsed += Time.deltaTime;
-            float t = Mathf.PingPong(elapsed * flashSpeed, 1f);
-            disc1.Thickness = Mathf.Lerp(minFlashThickness, maxFlashThickness, t);
+            float phase = 1f - Mathf.PingPong(elapsed * flashSpeed, 1f);
+            if (releaseFlash && phase > 0.98f)
+            {
+                ApplyAreaState(range, 1f);
+                yield break;
+            }
+            ApplyAreaState(range, Mathf.Lerp(flashMinScale, 1f, phase));
             yield return null;
         }
     }
@@ -137,13 +190,23 @@ public class ActiveSpell : MonoBehaviour
                 transform.position = entityManager.GetComponentData<SquadMovementComponent>(targetSquadEntity).SquadCenter;
             }
         }
+        if (trapEntity != Entity.Null && !World.DefaultGameObjectInjectionWorld.EntityManager.Exists(trapEntity))
+        {
+            bool sprung = Time.time < trapArmedUntil - 0.5f;
+            trapEntity = Entity.Null;
+            if (sprung)
+            {
+                ShowCastVisuals();
+                if (cleanUpCoroutine != null) StopCoroutine(cleanUpCoroutine);
+                cleanUpCoroutine = StartCoroutine(CleanUpSpell(TrapSprungLinger));
+            }
+        }
     }
     private IEnumerator WarmUpSpell()
     {
-        if (spellData.warmupSound) IAudioRequester.Instance.PlaySFX(spellData.warmupSound.sfxKey);
-        if (spellWarmupEffect != null) spellWarmupEffect.SetActive(true);
+        IAudioRequester.Instance.Play(spellData.warmupSound, transform.position, ignoreDucking: true);
+        if (visualAddon != null && visualAddon.warmupEffect != null) visualAddon.warmupEffect.SetActive(true);
         yield return new WaitForSeconds(spellData.SpellWarmUpDuration);
-        // if (spellWarmupEffect != null) spellWarmupEffect.SetActive(false);
 
         CastSpell();
     }
@@ -151,11 +214,14 @@ public class ActiveSpell : MonoBehaviour
     {
         // Debug.Log($"ActiveSpell: {spellData.name} applying effect at {transform.position} (radius={spellData.SpellRadius}, force={spellData.SpellForce}, oneOff={spellData.IsOneOff})");
 
-        if (spellVisualEffect != null) spellVisualEffect.SetActive(true);
-        if (spellData.hitSound) IAudioRequester.Instance.PlaySFX(spellData.hitSound.sfxKey);
+        if (!spellData.PlacesTrap) ShowCastVisuals();
 
         EntityManager entityManager = World.DefaultGameObjectInjectionWorld.EntityManager;
         var ecb = World.DefaultGameObjectInjectionWorld.GetOrCreateSystemManaged<EndSimulationEntityCommandBufferSystem>().CreateCommandBuffer();
+
+        // 0 = no icon. Registered here so unit-cast spells outside SpellRegistry still resolve a sprite.
+        int statusSpellId = spellData.ShowsStatusIcon ? (int)spellData.Spell : 0;
+        if (statusSpellId > 0) SpellStatusIcons.Register(spellData);
 
         if (effectHandledByCaster)
         {
@@ -196,6 +262,7 @@ public class ActiveSpell : MonoBehaviour
                     ecb.SetComponent(targetSquadEntity, mark);
                 else
                     ecb.AddComponent(targetSquadEntity, mark);
+                WriteSquadStatus(entityManager, targetSquadEntity, statusSpellId);
             }
         }
         else if (spellData.BracesTarget)
@@ -211,13 +278,15 @@ public class ActiveSpell : MonoBehaviour
                     RemainingDuration = spellData.SpellDuration,
                     Applied = false
                 });
+                WriteSquadStatus(entityManager, targetSquadEntity, statusSpellId);
             }
         }
         else if (spellData.PlacesTrap)
         {
             // Snare Trap - drop a hidden armed trap at the cast point; SnareTrapSystem springs it into a
             // burst + knockback when an enemy wanders into range, or lets it expire after SpellDuration.
-            Entity trapEntity = entityManager.CreateEntity();
+            trapEntity = entityManager.CreateEntity();
+            trapArmedUntil = Time.time + spellData.SpellDuration;
             ecb.AddComponent(trapEntity, new SnareTrapEntity
             {
                 Position = transform.position,
@@ -239,7 +308,7 @@ public class ActiveSpell : MonoBehaviour
             if (sourceTeam == Team.Enemy)
             {
                 Debug.LogError($"ActiveSpell: '{spellData.name}' teleports the selected squad, which is player-only - enemy cast ignored.", spellData);
-                StartCoroutine(CleanUpSpell());
+                cleanUpCoroutine = StartCoroutine(CleanUpSpell(spellData.SpellDuration));
                 return;
             }
             UnitSelectionManager selection = BattleManager.Instance.UnitSelectionManager;
@@ -272,7 +341,8 @@ public class ActiveSpell : MonoBehaviour
                         OriginationPoint = transform.position,
                         Range = spellData.SpellRadius,
                         Applied = false,
-                        TargetedUnit = 0
+                        TargetedUnit = 0,
+                        StatusSpellId = statusSpellId
                     },
                     TimerMax = 0.5f,
                     Lifetime = spellData.SpellDuration
@@ -327,25 +397,44 @@ public class ActiveSpell : MonoBehaviour
                 TargetSquadEntity = targetSquadEntity, // Entity.Null unless this is a Squad-targeted cast
                 TickInterval = spellData.TickInterval,
                 TickTimer = 0f, // first tick fires immediately, then every TickInterval seconds
-                HitsSingleUnit = spellData.HitsSingleUnit
+                HitsSingleUnit = spellData.HitsSingleUnit,
+                StatusSpellId = statusSpellId
             });
         }
 
-        StartCoroutine(CleanUpSpell());
+        cleanUpCoroutine = StartCoroutine(CleanUpSpell(spellData.SpellDuration));
     }
-    private IEnumerator CleanUpSpell()
+    // The addon's cast art and the hit sound; every spell but the trap plays them the moment it lands.
+    private void ShowCastVisuals()
     {
-        float leadTime = Mathf.Max(0f, spellData.SpellDuration - flashWarningDuration);
+        if (visualAddon != null && visualAddon.castEffect != null) visualAddon.castEffect.SetActive(true);
+        if (visualAddon != null && visualAddon.hideWarmupOnCast && visualAddon.warmupEffect != null) visualAddon.warmupEffect.SetActive(false);
+        IAudioRequester.Instance.Play(spellData.hitSound, transform.position, ignoreDucking: true);
+    }
+    // Tag spells (Mark, Shieldwall) expire on their own tag timer; the status entry mirrors that length.
+    private void WriteSquadStatus(EntityManager entityManager, Entity squadEntity, int statusSpellId)
+    {
+        if (statusSpellId <= 0 || !entityManager.HasBuffer<SpellStatusBufferElement>(squadEntity)) return;
+        double now = World.DefaultGameObjectInjectionWorld.Time.ElapsedTime;
+        SpellStatus.Set(entityManager.GetBuffer<SpellStatusBufferElement>(squadEntity), statusSpellId, now + spellData.SpellDuration, now);
+    }
+
+    private IEnumerator CleanUpSpell(float duration)
+    {
+        float leadTime = Mathf.Max(0f, duration - flashWarningDuration);
         yield return new WaitForSeconds(leadTime);
 
-        Coroutine flashCoroutine = null;
-        if(HasBonusDiscs) flashCoroutine = StartCoroutine(FlashDiscThickness());
+        Coroutine flashCoroutine = StartCoroutine(FlashArea(spellData.SpellRadius));
+        // Looping addon art drains over the warning second instead of cutting at Destroy; one-shots run out on their own.
+        if (visualAddon != null)
+            foreach (ParticleSystem addonSystem in visualAddon.GetComponentsInChildren<ParticleSystem>())
+                if (addonSystem.main.loop) addonSystem.Stop(false, ParticleSystemStopBehavior.StopEmitting);
 
-        yield return new WaitForSeconds(spellData.SpellDuration - leadTime);
+        yield return new WaitForSeconds(duration - leadTime);
 
-        if(flashCoroutine != null) StopCoroutine(flashCoroutine);
-
-        if(HasBonusDiscs) yield return AnimateDiscRadius(spellData.SpellRadius, cleanUpRadiusCurve);
+        releaseFlash = true;
+        yield return flashCoroutine;
+        yield return AnimateAreaSize(spellData.SpellRadius, shrinkCurve);
 
         Destroy(gameObject);
     }

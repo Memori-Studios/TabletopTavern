@@ -100,6 +100,7 @@ public partial class ProcessUnitDeathSystem : SystemBase
                         };
 
                         ecbDelete.SetComponent(childEntity, controlComp);
+                        ecbDelete.AddComponent<UnitOutlineClearTag>(childEntity);
 
                         ecbDelete.AddComponent<KillUnitTag>(removedUnit.Entity);
                         ecbDelete.AddComponent<KillUnitTag>(debugEntity);

@@ -72,8 +72,8 @@ namespace TJ
         }
         public void LoadBattleConditions()
         {
-            IAudioRequester.Instance.ambienceVolume.OnValueChanged += RainSoundLevelChange;
-            rainAudioSource.volume = IAudioRequester.Instance.ambienceVolume.GetValue();
+            IAudioRequester.Instance.effectsVolume.OnValueChanged += RainSoundLevelChange;
+            rainAudioSource.volume = IAudioRequester.Instance.effectsVolume.GetValue();
 
             PlayerSaveData playerSaveData = SaveDataHandler.LoadPlayerSaveData();
             battleFieldPreset = SaveDataHandler.Load().battleFieldPreset;
@@ -279,7 +279,7 @@ namespace TJ
         {
             if(IAudioRequester.HasInstance)
             {
-                IAudioRequester.Instance.ambienceVolume.OnValueChanged -= RainSoundLevelChange;
+                IAudioRequester.Instance.effectsVolume.OnValueChanged -= RainSoundLevelChange;
             }
         }
     }

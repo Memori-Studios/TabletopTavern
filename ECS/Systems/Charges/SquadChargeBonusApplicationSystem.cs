@@ -60,9 +60,11 @@ partial struct SquadChargeBonusApplicationSystem : ISystem
             if (squad.Team == Team.Player && campaignSaveDataHolder.ActiveHeroID != -1)
             {
                 // Rule data lives in HeroBonusRuleData (Components assembly) - HeroBonusManager
-                // itself (main assembly) isn't visible from here. No FactionBonusRule targets
-                // ChargeBonus today, so unlike UnitSetUpSystem this doesn't need the Sakura check.
-                bonus += (int)HeroBonusRuleEvaluator.SumHeroStatBonus(UnitStat.ChargeBonus, squad.UnitName, campaignSaveDataHolder.ActiveHeroID, squadStats, campaignSaveDataHolder.EnemyRace, bonus);
+                // itself (main assembly) isn't visible from here.
+                float heroBonus = HeroBonusRuleEvaluator.SumHeroStatBonus(UnitStat.ChargeBonus, squad.UnitName, campaignSaveDataHolder.ActiveHeroID, squadStats, campaignSaveDataHolder.EnemyRace, bonus);
+                if (campaignSaveDataHolder.OnlySakuraUnits)
+                    heroBonus += HeroBonusRuleEvaluator.SumFactionStatBonus(UnitStat.ChargeBonus, campaignSaveDataHolder.PlayerHeroRace, bonus);
+                bonus += (int)heroBonus;
             }
 
             if (empowered)

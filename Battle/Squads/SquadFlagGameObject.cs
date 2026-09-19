@@ -27,6 +27,8 @@ namespace TJ
         [SerializeField] private SquadSFXManager squadSFXManager;
         [SerializeField] private Image minimapImage;
         [SerializeField] private ParticleSystem weaponStrengthEffect;
+        // Loops in the newest spell's race colour while any lasting spell is on this squad (see HandleSpellStatus).
+        [SerializeField] private ParticleSystem spellBuffEffect;
         public int SquadId => squadId;
         public bool IsInCombat { get; private set; }
         public SquadSFXManager SFXManager => squadSFXManager;
@@ -51,6 +53,11 @@ namespace TJ
         float updateTimer = 0f;
         int slowUpdateTick = 0;
         bool isBelowMoraleThreshold = false;
+
+        // Last spell ids pushed to the health bar, so a bar tick that changes nothing touches no GameObject.
+        private int[] _shownSpellIds = new int[0];
+        private int _shownSpellCount = 0;
+        private readonly int[] _spellIdScratch = new int[8];
 
         private MaterialPropertyBlock _block;
         bool isRanged, isArtillery, isGate;
@@ -139,8 +146,8 @@ namespace TJ
 
             GetComponent<BattlefieldBiomeDetector>().SetSquadEntityId(squadId, squadEntity);
             minimapImage.color = ColorData.GetTeamMinimapColor(team == Team.Player);
-            squadSFXManager.SetBaseVolume(IAudioRequester.Instance.sFXVolume.GetValue());
-            IAudioRequester.Instance.sFXVolume.OnValueChanged += squadSFXManager.SetBaseVolume;
+            squadSFXManager.SetBaseVolume(IAudioRequester.Instance.effectsVolume.GetValue());
+            IAudioRequester.Instance.effectsVolume.OnValueChanged += squadSFXManager.SetBaseVolume;
 
             //if ranged
             if (ammunition>0)
@@ -325,12 +332,54 @@ namespace TJ
                     }
                 }
             }
-            void HandleHuntersMark()
+            void HandleSpellStatus()
             {
-                // Same polling shape as HandleArmorSundered: HuntersMarkSystem removes the tag on expiry,
-                // and the tag is the only durable answer to is this squad marked right now.
-                bool marked = EntityManager.HasComponent<HuntersMarkTag>(squadEntity);
-                if (marked != healthBarGO.HuntersMarkActive) healthBarGO.SetHuntersMarkActive(marked);
+                // One buffer read per bar tick. Expired entries stay in the buffer until a writer prunes
+                // them, so they are skipped here rather than removed.
+                int slotCount = healthBarGO.SpellStatusSlotCount;
+                if (slotCount == 0 || !EntityManager.HasBuffer<SpellStatusBufferElement>(squadEntity)) return;
+                DynamicBuffer<SpellStatusBufferElement> buffer = EntityManager.GetBuffer<SpellStatusBufferElement>(squadEntity, true);
+                double now = World.DefaultGameObjectInjectionWorld.Time.ElapsedTime;
+                int count = 0;
+                for (int i = 0; i < buffer.Length && count < slotCount && count < _spellIdScratch.Length; i++)
+                {
+                    if (buffer[i].ExpiresAtTime <= now) continue;
+                    _spellIdScratch[count++] = buffer[i].SpellId;
+                }
+
+                bool changed = count != _shownSpellCount;
+                for (int i = 0; !changed && i < count; i++) changed = _spellIdScratch[i] != _shownSpellIds[i];
+                if (!changed) return;
+
+                if (_shownSpellIds.Length < count) _shownSpellIds = new int[_spellIdScratch.Length];
+                System.Array.Copy(_spellIdScratch, _shownSpellIds, count);
+                _shownSpellCount = count;
+                healthBarGO.SetSpellStatus(_shownSpellIds, count);
+                UpdateSpellBuffEffect(count > 0 ? _shownSpellIds[count - 1] : 0);
+            }
+            void UpdateSpellBuffEffect(int newestSpellId)
+            {
+                if (spellBuffEffect == null) return;
+                if (newestSpellId == 0)
+                {
+                    spellBuffEffect.Stop();
+                    return;
+                }
+                if (TJ.Spells.SpellStatusIcons.TryGet(newestSpellId, out _, out Color color))
+                {
+                    // Keep every authored alpha and key time; only the hue comes from the spell.
+                    foreach (ParticleSystem particleSystem in spellBuffEffect.GetComponentsInChildren<ParticleSystem>(true))
+                    {
+                        var main = particleSystem.main;
+                        main.startColor = WithSpellHue(main.startColor, color);
+                        var colorOverLifetime = particleSystem.colorOverLifetime;
+                        colorOverLifetime.color = WithSpellHue(colorOverLifetime.color, color);
+                        var trails = particleSystem.trails;
+                        trails.colorOverLifetime = WithSpellHue(trails.colorOverLifetime, color);
+                        trails.colorOverTrail = WithSpellHue(trails.colorOverTrail, color);
+                    }
+                }
+                if (!spellBuffEffect.isPlaying) spellBuffEffect.Play();
             }
             void HandleIsBeingFlanked()
             {
@@ -471,7 +520,7 @@ namespace TJ
             HandleExhausted();
             HandleWeaponStrengthBonuses();
             HandleArmorSundered();
-            HandleHuntersMark();
+            HandleSpellStatus();
             HandleIsBeingFlanked();
             HandleFlanking();
             HandleFireDamageTaking();
@@ -506,6 +555,39 @@ namespace TJ
                 else squadSFXManager.StopCombatSound();
             }
         }
+
+        #region Spell Buff Tint
+        private static ParticleSystem.MinMaxGradient WithSpellHue(ParticleSystem.MinMaxGradient source, Color hue)
+        {
+            switch (source.mode)
+            {
+                case ParticleSystemGradientMode.Color:
+                    return new ParticleSystem.MinMaxGradient(WithSpellHue(source.color, hue));
+                case ParticleSystemGradientMode.TwoColors:
+                    return new ParticleSystem.MinMaxGradient(WithSpellHue(source.colorMin, hue), WithSpellHue(source.colorMax, hue));
+                case ParticleSystemGradientMode.Gradient:
+                    return new ParticleSystem.MinMaxGradient(WithSpellHue(source.gradient, hue));
+                case ParticleSystemGradientMode.TwoGradients:
+                    return new ParticleSystem.MinMaxGradient(WithSpellHue(source.gradientMin, hue), WithSpellHue(source.gradientMax, hue));
+                default:
+                    return source;
+            }
+        }
+
+        private static Color WithSpellHue(Color source, Color hue)
+        {
+            return new Color(hue.r, hue.g, hue.b, source.a);
+        }
+
+        private static Gradient WithSpellHue(Gradient source, Color hue)
+        {
+            GradientColorKey[] colorKeys = source.colorKeys;
+            for (int i = 0; i < colorKeys.Length; i++) colorKeys[i].color = hue;
+            Gradient tinted = new Gradient { mode = source.mode };
+            tinted.SetKeys(colorKeys, source.alphaKeys);
+            return tinted;
+        }
+        #endregion
 
         #region Event Handlers
         private void OnSelectedSquadsChanged(List<int> selectedSquadIds)
@@ -594,7 +676,23 @@ namespace TJ
         private void OnBattlefieldBonusApplied(int _squadId, BattlefieldBonusEnum _bonus, UnitStat _stat, float _value)
         {
             if (_squadId != squadId) return;
+            // Spell bonuses get the looping spellBuffEffect from HandleSpellStatus instead of this one-shot.
+            if (IsSpellBonus(_bonus)) return;
             weaponStrengthEffect.Play();
+        }
+        private static bool IsSpellBonus(BattlefieldBonusEnum bonus)
+        {
+            switch (bonus)
+            {
+                case BattlefieldBonusEnum.LesserWeaponStrengthSpell:
+                case BattlefieldBonusEnum.LesserWindSpell:
+                case BattlefieldBonusEnum.LesserMoraleSpell:
+                case BattlefieldBonusEnum.SpellStatBonus:
+                case BattlefieldBonusEnum.RallyTheBanners:
+                    return true;
+                default:
+                    return false;
+            }
         }
         #endregion
 
@@ -623,7 +721,7 @@ namespace TJ
                 unitSelectionManager.OnHoverSquadsChanged -= OnHoverSquadsChanged;
             }
             if(IAudioRequester.HasInstance)
-                IAudioRequester.Instance.sFXVolume.OnValueChanged -= squadSFXManager.SetBaseVolume;
+                IAudioRequester.Instance.effectsVolume.OnValueChanged -= squadSFXManager.SetBaseVolume;
         }
         private Coroutine _cameraHideFadeCoroutine;
         private float _currentCameraHide = 1f;

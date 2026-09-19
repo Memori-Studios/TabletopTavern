@@ -46,6 +46,12 @@ partial struct MageSquadFindTargetSystem : ISystem
             if (!squadOverrides.AutoTarget && !entityManager.Exists(squad.ValueRO.TargetSquadEntity))
                 continue;
 
+            // A manual cast owns the squad until it lands: re-targeting here would overwrite the
+            // approach order the player just issued.
+            if (entityManager.HasComponent<MageManualCastOrder>(squad.ValueRO.SelfEntity)
+                && entityManager.IsComponentEnabled<MageManualCastOrder>(squad.ValueRO.SelfEntity))
+                continue;
+
             // An existing target is kept until it dies, breaks, or walks out of casting range. Unlike
             // archers there is nothing to re-acquire per shot - the cast system reads
             // TargetSquadEntity when its timer fires.

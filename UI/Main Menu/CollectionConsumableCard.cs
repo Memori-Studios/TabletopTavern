@@ -40,7 +40,7 @@ public class CollectionConsumableCard : MonoBehaviour, IPointerEnterHandler, IPo
 
         gearName.text = isCollected ? LocalizationManager.Instance.GetText(consumable.ConsumableEnum.ToString()+"Name") : "Not Discoverd";
 
-        gearDescriptionText.text = isCollected ? LocalizationManager.Instance.GetText(consumable.ConsumableEnum.ToString()+"Desc") : "Obtain in Campaign";
+        gearDescriptionText.text = isCollected ? ConsumableData.FormatDescription(consumable.ConsumableEnum, LocalizationManager.Instance.GetText(consumable.ConsumableEnum.ToString()+"Desc")) : "Obtain in Campaign";
         gearImage.color = isCollected ? Color.white : new Color(0.1f, 0.1f, 0.1f, 1f);
         gearFlavorText.text = "";
         

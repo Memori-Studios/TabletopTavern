@@ -14,7 +14,7 @@ public class HeroCompletionEditor : EditorWindow
 
     static readonly TT_Difficulty[] Difficulties = (TT_Difficulty[])System.Enum.GetValues(typeof(TT_Difficulty));
 
-    [MenuItem("TJ/Hero Completion Editor")]
+    [MenuItem("Tabletop Tavern/Hero Completion Editor")]
     static void Open() => GetWindow<HeroCompletionEditor>("Hero Completions");
 
     void OnEnable() => Load();

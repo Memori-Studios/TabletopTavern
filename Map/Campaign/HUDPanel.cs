@@ -233,6 +233,12 @@ namespace TJ.Map
             ColorData.XMLTagColorApplicator(ref heroBonusText2string);
             ColorData.XMLTagColorApplicator(ref raceBonusTextstring);
             heroBonusText1string += "\n" + heroBonusText2string;
+            if (campaignSaveManager.SaveData.heroID == CampaignSaveManager.SKRIX_HERO_ID)
+            {
+                string koboldProgress = string.Format(LocalizationManager.Instance.GetText("KoboldBonusProgress"),
+                    campaignSaveManager.CountKoboldUnits(), CampaignSaveManager.SKRIX_KOBOLD_THRESHOLD);
+                heroBonusText1string += "\n" + koboldProgress;
+            }
             heroNameTooltipTrigger.SetUpToolTip(_title: heroNameLocalized, _description: heroBonusText1string);
             heroRaceTooltipTrigger.SetUpToolTip(_title: heroRaceLocalized, _description: raceBonusTextstring);
         }
@@ -240,6 +246,7 @@ namespace TJ.Map
         {
             // Debug.Log($"Army structure changed");
             RefreshTroopsPanel();
+            UpdateHeroNameAndRace(); // Kobold count in the hero tooltip
             CloseAllPopUps();
             squadBattleInfo.InvalidateSnapshotCache();
             squadBattleInfo.Unhover();
@@ -275,6 +282,9 @@ namespace TJ.Map
             SquadToLoad[] playerSquads = campaignSaveManager.SaveData?.playerArmy;
             if (playerSquads == null) return;
 
+            // A rejected drop rebuilds without going through ArmyStructureChanged; a selected card left in
+            // selectedCards past its Destroy wedges every later DeselectAllCards.
+            DeselectAllCards();
             playerSquadsCards = new List<SquadDisplayCardMenu>();
             foreach (Transform child in deployedUnitsParent) Destroy(child.gameObject);
             foreach (Transform child in reserveUnitsParent) Destroy(child.gameObject);
@@ -381,6 +391,8 @@ namespace TJ.Map
         public void DeselectAllCards()
         {
             if (playerSquadsCards == null) return;
+            // A destroyed card throws on SelectSquad before Clear() runs, so it would stay selected forever.
+            selectedCards.RemoveAll(c => c == null);
             foreach (SquadDisplayCardMenu c in selectedCards)
                 c.SelectSquad(false);
             foreach (SquadDisplayCardMenu c in playerSquadsCards)

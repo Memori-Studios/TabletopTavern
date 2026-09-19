@@ -32,7 +32,8 @@ namespace TJ
         GoldInterest,
         EventExplanation,
         ConsumableUsage,
-        Mage
+        Mage,
+        EnemyArtillery
     }
     public static class TutorialData
     {
@@ -157,6 +158,12 @@ namespace TJ
         {
             tutorialStepEnum = TutorialStepEnum.Mage,
             stepID = 29,
+        };
+        // Engagement panel, first time the enemy roster contains artillery.
+        public static TutorialStep EnemyArtillery = new()
+        {
+            tutorialStepEnum = TutorialStepEnum.EnemyArtillery,
+            stepID = 30,
         };
     }
 }

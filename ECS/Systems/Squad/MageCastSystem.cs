@@ -13,6 +13,7 @@ partial struct MageCastSystem : ISystem
 {
     private ComponentLookup<MageCast> _mageCastLookup;
     private ComponentLookup<SquadMovementComponent> _squadMovementLookup;
+    private ComponentLookup<MageManualCastOrder> _manualCastLookup;
 
     [BurstCompile]
     public void OnCreate(ref SystemState state)
@@ -20,6 +21,7 @@ partial struct MageCastSystem : ISystem
         state.RequireForUpdate<BattlePhase>();
         _mageCastLookup = state.GetComponentLookup<MageCast>(false);
         _squadMovementLookup = state.GetComponentLookup<SquadMovementComponent>(true);
+        _manualCastLookup = state.GetComponentLookup<MageManualCastOrder>(false);
     }
 
     [BurstCompile]
@@ -30,6 +32,7 @@ partial struct MageCastSystem : ISystem
 
         _mageCastLookup.Update(ref state);
         _squadMovementLookup.Update(ref state);
+        _manualCastLookup.Update(ref state);
 
         EntityManager entityManager = state.EntityManager;
         EntityCommandBuffer entityCommandBuffer = SystemAPI.GetSingleton<EndSimulationEntityCommandBufferSystem.Singleton>().CreateCommandBuffer(state.WorldUnmanaged);
@@ -52,11 +55,61 @@ partial struct MageCastSystem : ISystem
             // mid-cycle - the same correction RangedUnitAttackSystem needed for archers, where a
             // resetting idle timer meant waiting out half a reload after acquiring a target.
             mageCast.ValueRW.Timer -= deltaTime;
+
+            Entity self = squad.ValueRO.SelfEntity;
+            bool manualCastPending = _manualCastLookup.HasComponent(self) && _manualCastLookup.IsComponentEnabled(self);
+            if (manualCastPending)
+            {
+                // A manual target that died or broke voids the order whatever the timer says, so the
+                // auto loop is not held off for a whole cooldown by a dead order. The charge is kept.
+                Entity manualTarget = _manualCastLookup[self].TargetSquadEntity;
+                if (manualTarget != Entity.Null
+                    && (!entityManager.Exists(manualTarget)
+                        || entityManager.HasComponent<BrokenSquadTag>(manualTarget)
+                        || !_squadMovementLookup.HasComponent(manualTarget)))
+                {
+                    _manualCastLookup.SetComponentEnabled(self, false);
+                    manualCastPending = false;
+                }
+            }
+
             if (mageCast.ValueRO.Timer > 0f) continue;
 
             // Casting stops in melee. A mage that is engaged swings its staff instead - MeleeAttack
             // is on the entity like every other unit, so that needs nothing from this system.
-            if (entityManager.HasComponent<InCombat>(squad.ValueRO.SelfEntity)) continue;
+            if (entityManager.HasComponent<InCombat>(self)) continue;
+
+            if (!_squadMovementLookup.HasComponent(self)) continue;
+            float3 selfCenter = _squadMovementLookup[self].SquadCenter;
+
+            #region Manual cast
+            // A player-directed cast takes precedence over the auto loop and ignores Cease Fire:
+            // holding spells is exactly the state a player casts out of by hand.
+            if (manualCastPending)
+            {
+                MageManualCastOrder manual = _manualCastLookup[self];
+                Entity manualTarget = manual.TargetSquadEntity;
+                float3 castPoint = manualTarget != Entity.Null
+                    ? _squadMovementLookup[manualTarget].SquadCenter
+                    : manual.Position;
+
+                // Out of range: the approach order issued with this cast is still walking the squad in.
+                if (math.distance(selfCenter, castPoint) > mageSquad.ValueRO.AttackRange) continue;
+
+                requests.Add(new MageCastRequestBufferElement
+                {
+                    SquadId = squad.ValueRO.SquadId,
+                    UnitName = squad.ValueRO.UnitName,
+                    TeamOfSource = squad.ValueRO.SquadId > 0 ? Team.Player : Team.Enemy,
+                    Position = castPoint,
+                    TargetSquadEntity = manualTarget,
+                });
+                mageCast.ValueRW.Timer = mageCast.ValueRO.Cooldown;
+                entityCommandBuffer.AddComponent<AmmuntionSpent>(unitEntity);
+                _manualCastLookup.SetComponentEnabled(self, false);
+                continue;
+            }
+            #endregion
 
             // Hold Spells. Reuses the existing Cease Fire stance rather than a mage-specific toggle.
             if (entityManager.HasComponent<CeaseFireTag>(squad.ValueRO.SelfEntity)
@@ -66,10 +119,9 @@ partial struct MageCastSystem : ISystem
             if (!entityManager.Exists(targetSquad)) continue;
             if (entityManager.HasComponent<BrokenSquadTag>(targetSquad)) continue;
             if (!_squadMovementLookup.HasComponent(targetSquad)) continue;
-            if (!_squadMovementLookup.HasComponent(squad.ValueRO.SelfEntity)) continue;
 
             float3 targetCenter = _squadMovementLookup[targetSquad].SquadCenter;
-            float distance = math.distance(_squadMovementLookup[squad.ValueRO.SelfEntity].SquadCenter, targetCenter);
+            float distance = math.distance(selfCenter, targetCenter);
             if (distance > mageSquad.ValueRO.AttackRange) continue;
 
             requests.Add(new MageCastRequestBufferElement

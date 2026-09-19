@@ -140,11 +140,9 @@ partial struct MeleeUnitAttackSystem : ISystem
             
             int meleeAttackValue = meleeAttack.ValueRO.MeleeAttackValue;
 
-            //The base chance to hit is 35%.
-            // For every point of Melee Attack above the defender's Melee Defense, the hit chance increases by +2% (up to a maximum of 90%).
-            // For every point below, the hit chance decreases by -2% (to a minimum of 10%).
-            int hitChance = 35 + (meleeAttackValue - meleeDefense) * 2;
-            hitChance = math.clamp(hitChance, 10, 90);
+            int hitChance = TabletopTavernConstants.MELEE_BASE_HIT_CHANCE
+                + (meleeAttackValue - meleeDefense) * TabletopTavernConstants.MELEE_HIT_CHANCE_PER_POINT;
+            hitChance = math.clamp(hitChance, TabletopTavernConstants.MELEE_HIT_CHANCE_MIN, TabletopTavernConstants.MELEE_HIT_CHANCE_MAX);
             if(_random.NextInt(0, 100) > hitChance) {
                 // Debug.Log($"MeleeUnitAttackSystem: {entity} missed the attack");
                 continue;

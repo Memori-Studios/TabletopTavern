@@ -353,7 +353,7 @@ namespace TJ.Shop
                 outlines[i].enabled = _enable;
             }
         }
-        public async void PurchasePack(CardPackData _cardPackData, int _cost)
+        public void PurchasePack(CardPackData _cardPackData, int _cost)
         {
             string localizedString = LocalizationManager.Instance.GetText("Shop");
             CampaignManager.Instance.GoldManager.ModifyGold(-_cost, localizedString);

@@ -11,10 +11,13 @@ namespace TJ
         [SerializeField] private AudioSource combatLoopingSource;     // plays only when in combat
         private const float ChargeShoutIntervalMin = 1.5f;
         private const float ChargeShoutIntervalMax = 3f;
+        // Where a charge shout's linear rolloff reaches silence.
+        private const float ChargeShoutMaxDistance = 60f;
         private const float _fadeOutDuration = 2f;
 
         private VoiceSFX _voiceSFX;
         private bool _isInfantry;
+        // Effects slider value for the looping sources. One-shots go through SFXManager, which applies its own channel.
         private float _baseVolume = 1f;
         private Coroutine _chargeShoutCoroutine;
         private Coroutine _movingFadeCoroutine;
@@ -64,22 +67,22 @@ namespace TJ
             }
         }
 
-        // Single clip — for per-unit events (melee attack, death, fire projectile, etc.)
-        public void PlaySFX(AudioClip clip, Vector3 worldPosition)
+        // Single clip for a per-unit event. Death cries are Voices; melee hits and projectile fire are Effects.
+        public void PlaySFX(AudioClip clip, Vector3 worldPosition, float maxDistance, AudioChannel channel)
         {
             if (Time.timeScale == 0) return;
-            SFXManager.Instance.Play(clip, worldPosition, _baseVolume);
+            SFXManager.Instance.Play(clip, worldPosition, maxDistance, channel);
         }
 
-        // Bark burst — accumulate N bark events from EntityWatcher, play at squad center.
-        public void PlayBarks(int count, Vector3 squadCenter)
+        // Bark burst: N bark events accumulated by EntityWatcher, played at the squad center on Voices.
+        public void PlayBarks(int count, Vector3 squadCenter, float maxDistance)
         {
             if (Time.timeScale == 0) return;
             if (_voiceSFX == null || _voiceSFX.idleSFX == null || _voiceSFX.idleSFX.Length == 0) return;
             for (int i = 0; i < count; i++)
             {
                 AudioClip clip = _voiceSFX.idleSFX[Random.Range(0, _voiceSFX.idleSFX.Length)];
-                SFXManager.Instance.Play(clip, squadCenter, _baseVolume);
+                SFXManager.Instance.Play(clip, squadCenter, maxDistance, AudioChannel.Voices);
             }
         }
 
@@ -195,7 +198,7 @@ namespace TJ
                         index = 0;
 
                     lastIndex = index;
-                    SFXManager.Instance.Play(_voiceSFX.chargeSFX[index], squadCenter, _baseVolume);
+                    SFXManager.Instance.Play(_voiceSFX.chargeSFX[index], squadCenter, ChargeShoutMaxDistance, AudioChannel.Voices);
                 }
                 yield return new WaitForSeconds(Random.Range(ChargeShoutIntervalMin, ChargeShoutIntervalMax));
             }

@@ -234,13 +234,6 @@ namespace TJ.Spells
             {
                 SpellData rowSpell = rows[i].SpellData;
 
-                // An unauthored asset has no prefab and would throw at Instantiate on first cast, so it
-                // is shown as un-takeable rather than allowed into a slot.
-                if(rowSpell.SpellPrefab == null)
-                {
-                    rows[i].SetState(SpellBrowseState.Unavailable);
-                    continue;
-                }
 
                 // Checked before Equipped, because the spell in the armed slot is equipped too and the
                 // brackets are the more useful reading of it.
@@ -407,8 +400,6 @@ namespace TJ.Spells
         /// </summary>
         private void EditorApplyPreviewState(SpellBrowseSlot row, SpellData spell, int index)
         {
-            if(spell.SpellPrefab == null) { row.SetState(SpellBrowseState.Unavailable); return; }
-
             switch(index)
             {
                 case 0:  row.SetState(SpellBrowseState.Equipped, 0);   break;

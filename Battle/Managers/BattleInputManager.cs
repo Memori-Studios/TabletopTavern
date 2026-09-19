@@ -12,7 +12,7 @@ using Unity.Mathematics;
 using Memori.Notifications;
 using Memori.Audio;
 
-public enum CursorMode {Free, MouseDown, UnitsSelected, Reposition, SpawnSquad, CastSpell, QuickCastMenu, PostGame }
+public enum CursorMode {Free, MouseDown, UnitsSelected, Reposition, SpawnSquad, CastSpell, PostGame }
 public class BattleInputManager : MonoBehaviour
 {
     public static BattleInputManager Instance { get; private set; }
@@ -476,6 +476,17 @@ public class BattleInputManager : MonoBehaviour
             upperRightCorner.x - lowerLeftCorner.x,
             upperRightCorner.y - lowerLeftCorner.y
         );
+    }
+    /// <summary>
+    /// A mouse release while the settings panel is open is never seen; drop the drag preview and selection box.
+    /// </summary>
+    public void CancelPendingMouseActions(bool unitsAreSelected)
+    {
+        selectionAreaStarted = false;
+        if (cursorMode != CursorMode.MouseDown) return;
+
+        positionDrawer.TurnOff();
+        BattleManager.Instance.SetCursorMode(unitsAreSelected ? CursorMode.UnitsSelected : CursorMode.Free);
     }
     public void SetRearrangingSquads(bool _isRearrangingSquads)
     {

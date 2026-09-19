@@ -460,9 +460,10 @@ namespace TJ
             tooltipCanvasGroup.CGEnable();
 
             //force refresh of ui
-            LayoutRebuilder.ForceRebuildLayoutImmediate(transform as RectTransform);
+            // Sections size themselves with a ContentSizeFitter, so they go first or the root reads last hover's height.
             unitAttributesUIContainer.Refresh();
             unitStatsUIContainer.Refresh();
+            LayoutRebuilder.ForceRebuildLayoutImmediate(transform as RectTransform);
 
             // Needs the bonus boxes to have been laid out, so it runs after the rebuild above.
             PositionSpellBonus();
@@ -825,24 +826,29 @@ namespace TJ
             if (bloodFrenzyAttribute.gameObject.activeSelf)
             {
                 bloodFrenzyAttribute.Load(UnitAttribute.BloodFrenzy);
+                bloodFrenzyAttribute.SetUpTooltip();
             }
             bool isRageActive = entityManager.HasComponent<RageActiveTag>(squadEntity.SelfEntity);
             bool isSlayerActive = entityManager.HasComponent<SlayerActiveTag>(squadEntity.SelfEntity);
             rageAttribute.gameObject.SetActive(isRageActive || isSlayerActive);
             if (rageAttribute.gameObject.activeSelf)
             {
-                rageAttribute.Load(UnitAttribute.Rage);
+                // Load(UnitAttribute) disables the tooltip; re-enable it, and name a Slayer proc as such.
+                rageAttribute.Load(isRageActive ? UnitAttribute.Rage : UnitAttribute.MonsterSlayer);
+                rageAttribute.SetUpTooltip();
             }
             armorSunderedAttribute.gameObject.SetActive(entityManager.HasComponent<ArmorSunderedTag>(squadEntity.SelfEntity));
             if (armorSunderedAttribute.gameObject.activeSelf)
             {
                 armorSunderedAttribute.Load(UnitAttribute.Emblazing);
+                armorSunderedAttribute.SetUpTooltip();
             }
             RefreshHuntersMark(entityManager);
             isOnFireAttribute.gameObject.SetActive(entityManager.IsComponentEnabled<TakingFireDamage>(squadEntity.SelfEntity));
             if (isOnFireAttribute.gameObject.activeSelf)
             {
                 isOnFireAttribute.Load(UnitAttribute.IsOnFire);
+                isOnFireAttribute.SetUpTooltip();
             }
             garrisonDefenderAttribute.gameObject.SetActive(entityManager.HasComponent<GarrisonDefenderComponent>(squadEntity.SelfEntity));
             if (garrisonDefenderAttribute.gameObject.activeSelf)

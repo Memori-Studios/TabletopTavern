@@ -167,9 +167,9 @@ namespace TJ.Map
 
             return;
         }
-        public async Task PruneTrees()
+        public Task PruneTrees()
         {
-            if(trees==null || trees.Count == 0) return;
+            if(trees==null || trees.Count == 0) return Task.CompletedTask;
 
             //remove all trees that are blocking paths
             for (int i = 0; i < trees.Count; i++)
@@ -188,7 +188,7 @@ namespace TJ.Map
                     }
                 }
             }
-            return;
+            return Task.CompletedTask;
         }
     }
 }

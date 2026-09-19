@@ -34,6 +34,8 @@ partial struct EnemyArmyTargetOverrideSystem : ISystem
             WithdrawSquadTag>()
         .WithNone<
             CavalryFlankingTag>()
+        // A gate cannot move, so it never retargets or charges; without this it showed "Charging".
+        .WithNone<GarrisonGateSquadTag>()
         // Mages are excluded: they have their own find-target system, exactly as artillery does,
         // and this override would undo it. It writes TargetSquadEntity directly and adds
         // StartChargeTag, so an enemy caster loses the squad MageSquadFindTargetSystem chose and
@@ -65,6 +67,14 @@ partial struct EnemyArmyTargetOverrideSystem : ISystem
 
             Entity closestEnemySquadEntity = squad.ValueRO.TargetSquadEntity;
             if(closestEnemySquadEntity == Entity.Null) continue; //if not yet targeting an enemy squad, ignore this system
+
+            // The target can die between the order and this tick; reading it then is a Burst crash in builds.
+            if (!entityManager.Exists(closestEnemySquadEntity) ||
+                !entityManager.HasComponent<SquadMovementComponent>(closestEnemySquadEntity))
+            {
+                squad.ValueRW.TargetSquadEntity = Entity.Null;
+                continue;
+            }
 
             float currentDistanceToTarget = math.distance(
                 squadMovementComponent.ValueRO.SquadCenter, 

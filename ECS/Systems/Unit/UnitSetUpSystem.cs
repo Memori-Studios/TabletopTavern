@@ -112,7 +112,8 @@ partial struct UnitSetUpSystem : ISystem
             // and the values can't drift from what the UI shows. HeroBonusManager itself can't be
             // referenced from this assembly (TabletopTavern.Core.Systems doesn't reference the
             // main TabletopTavern.Core assembly), hence the separate evaluator. This system covers
-            // exactly the stats it's responsible for: Leadership is applied in SquadManager,
+            // exactly the stats it's responsible for: Leadership, Speed and ChargeImpactDamage are
+            // applied in SquadManager.RegisterSquad (HitPoints there too, for the squad health bar),
             // ChargeBonus in SquadChargeBonusApplicationSystem, Ammunition in EntityWatcher. The
             // Sakura Dynasty mono-race army gate (OnlySakuraUnits) is unchanged - not yet
             // generalized to other races.
@@ -128,6 +129,8 @@ partial struct UnitSetUpSystem : ISystem
 
                 meleeAttack += (int)SumHeroBonus(UnitStat.MeleeAttack, meleeAttack);
                 meleeDefense += (int)SumHeroBonus(UnitStat.MeleeDefense, meleeDefense);
+                if (squadStats.unitType != UnitType.Structure)
+                    maxHitPoints += (int)SumHeroBonus(UnitStat.HitPoints, maxHitPoints);
                 accuracy += SumHeroBonus(UnitStat.Accuracy, accuracy);
                 weaponStrength += (int)SumHeroBonus(UnitStat.WeaponStrength, weaponStrength);
                 armor += SumHeroBonus(UnitStat.Armor, armor);
@@ -257,6 +260,9 @@ partial struct UnitSetUpSystem : ISystem
             });
             if(entityManager.HasComponent<ModifyHealthOnSpawn>(entity)) {
                 int healthValue = entityManager.GetComponentData<ModifyHealthOnSpawn>(entity).Value;
+                // The save stores health in base HP; a HitPoints bonus raises the max, so scale to match.
+                if (squadStats.unitType != UnitType.Structure && maxHitPoints != squadStats.HitPointsPerUnit && squadStats.HitPointsPerUnit > 0)
+                    healthValue = (int)((long)healthValue * maxHitPoints / squadStats.HitPointsPerUnit);
                 entityCommandBuffer.AddComponent(entity, new Health {
                     Value = healthValue,
                     onHealthChanged = true,

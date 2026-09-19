@@ -66,7 +66,11 @@ public class UnitSelectionManager : MonoBehaviour
     {
         if (battleInputManager.IsRearrangingSquads) return;
 
-        if (SettingsManager.Instance.SettingsPanelOpen) return;
+        if (SettingsManager.Instance.SettingsPanelOpen)
+        {
+            battleInputManager.CancelPendingMouseActions(unitsAreSelected);
+            return;
+        }
 
         if (UnityEngine.EventSystems.EventSystem.current.IsPointerOverGameObject())
         {
@@ -198,18 +202,12 @@ public class UnitSelectionManager : MonoBehaviour
 
         //check if all selected units are outriders
 
+        // Hero rules (built-in or modded) can grant Outrider, so read them instead of a hero id check.
         bool outrider = true;
+        int activeHeroID = HeroBonusManager.Instance.ActiveHeroID;
         foreach (UnitName squadUnitName in SelectedSquadUnitNames)
         {
-            SquadStats squadStats = TabletopTavernData.Instance.GetSquadStats(squadUnitName);
-
-            //Unbound by Chivalry: All units gain the [Outrider] ability
-            if(HeroBonusManager.Instance.ActiveHeroID == 9)
-            {
-                squadStats.SquadAttributes.Outrider = true;
-            }
-
-            if (!squadStats.SquadAttributes.Outrider)
+            if (!HeroBonusManager.UnitHasAttribute(squadUnitName, activeHeroID, UnitAttribute.Outrider))
             {
                 outrider = false;
                 break;
@@ -952,14 +950,14 @@ public class UnitSelectionManager : MonoBehaviour
             BattleManager.Instance.UIManager.SetNoSquadHovered();
         }
 
-        //if hoversquad is an enemy squad, enemy has deployed, and not an outrider during deployment, show the attack cursor
-        if (!playerSquad && BattleManager.Instance.ArmySpawnManager.EnemyArmyDeployed && !IsOutriderSquadDuringDeployment(previousHoveredSquad))
+        // SpellManager owns the cursor while a spell is armed; the hover swap here would overwrite it.
+        if (BattleManager.Instance.CursorMode != CursorMode.CastSpell)
         {
-            battleInputManager.ChangeCursorToAttack();
-        }
-        else
-        {
-            battleInputManager.ResetCursor();
+            //if hoversquad is an enemy squad, enemy has deployed, and not an outrider during deployment, show the attack cursor
+            if (!playerSquad && BattleManager.Instance.ArmySpawnManager.EnemyArmyDeployed && !IsOutriderSquadDuringDeployment(previousHoveredSquad))
+                battleInputManager.ChangeCursorToAttack();
+            else
+                battleInputManager.ResetCursor();
         }
         OnHoverSquadsChanged?.Invoke(new List<int> { previousHoveredSquad });
     }

@@ -25,6 +25,7 @@ partial struct SpellSystem : ISystem
         CollisionWorld collisionWorld = physicsWorldSingleton.CollisionWorld;
         NativeList<DistanceHit> distanceHitList = new NativeList<DistanceHit>(Allocator.Temp);
         float deltaTime = SystemAPI.Time.DeltaTime;
+        double elapsedTime = SystemAPI.Time.ElapsedTime;
         // GetSingleton<PhysicsWorldSingleton>() does not guarantee the broadphase build jobs have
         // finished by the time this variable-rate system runs, and an OverlapSphere against a
         // half-built tree returns nothing. Measured 2026-09-13: about one persistent-spell tick in
@@ -106,6 +107,17 @@ partial struct SpellSystem : ISystem
 
                     DynamicBuffer<DamageBufferElement> damageBuffer = SystemAPI.GetBuffer<DamageBufferElement>(hitEntity);
                     damageBuffer.Add(damageBufferElement);
+
+                    // Zone spells have no squad-level tag, so each tick stamps the parent squad's status entry
+                    // to outlive the next tick by half a second; a squad that leaves the zone drops it then.
+                    int statusSpellId = spellEntity.ValueRO.StatusSpellId;
+                    if (statusSpellId > 0 && !spellEntity.ValueRO.IsOneOff && SystemAPI.HasComponent<UnitParentEntityTag>(hitEntity))
+                    {
+                        Entity parentSquad = SystemAPI.GetComponent<UnitParentEntityTag>(hitEntity).parentSquadEntity;
+                        if (SystemAPI.HasBuffer<SpellStatusBufferElement>(parentSquad))
+                            SpellStatus.Set(SystemAPI.GetBuffer<SpellStatusBufferElement>(parentSquad), statusSpellId,
+                                elapsedTime + spellEntity.ValueRO.TickInterval + 0.5, elapsedTime);
+                    }
 
                     bool shouldKnockback = damageBufferElement.DamageType != DamageType.Healing
                         && spellEntity.ValueRO.SpellForce > 0f

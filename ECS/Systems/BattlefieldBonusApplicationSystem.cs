@@ -87,6 +87,14 @@ partial struct BattlefieldBonusApplicationSystem : ISystem
 
                 //apply bonus
                 bonusBuffer.Add(new BattlefieldBonusBufferElement { Value = battlefieldBonusApplicator.ValueRO.BattlefieldBonus });
+
+                // A multi-stat spell lands several applicators with the same id; Set refreshes instead of stacking.
+                int statusSpellId = battlefieldBonusApplicator.ValueRO.BattlefieldBonus.StatusSpellId;
+                if (statusSpellId > 0 && SystemAPI.HasBuffer<SpellStatusBufferElement>(squadEntity.SelfEntity))
+                {
+                    SpellStatus.Set(SystemAPI.GetBuffer<SpellStatusBufferElement>(squadEntity.SelfEntity),
+                        statusSpellId, battlefieldBonusApplicator.ValueRO.BattlefieldBonus.ExpiresAtTime, elapsedTime);
+                }
                 // Debug.Log($"BattlefieldBonusApplicationSystem: Applied bonus {battlefieldBonusApplicator.ValueRO.BattlefieldBonus.UnitStat} to {squadEntity.SelfEntity}");
             }
         }

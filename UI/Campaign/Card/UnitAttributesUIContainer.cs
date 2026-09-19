@@ -122,7 +122,7 @@ namespace TJ
                 }
             }
             if (!poolMatchesLayout) {
-                foreach (UnitAttributesUI ui in _unitAttributeUIs) Destroy(ui.gameObject);
+                foreach (UnitAttributesUI ui in _unitAttributeUIs) TrimRow(ui);
                 _unitAttributeUIs.Clear();
             }
 
@@ -134,7 +134,7 @@ namespace TJ
                 }
             } else if(unitAttributes.Count < _unitAttributeUIs.Count) {
                 for(int i = _unitAttributeUIs.Count - 1; i >= unitAttributes.Count; i--) {
-                    Destroy(_unitAttributeUIs[i].gameObject);
+                    TrimRow(_unitAttributeUIs[i]);
                     _unitAttributeUIs.RemoveAt(i);
                 }
             }
@@ -179,6 +179,12 @@ namespace TJ
         public void Refresh()
         {
             LayoutRebuilder.ForceRebuildLayoutImmediate(unitAttributesParent as RectTransform);
+        }
+        // Destroy lands at end of frame; an active row would still count in the size fitter this frame.
+        static void TrimRow(UnitAttributesUI row)
+        {
+            row.gameObject.SetActive(false);
+            Destroy(row.gameObject);
         }
         public void OnPointerEnter(PointerEventData eventData)
         {

@@ -41,7 +41,7 @@ namespace TJ.Games
         public void SetButtonAffordability(bool canAfford)
         {
             _canAfford = canAfford;
-            animator.SetBool(_canAfford ? "Normal" : "Disabled", true);
+            // Grey text marks unaffordable; the animator's Disabled state hides the button (Content alpha 0).
             SetColor(SecondaryColor);
             SetImageAlpha(AlphaDefault);
         }

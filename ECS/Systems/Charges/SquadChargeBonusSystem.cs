@@ -47,6 +47,7 @@ partial struct SquadChargeBonusSystem : ISystem
 [BurstCompile]
 [WithNone(typeof(ChargeBonus))]
 [WithNone(typeof(ExhaustedTag))]
+[WithNone(typeof(GarrisonGateSquadTag))]
 partial struct ApplyChargeBonusJob : IJobEntity
 {
     public float DeltaTime;

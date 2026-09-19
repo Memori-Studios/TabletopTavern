@@ -40,10 +40,12 @@ namespace TJ
         [SerializeField] private TMP_Text spawnErrorText;
         [SerializeField] private GameObject addingOrQueuingIconParent;
         [SerializeField] private Image addingOrQueuingIcon;
-        [SerializeField] private GameObject _spellQuickCast;
-        private SpellQuickCastMenu spellQuickCastMenu;
+
+        [Header("Spell Target Hint")]
+        [SerializeField] private MemoriCanvasGroup spellTargetHint;
+        [SerializeField] private RawImage spellTargetHintIcon;
+        [SerializeField] private TMP_Text spellTargetHintText;
         private bool isOverUI;
-        private CursorMode cursorModeBeforeQuickCastMenu;
 
         [Header("Battle")]
         [SerializeField] private Button startBattleButton;
@@ -162,8 +164,6 @@ namespace TJ
             if (addingOrQueuingIcon != null) addingOrQueuingIcon.enabled = false;
             InputHandler.Instance.OnQueueOrder += EnableAddingOrQueuingIcon;
             InputHandler.Instance.OnQueueOrderCanceled += CancelAddingOrQueuingIcon;
-            InputHandler.Instance.OnSpellQuickCast += ShowSpellQuickCastMenu;
-            InputHandler.Instance.OnSpellQuickCastCanceled += HideSpellQuickCastMenu;
             InputHandler.Instance.OnFireAtWillModeToggle += SetFireAtWillMode;
             InputHandler.Instance.OnVolleyFireModeToggle += SetVolleyFireMode;
             InputHandler.Instance.OnBalancedStanceToggle += SetBalancedStance;
@@ -174,8 +174,6 @@ namespace TJ
 
             endBattlePanel.SetActive(false);
             UpdateBattleButtons(false);
-            spellQuickCastMenu = _spellQuickCast.GetComponent<SpellQuickCastMenu>();
-            _spellQuickCast.SetActive(false);
 
             if (BattleManager.Instance.BattleSaveManager.IsGarrisonBattle)
             {
@@ -210,11 +208,6 @@ namespace TJ
             {
                 isOverUI = overUI;
                 addingOrQueuingIconParent.SetActive(!isOverUI);
-            }
-
-            if (BattleManager.Instance.CursorMode == CursorMode.QuickCastMenu && Input.GetMouseButtonDown(1))
-            {
-                HideSpellQuickCastMenu();
             }
 
             foreach (HealthBar healthBar in healthBars.Values)
@@ -412,7 +405,7 @@ namespace TJ
                 spawnErrorMessage.CGDisable();
             }
         }
-        private async void StartBattle()
+        private void StartBattle()
         {
             IAudioRequester.Instance.PlaySFX("start-battle");
             startBattleButton.interactable = false;
@@ -938,8 +931,6 @@ namespace TJ
                 InputHandler.Instance.OnWithdrawCommand -= OnWithdrawSquadButtonClicked;
                 InputHandler.Instance.OnQueueOrder -= EnableAddingOrQueuingIcon;
                 InputHandler.Instance.OnQueueOrderCanceled -= CancelAddingOrQueuingIcon;
-                InputHandler.Instance.OnSpellQuickCast -= ShowSpellQuickCastMenu;
-                InputHandler.Instance.OnSpellQuickCastCanceled -= HideSpellQuickCastMenu;
                 InputHandler.Instance.OnFireAtWillModeToggle -= SetFireAtWillMode;
                 InputHandler.Instance.OnVolleyFireModeToggle -= SetVolleyFireMode;
                 InputHandler.Instance.OnBalancedStanceToggle -= SetBalancedStance;
@@ -1026,7 +1017,7 @@ namespace TJ
                 );
             }
         }
-        private async void HandleRestartCustomBattle()
+        private void HandleRestartCustomBattle()
         {
             SceneHandler.Instance.RequestCustomBattleRestart();
             SceneHandler.Instance.RequestSceneCleanUpFunction(GameStateEnum.MainMenu);
@@ -1047,6 +1038,23 @@ namespace TJ
             spawnErrorMessage.FadeInAsync(0.25f, false, false);
         }
         public void HideCursorHint() => spawnErrorMessage.CGDisable();
+        /// <summary>
+        /// The fixed label above the unit cards while a spell is armed: the current targeting cursor
+        /// and either "Invalid target. Valid targets: X" or the click instructions. Rich text is allowed.
+        /// </summary>
+        public void ShowSpellTargetHint(Texture icon, string message)
+        {
+            if(spellTargetHint == null) { Debug.LogError("UIManager: spellTargetHint is not wired", this); return; }
+            spellTargetHintIcon.texture = icon;
+            spellTargetHintIcon.enabled = icon != null;
+            spellTargetHintText.text = message;
+            if(spellTargetHint.canvasGroup.alpha < 1f) spellTargetHint.FadeInAsync(0.15f, false, false);
+        }
+        public void HideSpellTargetHint()
+        {
+            if(spellTargetHint == null) return;
+            spellTargetHint.CGDisable();
+        }
         public void BroadcastSpawnError()
         {
             NotificationManager.Instance.DisplayNotification(recentPositionErrorMessage);
@@ -1141,30 +1149,6 @@ namespace TJ
             if (addingOrQueuingIcon == null) return;
             addingOrQueuingIcon.enabled = false;
         }
-        private void ShowSpellQuickCastMenu()
-        {
-#if !SPELLS
-            return;
-#endif
-            if (_spellQuickCast == null || isOverUI) return;
-            if (BattleManager.Instance.CursorMode == CursorMode.Reposition) return;
-
-            cursorModeBeforeQuickCastMenu = BattleManager.Instance.CursorMode;
-            BattleManager.Instance.SetCursorMode(CursorMode.QuickCastMenu);
-            _spellQuickCast.SetActive(true);
-        }
-        private void HideSpellQuickCastMenu()
-        {
-            if (_spellQuickCast == null) return;
-            _spellQuickCast.SetActive(false);
-
-            int queuedSlotIndex = spellQuickCastMenu.ConsumeQueuedSlotIndex();
-            if (queuedSlotIndex >= 0)
-                BattleManager.Instance.SpellManager.SelectSpell(queuedSlotIndex);
-
-            if (BattleManager.Instance.CursorMode == CursorMode.QuickCastMenu)
-                BattleManager.Instance.SetCursorMode(cursorModeBeforeQuickCastMenu);
-        }
         public void UpdateBalanceOfPower(BalanceOfPower balanceOfPower)
         {
             balanceOfPowerDisplay.UpdateBalanceOfPowerDisplay(balanceOfPower);
@@ -1175,6 +1159,8 @@ namespace TJ
             if(teamThatSufferedLosses == Team.Player)
             {
                 entityManager.CreateEntity(typeof(ArmyLossesTriggeredPlayer));
+                // The morale penalty is invisible otherwise, and full-health squads breaking reads as a bug.
+                NotificationManager.Instance.DisplayNotification(LocalizationManager.Instance.GetText("ArmyLossesNotification"));
                 // Recorded into the run save at battle end ("Against All Odds"); the battle scene has
                 // no CampaignSaveManager, so this rides the same static bridge as PauseUsedThisBattle.
                 SaveDataHandler.ArmyLossesSufferedThisBattle = true;

@@ -24,7 +24,7 @@ public class FPSCounter : MonoBehaviour
             return;
 
         timer = 0;
-        fpsCounterText.text = $"{Mathf.Ceil(fps)} FPS";
+        fpsCounterText.text = $"{Mathf.RoundToInt(fps)} FPS";
     }
 }
 }

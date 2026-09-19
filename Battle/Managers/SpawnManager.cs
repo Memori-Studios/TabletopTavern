@@ -78,7 +78,7 @@ public class SpawnManager : MonoBehaviour
     }
     public void SpawnFormation(EntityManager entityManager, SquadSpawner squadSpawner, EntityCommandBuffer entityCommandBuffer)
     {
-        IAudioRequester.Instance.PlaySFX(TabletopTavernData.Instance.GetRandomBarkSFX(squadSpawner.unitName));
+        IAudioRequester.Instance.PlayVoice(TabletopTavernData.Instance.GetRandomBarkSFX(squadSpawner.unitName));
 
         EntityQuery query = entityManager.CreateEntityQuery(ComponentType.ReadOnly<EntitiesReferences>());
         EntitiesReferences entitiesReferences = query.GetSingleton<EntitiesReferences>();

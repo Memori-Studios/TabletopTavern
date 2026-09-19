@@ -13,11 +13,27 @@ public static class HeroBonusRuleEvaluator
 {
     private static List<HeroStatBonusRule> _statRules;
     private static List<FactionBonusRule> _factionRules;
+    private static List<HeroAttributeBonusRule> _attributeRules;
 
-    public static void SetRules(List<HeroStatBonusRule> statRules, List<FactionBonusRule> factionRules)
+    public static void SetRules(List<HeroStatBonusRule> statRules, List<FactionBonusRule> factionRules, List<HeroAttributeBonusRule> attributeRules)
     {
         _statRules = statRules;
         _factionRules = factionRules;
+        _attributeRules = attributeRules;
+    }
+
+    // Grants every attribute the hero's rules give this unit, straight onto the attribute set.
+    // Auto-resolve uses this; the live battle adds tag components per attribute in SquadManager.
+    public static void ApplyHeroAttributes(ref SquadAttributes attributes, UnitName requestingUnit, int activeHeroID, SquadStats stats, Race enemyRace)
+    {
+        if (activeHeroID == -1 || _attributeRules == null) return;
+
+        foreach (var rule in _attributeRules)
+        {
+            if (rule.HeroID != activeHeroID) continue;
+            if (!rule.Condition.Matches(requestingUnit, stats, enemyRace)) continue;
+            TabletopTavernConstants.SetAttribute(ref attributes, rule.GrantedAttribute);
+        }
     }
 
     public static float SumHeroStatBonus(UnitStat stat, UnitName requestingUnit, int activeHeroID, SquadStats stats, Race enemyRace, float currentValue)

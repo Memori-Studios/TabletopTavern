@@ -24,7 +24,7 @@ namespace TJ.Engagement
     /// charge on one squad. The last is only visible with several candidate targets - so when adding a
     /// spell shape, add a multi-target case as well as a single-target one.
     ///
-    /// Run from Tools > Tabletop Tavern > Test Mage Auto-Resolve, or the button on the
+    /// Run from Tabletop Tavern > Test Mage Auto-Resolve, or the button on the
     /// AutoResolveBattleManager inspector.
     /// </summary>
     public static class MageAutoResolveTests
@@ -37,7 +37,7 @@ namespace TJ.Engagement
         private const UnitName Foe = UnitName.GoblinRabble;
         private const UnitName Archer = UnitName.PeasantBowmen;
 
-        [MenuItem("Tools/Tabletop Tavern/Test Mage Auto-Resolve")]
+        [MenuItem("Tabletop Tavern/Test Mage Auto-Resolve")]
         public static void RunFromMenu()
         {
             string report = RunAll(out int passed, out int failed);

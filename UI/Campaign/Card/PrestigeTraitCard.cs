@@ -37,9 +37,7 @@ namespace TJ
         }
         public void NotifyOfSelection(UnitAttribute trait)
         {
-            if (_trait == trait)
-                ; // selectMMF.PlayFeedbacks();
-            else
+            if (_trait != trait)
                 DarkenCard();
         }
         public void SelectTraitCard()
