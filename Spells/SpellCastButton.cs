@@ -50,10 +50,24 @@ public class SpellCastButton : MonoBehaviour, IPointerEnterHandler, IPointerExit
     // no SpellData, so SelectSpell refuses it either way - this only stops it reading as a bug.
     [SerializeField] private GameObject lockedOverlay;
 
+    [Header("Hotkey")]
+    // Optional. The Y-menu digit: a small corner label at rest, large over the icon while Y is held.
+    [SerializeField] private TMP_Text hotkeyText;
+    private const float HOTKEY_OPEN_SIZE = 30f;
+    private const float HOTKEY_REST_ALPHA = 0.7f;
+    private RectTransform hotkeyRect;
+    private Vector2 hotkeyRestAnchorMin, hotkeyRestAnchorMax, hotkeyRestPivot, hotkeyRestPosition, hotkeyRestSize;
+    private float hotkeyRestFontSize;
+    private HorizontalAlignmentOptions hotkeyRestHorizontal;
+    private VerticalAlignmentOptions hotkeyRestVertical;
+
     private const float RAIL_ALPHA = 0.9f;
     // Unaffordable reads on brightness, never hue - every hue is spent on faction identity. Same
     // channel SpellBrowseSlot dims an equipped row with.
     private const float UNAFFORDABLE_ICON_ALPHA = 0.3f;
+    // The icon steps back while the Y-menu digit sits over it, so the digit reads first.
+    private const float MENU_OPEN_ICON_ALPHA = 0.35f;
+    private bool cachedMenuOpen;
 
     private Color cachedCooldownColor;
     private Color factionColor = Color.white;
@@ -61,8 +75,16 @@ public class SpellCastButton : MonoBehaviour, IPointerEnterHandler, IPointerExit
     private bool cachedOnCooldown;
     private bool cachedHovered;
     private bool cachedBrowseTarget;
+    // A mage walking to a manual cast: the frame breathes between rest and active until it lands.
+    private bool cachedPending;
+    private const float PENDING_PULSE_SECONDS = 1.2f;
     private bool cachedAffordable = true;
     private bool hasSpell;
+    private SpellData cachedSpell;
+    private int cachedHotkeyNumber;
+    // The line above the description: the mana cost for a hotbar slot, the caster stat block for a
+    // mage tile. Kept so the tooltip can be rebuilt when the block changes (charges spent).
+    private string cachedStatBlock;
 
     // Pre-battle spell browsing (custom battle only). Null when browsing is disabled, in which case
     // hovering this button never opens the browse menu.
@@ -71,6 +93,20 @@ public class SpellCastButton : MonoBehaviour, IPointerEnterHandler, IPointerExit
     private void Awake()
     {
         if(cooldownImage != null) cachedCooldownColor = cooldownImage.color;
+        if(hotkeyText != null)
+        {
+            // The prefab authors the rest layout; the open layout is derived in code.
+            hotkeyRect = hotkeyText.rectTransform;
+            hotkeyRestAnchorMin = hotkeyRect.anchorMin;
+            hotkeyRestAnchorMax = hotkeyRect.anchorMax;
+            hotkeyRestPivot = hotkeyRect.pivot;
+            hotkeyRestPosition = hotkeyRect.anchoredPosition;
+            hotkeyRestSize = hotkeyRect.sizeDelta;
+            hotkeyRestFontSize = hotkeyText.fontSize;
+            hotkeyRestHorizontal = hotkeyText.horizontalAlignment;
+            hotkeyRestVertical = hotkeyText.verticalAlignment;
+            hotkeyText.alpha = HOTKEY_REST_ALPHA;
+        }
     }
 
     /// <summary>
@@ -91,13 +127,26 @@ public class SpellCastButton : MonoBehaviour, IPointerEnterHandler, IPointerExit
         return false;
     }
 
+    /// <summary>
+    /// <paramref name="statBlock"/> replaces the mana-cost line above the description; a mage tile
+    /// passes its caster block, the hotbar leaves it null.
+    /// </summary>
     public void LoadSpellUI(SpellData spellData, Action onSelectRequested, int hotkeyNumber,
-        Action _onBrowseHoverEnter = null, Action _onBrowseHoverExit = null)
+        Action _onBrowseHoverEnter = null, Action _onBrowseHoverExit = null, string statBlock = null)
     {
         if(!ReferencesAssigned()) return;
 
         onBrowseHoverEnter = _onBrowseHoverEnter;
         onBrowseHoverExit = _onBrowseHoverExit;
+        cachedSpell = spellData;
+        cachedHotkeyNumber = hotkeyNumber;
+        cachedStatBlock = statBlock;
+        if(hotkeyText != null)
+        {
+            // 10 is the 0 key; anything past the ten digits has no key and shows nothing.
+            hotkeyText.text = hotkeyNumber >= 1 && hotkeyNumber <= 10 ? (hotkeyNumber % 10).ToString() : "";
+            hotkeyText.gameObject.SetActive(spellData != null);
+        }
 
         // Assigned before SetSelected, which repaints the frame off it.
         hasSpell = spellData != null;
@@ -126,20 +175,64 @@ public class SpellCastButton : MonoBehaviour, IPointerEnterHandler, IPointerExit
 
         spellIcon.sprite = spellData.SpellSprite;
         selectSpellButton.onClick.AddListener(() => onSelectRequested?.Invoke());
-
-        string localizedCost = string.Format(
-            LocalizationManager.Instance.GetText("SpellManaCostLine"), spellData.SpellManaCost);
         if(manaCostText != null) manaCostText.text = spellData.SpellManaCost.ToString();
 
-        string localizedSpellName = LocalizationManager.Instance.GetText(spellData.Spell.ToString());
+        RefreshTooltip(statBlock);
+    }
+
+    /// <summary>Rebuilds the tooltip with a new stat block. Pass null for the hotbar's mana-cost line.</summary>
+    public void RefreshTooltip(string statBlock)
+    {
+        if(cachedSpell == null || tooltipTrigger == null) return;
+        cachedStatBlock = statBlock;
+
+        string lead = statBlock ?? string.Format(
+            LocalizationManager.Instance.GetText("SpellManaCostLine"), cachedSpell.SpellManaCost);
+
+        string localizedSpellName = LocalizationManager.Instance.GetText(cachedSpell.Spell.ToString());
         // Slots past the ten menu digits (the spell test grid) have no key to show.
-        string hotkeyLabel = GetHotkeyLabel(hotkeyNumber);
+        string hotkeyLabel = GetHotkeyLabel(cachedHotkeyNumber);
         if(hotkeyLabel.Length > 0) localizedSpellName += " (" + hotkeyLabel + ")";
         // Cost leads the description. A player deciding whether to arm this spell needs the price
         // before the flavour, and the hotbar numeral is optional so this is the only guaranteed place.
-        string localizedSpellDescription = localizedCost + "\n\n" + spellData.GetLocalizedSpellDescription();
+        string localizedSpellDescription = lead + "\n\n" + cachedSpell.GetLocalizedSpellDescription();
 
         tooltipTrigger.SetUpToolTip(localizedSpellName, localizedSpellDescription);
+    }
+
+    /// <summary>
+    /// While Y is held the digit fills the tile so the player reads "press 3" without hunting the
+    /// corner; released, it drops back to the small label the prefab authored.
+    /// </summary>
+    public void SetMenuOpen(bool open)
+    {
+        if(hotkeyText == null || hotkeyRect == null) return;
+        cachedMenuOpen = open;
+        RefreshIconAlpha();
+        if(open)
+        {
+            hotkeyRect.anchorMin = Vector2.zero;
+            hotkeyRect.anchorMax = Vector2.one;
+            hotkeyRect.pivot = new Vector2(0.5f, 0.5f);
+            hotkeyRect.anchoredPosition = Vector2.zero;
+            hotkeyRect.sizeDelta = Vector2.zero;
+            hotkeyText.fontSize = HOTKEY_OPEN_SIZE;
+            hotkeyText.horizontalAlignment = HorizontalAlignmentOptions.Center;
+            hotkeyText.verticalAlignment = VerticalAlignmentOptions.Middle;
+            hotkeyText.alpha = 1f;
+        }
+        else
+        {
+            hotkeyRect.anchorMin = hotkeyRestAnchorMin;
+            hotkeyRect.anchorMax = hotkeyRestAnchorMax;
+            hotkeyRect.pivot = hotkeyRestPivot;
+            hotkeyRect.anchoredPosition = hotkeyRestPosition;
+            hotkeyRect.sizeDelta = hotkeyRestSize;
+            hotkeyText.fontSize = hotkeyRestFontSize;
+            hotkeyText.horizontalAlignment = hotkeyRestHorizontal;
+            hotkeyText.verticalAlignment = hotkeyRestVertical;
+            hotkeyText.alpha = HOTKEY_REST_ALPHA;
+        }
     }
 
     // "Y+3": the spell menu key from its binding (rebindable), then the slot's digit (0 stands for 10).
@@ -202,6 +295,7 @@ public class SpellCastButton : MonoBehaviour, IPointerEnterHandler, IPointerExit
 
         Color c = factionColor;
         if(!cachedAffordable) c.a *= UNAFFORDABLE_ICON_ALPHA;
+        if(cachedMenuOpen) c.a *= MENU_OPEN_ICON_ALPHA;
         spellIcon.color = c;
     }
 
@@ -255,11 +349,29 @@ public class SpellCastButton : MonoBehaviour, IPointerEnterHandler, IPointerExit
 
         outlineImage.color = cachedBrowseTarget || cachedSelected ? ColorData.SpellFrameActive
                            : cachedHovered                       ? ColorData.SpellFrameHover
+                           : cachedPending                       ? PendingFrameColor()
                                                                  : ColorData.SpellFrameRest;
 
         if(targetBrackets != null) targetBrackets.SetActive(cachedBrowseTarget);
     }
 
+    /// <summary>On while the squad holds an unfired manual cast order. The frame pulses until it fires or is voided.</summary>
+    public void SetPending(bool pending)
+    {
+        if(cachedPending == pending) return;
+        cachedPending = pending;
+        RefreshFrame();
+    }
+    private static Color PendingFrameColor()
+    {
+        float t = 0.5f + 0.5f * Mathf.Sin(Time.unscaledTime * (2f * Mathf.PI / PENDING_PULSE_SECONDS));
+        return Color.Lerp(ColorData.SpellFrameRest, ColorData.SpellFrameActive, t);
+    }
+    private void Update()
+    {
+        // Only the pulse animates; every other frame state is event-driven.
+        if(cachedPending && !cachedSelected && !cachedHovered && !cachedBrowseTarget) RefreshFrame();
+    }
     public void RenderCooldown(float remainingFraction01, bool onCooldown)
     {
         cachedOnCooldown = onCooldown;

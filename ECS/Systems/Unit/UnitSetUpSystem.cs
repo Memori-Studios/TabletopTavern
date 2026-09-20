@@ -425,33 +425,36 @@ partial struct UnitSetUpSystem : ISystem
                 entityCommandBuffer.AddComponent(entity, new ResistKnockbackTag { });
             }
 
-            // Size-based separation: larger units have low Weight (barely yield) and wide Radius
-            // (detect smaller units early). Smaller units have high Weight (move away quickly).
-            // Net effect: large units push through small ones without needing reciprocal force logic.
-            // Separation.Radius must be > AgentShape.Radius (0.75) so the spatial query finds
-            // neighbours before they are already overlapping (two touching infantry are 1.5 apart).
-            // Large units only separate from other large units (Layer1/Layer2), not from infantry
-            // (NavigationLayers.Default). Infantry keeps Everything so they still yield to large
-            // units when both are moving — the weight asymmetry (0.2-0.7 vs 1.5) ensures infantry
-            // scatter away while the large unit holds its course.
+            // Separation is soft spacing only; UnitCollisionSystem owns hard overlap, so infantry
+            // weight stays below the seek force (1.0) and can never turn a unit around.
+            // Large units only separate from other large units (Layer1/Layer2).
             AgentSeparation separation = squadStats.unitSize switch
             {
                 UnitSize.SingleUnit => new AgentSeparation { Radius = 2.5f, Weight = 0.2f, Layers = NavigationLayers.Layer1 | NavigationLayers.Layer2 },
                 UnitSize.Monstrous  => new AgentSeparation { Radius = 2.0f, Weight = 0.3f, Layers = NavigationLayers.Layer1 | NavigationLayers.Layer2 },
                 UnitSize.Cavalry    => new AgentSeparation { Radius = 1.8f, Weight = 0.7f, Layers = NavigationLayers.Layer1 | NavigationLayers.Layer2 },
-                UnitSize.Artillery  => new AgentSeparation { Radius = 1.6f, Weight = 1.2f, Layers = NavigationLayers.Everything },
-                _                   => new AgentSeparation { Radius = 1.6f, Weight = 1.5f, Layers = NavigationLayers.Everything }, // Infantry
+                UnitSize.Artillery  => new AgentSeparation { Radius = 1.6f, Weight = 0.6f, Layers = NavigationLayers.Everything },
+                _                   => new AgentSeparation { Radius = 1.6f, Weight = 0.6f, Layers = NavigationLayers.Everything }, // Infantry
             };
-            if (squadStats.unitType == UnitType.Structure)
+            // Every unit spawns from Base Unit.prefab (radius 0.75), so the contact radius is set here by size.
+            if (entityManager.HasComponent<AgentShape>(entity))
             {
-                // separation.Radius = 10f;
-                if (entityManager.HasComponent<AgentShape>(entity))
-                {
-                    AgentShape agentShape = entityManager.GetComponentData<AgentShape>(entity);
-                    agentShape.Radius = 2.5f;
-                    entityCommandBuffer.SetComponent(entity, agentShape);
-                }
+                AgentShape agentShape = entityManager.GetComponentData<AgentShape>(entity);
+                agentShape.Radius = squadStats.unitType == UnitType.Structure
+                    ? 2.5f
+                    : TabletopTavernConstants.CollisionRadius(squadStats.unitSize);
+                entityCommandBuffer.SetComponent(entity, agentShape);
             }
+            entityCommandBuffer.AddComponent(entity, new UnitCollisionBody
+            {
+                Mass = TabletopTavernConstants.CollisionMass(squadStats.unitSize),
+                Reach = TabletopTavernConstants.MeleeReach(squadStats.unitSize),
+                Immovable = squadStats.unitType == UnitType.Structure,
+            });
+            entityCommandBuffer.AddComponent(entity, new UnitCollisionState
+            {
+                ReturnsLeft = TabletopTavernConstants.RETURN_TO_SLOT_BUDGET,
+            });
             entityCommandBuffer.SetComponent(entity, separation);
             entityCommandBuffer.AddComponent(entity, new BaseSeparationWeight { Value = separation.Weight });
             // AgentSonarAvoid.Radius on the prefab is 0.25 — smaller than AgentShape.Radius (0.75),
@@ -468,7 +471,7 @@ partial struct UnitSetUpSystem : ISystem
                     _                   => 0.85f, // Infantry / Artillery
                 };
                 // Large units ignore infantry (Default layer) so sonar does not steer them around
-                // infantry walls — LargeUnitPushSystem handles the actual physical displacement.
+                // infantry walls; UnitCollisionSystem does the physical displacement.
                 sonarAvoid.Layers = squadStats.unitSize switch
                 {
                     UnitSize.SingleUnit or UnitSize.Monstrous or UnitSize.Cavalry =>
@@ -493,19 +496,10 @@ partial struct UnitSetUpSystem : ISystem
                 entityManager.SetComponentData(entity, agent);
             }
 
-            // Large units only hard-collide with other large units (Layer1/Layer2).
-            // Infantry is displaced by LargeUnitPushSystem instead, not AgentCollider.
+            // The package collider stays off for good; UnitCollisionSystem replaces it for every unit.
             if (entityManager.HasComponent<AgentCollider>(entity))
             {
-                AgentCollider collider = entityManager.GetComponentData<AgentCollider>(entity);
-                collider.Layers = squadStats.unitSize switch
-                {
-                    UnitSize.Cavalry    => NavigationLayers.Layer1 | NavigationLayers.Layer2,
-                    UnitSize.Monstrous  => NavigationLayers.Layer1 | NavigationLayers.Layer2,
-                    UnitSize.SingleUnit => NavigationLayers.Layer1 | NavigationLayers.Layer2,
-                    _                   => NavigationLayers.Default,
-                };
-                entityCommandBuffer.SetComponent(entity, collider);
+                entityCommandBuffer.SetComponentEnabled<AgentCollider>(entity, false);
             }
 
             entityCommandBuffer.AddComponent(entity, new RetreatingUnit { });

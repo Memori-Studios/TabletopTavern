@@ -52,6 +52,22 @@ public enum RangedToMeleeSwitchType { Melee, Ranged }
 public struct SwitchToMeleeTag : IComponentData { public RangedToMeleeSwitchType SwitchType; }
 public struct RangedSquadSkirmishTag : IComponentData { public float Delay; }
 public struct BaseSeparationWeight : IComponentData { public float Value; }
+public struct UnitCollisionBody : IComponentData
+{
+    public float Mass;
+    public float Reach;
+    public bool Immovable;
+}
+// A gate blocks its whole wall opening: a capsule along Axis, HalfWidth each side of the unit's centre.
+public struct GateCollisionShape : IComponentData { public float2 Axis; public float HalfWidth; }
+public struct UnitCollisionState : IComponentData
+{
+    // Seconds since the collision job last found an overlap on this unit.
+    public float SettledTime;
+    // Walks back to the slot left for this order; reset when the slot moves.
+    public int ReturnsLeft;
+    public float3 LastSlot;
+}
 public struct SetDestination : IComponentData
 {
     public float3 destinationPosition;
@@ -134,6 +150,8 @@ public struct FormationShapeChanged : IComponentData { }
 public struct FindTargets : IComponentData { }
 public struct SquadMoveOverrideTag : IComponentData { public float DistanceGoal; }
 public struct CancelSquadMoveOverrideTag : IComponentData { }
+// A locked group marches at its slowest member's pace; only read while SquadMoveOverrideTag is present.
+public struct FormationSpeedCap : IComponentData { public float MaxSpeed; }
 public struct OpponentRanAwayTag : IComponentData { public float DazedTime; }
 
 // Tracks whether a charging melee squad is making net closing progress toward its target.
@@ -343,6 +361,7 @@ public struct SquadDestination : IComponentData {
     public quaternion DestinationRotation;
     public int TargetSquadId;
     public int2 WidthAndDepth;
+    public float SpeedCap;
 }
 public enum QueuedOrderType : byte { Move = 0, Attack = 1 }
 public enum QueuedOrderStatus : byte { Pending = 0, InProgress = 1 }
@@ -354,6 +373,8 @@ public struct QueuedOrder : IBufferElementData
     public quaternion Rotation;
     public int TargetSquadId;
     public int2 WidthAndDepth;
+    // 0 = no cap. Set by locked-group moves so the whole block arrives together.
+    public float SpeedCap;
     public static QueuedOrder Move(float3 goal, quaternion rotation)
     {
         return new QueuedOrder

@@ -351,7 +351,7 @@ namespace TJ
         private void ResetWeatherDropdownOptions()
         {
             weatherDropdown.options.Clear();
-            foreach (var possibleWeathers in mapRegion.possibleWeathers)
+            foreach (var possibleWeathers in mapRegion.GetPossibleWeathers())
             {
                 string localizedWeatherName = LocalizationManager.Instance.GetText(possibleWeathers.weather.ToString());
                 weatherDropdown.options.Add(new TMP_Dropdown.OptionData(localizedWeatherName));
@@ -361,7 +361,7 @@ namespace TJ
         }
         private void OnWeatherChanged(int value)
         {
-            weather = mapRegion.possibleWeathers[value].weather;
+            weather = mapRegion.GetPossibleWeathers()[value].weather;
             weatherDropdown.RefreshShownValue();
             BattleManager.Instance.BattlefieldEnvManager.ToggleWeather(weather);
 

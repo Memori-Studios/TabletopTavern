@@ -5,6 +5,7 @@ using Memori.Input;
 using System;
 using Memori.Notifications;
 using Memori.SaveData;
+using Unity.Mathematics;
 
 namespace TJ.Battle
 {
@@ -13,7 +14,13 @@ public class SquadGroup
 {
     public List<int> squadIds = new List<int>();
     [NonSerialized] public bool IsLocked = false;
-    [NonSerialized] public List<SetDestination> LockedPositions = new();
+    // Group frame: origin at the member centroid, +Z along the shared facing. Empty until snapshotted.
+    [NonSerialized] public Dictionary<int, LockedSlot> LockedSlots = new();
+}
+public struct LockedSlot
+{
+    public float3 LocalOffset;
+    public quaternion LocalRotation;
 }
     public class GroupManager : MonoBehaviour
     {
@@ -30,10 +37,6 @@ public class SquadGroup
         private List<SquadDisplayCardBattle> squadDisplays = new ();
         public SquadGroup[] SquadGroups => squadGroups;
         private List<SavedSquadGroup> _pendingSavedGroups;
-
-        // Locked group formations are code-complete but parked (see ToggleLockGroup), so the
-        // lock button stays hidden rather than toggling with no effect. Flip to true to surface it.
-        private const bool LOCK_FEATURE_ENABLED = false;
 
         public void Load()
         {
@@ -56,6 +59,7 @@ public class SquadGroup
             BattleManager.Instance.UIManager.OnSquadDisplaysChanged -= OnSquadDisplaysChanged;
             BattleManager.Instance.SquadManager.OnDestroyedSquad -= RemoveSquadFromGroups;
             BattleManager.Instance.UnitSelectionManager.OnSelectedSquadsChanged -= OnSelectedSquadsChanged;
+            BattleManager.Instance.OnGamePhaseChanged -= OnGamePhaseChanged;
 
             InputHandler.Instance.GroupButtonPressed += CreateGroup;
             InputHandler.Instance.OnSelectedGroup1 += SelectGroup1;
@@ -69,6 +73,7 @@ public class SquadGroup
             BattleManager.Instance.UIManager.OnSquadDisplaysChanged += OnSquadDisplaysChanged;
             BattleManager.Instance.SquadManager.OnDestroyedSquad += RemoveSquadFromGroups;
             BattleManager.Instance.UnitSelectionManager.OnSelectedSquadsChanged += OnSelectedSquadsChanged;
+            BattleManager.Instance.OnGamePhaseChanged += OnGamePhaseChanged;
         }
         private void SelectAllSquads()
         {
@@ -102,6 +107,12 @@ public class SquadGroup
         }
         public void CreateGroup()
         {
+            // Ctrl+G is the Total War lock hotkey: lock the selected group, creating it first if needed.
+            if (InputHandler.Instance.ControlInput)
+            {
+                ToggleLockOnSelection();
+                return;
+            }
             CreateGroup(-1);
         }
         public void CreateGroup(int _groupNumber = -1)
@@ -246,7 +257,7 @@ public class SquadGroup
                 }
 
                 GroupUI groupUI = Instantiate(groupUIPrefab, groupUIPosition);
-                groupUI.SetUpGroupUI(i+1, squadGroup.squadIds.Count, this, colors[i % colors.Count], squadGroup.IsLocked, LOCK_FEATURE_ENABLED);
+                groupUI.SetUpGroupUI(i+1, squadGroup.squadIds.Count, this, colors[i % colors.Count], squadGroup.IsLocked);
                 groupUIs.Add(groupUI);
                 groupUI.transform.SetParent(groupUIParent);
             }
@@ -310,45 +321,148 @@ public class SquadGroup
             if(_index < 0 || _index >= squadDisplays.Count) return -1;
             return GetGroupNumberForSquad(squadDisplays[_index].SquadId);
         }
+        #region Locked formations
         public void ToggleLockGroup(int groupNumber)
         {
-            return; // Feature disabled — locking not yet implemented
-            // if (groupNumber < 1 || groupNumber > squadGroups.Length) return;
-            // SquadGroup group = squadGroups[groupNumber - 1];
-            // if (group.IsLocked) UnlockGroup(groupNumber);
-            // else LockGroup(groupNumber);
-        }
-        private void LockGroup(int groupNumber)
-        {
+            if (groupNumber < 1 || groupNumber > squadGroups.Length) return;
             SquadGroup group = squadGroups[groupNumber - 1];
             if (group.squadIds.Count == 0) return;
-            group.LockedPositions = BattleManager.Instance.UnitSelectionManager.GetSelectedUnitsPositions();
-            group.IsLocked = true;
-            Debug.Log($"Locked group {groupNumber} with {group.LockedPositions.Count} unit positions.");
+            if (group.IsLocked) UnlockGroup(group);
+            else LockGroup(group);
             RefreshGroupUIs();
         }
-        private void UnlockGroup(int groupNumber)
+        private void ToggleLockOnSelection()
         {
-            SquadGroup group = squadGroups[groupNumber - 1];
-            group.IsLocked = false;
-            group.LockedPositions.Clear();
-            RefreshGroupUIs();
+            if (BattleManager.Instance.GamePhase == GamePhase.SetUp) return;
+            List<int> selectedSquadIds = new(BattleManager.Instance.UnitSelectionManager.SelectedSquadIds);
+            if (selectedSquadIds.Count == 0) return;
+
+            int groupNumber = FindGroupMatchingSelection(selectedSquadIds);
+            if (groupNumber == -1)
+            {
+                CreateGroup(-1);
+                groupNumber = FindGroupMatchingSelection(selectedSquadIds);
+                if (groupNumber == -1) return;
+            }
+            ToggleLockGroup(groupNumber);
         }
-        public bool AreSelectedSquadsInLockedGroup(List<int> selectedIds, out SquadGroup lockedGroup)
+        private int FindGroupMatchingSelection(List<int> selectedSquadIds)
+        {
+            for (int i = 0; i < squadGroups.Length; i++)
+            {
+                if (squadGroups[i].squadIds.Count != selectedSquadIds.Count) continue;
+                if (squadGroups[i].squadIds.All(selectedSquadIds.Contains)) return i + 1;
+            }
+            return -1;
+        }
+        private void LockGroup(SquadGroup group)
+        {
+            group.IsLocked = true;
+            SnapshotLockedFormation(group);
+            Debug.Log($"Locked group formation with {group.LockedSlots.Count} slots.");
+        }
+        private void UnlockGroup(SquadGroup group)
+        {
+            group.IsLocked = false;
+            group.LockedSlots.Clear();
+        }
+        /// <summary>
+        /// Rebuilds the group's slots from where its members are, or are ordered to go. Anchor is the
+        /// member centroid, facing is the normalised sum of member forwards, so a group that is
+        /// already lined up gets an identity-like frame and offsets that read like the battlefield.
+        /// </summary>
+        public void SnapshotLockedFormation(SquadGroup group)
+        {
+            UnitPositioningManager positioning = BattleManager.Instance.UnitPositioningManager;
+            List<LockedFormation.Pose> poses = new();
+            foreach (int squadId in group.squadIds)
+            {
+                if (!positioning.TryGetSquadIntendedPose(squadId, out float3 center, out quaternion rotation)) continue;
+                poses.Add(new LockedFormation.Pose { SquadId = squadId, Center = center, Rotation = rotation });
+            }
+            LockedFormation.Snapshot(poses, group.LockedSlots);
+        }
+        /// <summary>
+        /// The locked group the selection stands for, if any. A member that is dead or broken cannot
+        /// be selected, so the match is against the group's commandable members, not its full list.
+        /// Slots are snapshotted here on first use (a lock restored from a save has none yet).
+        /// </summary>
+        public bool TryGetLockedGroup(List<int> selectedSquadIds, out SquadGroup lockedGroup)
         {
             lockedGroup = null;
-            foreach (SquadGroup g in squadGroups)
+            if (selectedSquadIds == null || selectedSquadIds.Count == 0) return false;
+
+            foreach (SquadGroup group in squadGroups)
             {
-                if (!g.IsLocked) continue;
-                if (g.squadIds.Count != selectedIds.Count) continue;
-                if (g.squadIds.All(id => selectedIds.Contains(id)))
-                {
-                    lockedGroup = g;
-                    return true;
-                }
+                if (!group.IsLocked || group.squadIds.Count == 0) continue;
+                if (!selectedSquadIds.All(group.squadIds.Contains)) continue;
+
+                List<int> commandable = BattleInputManager.Instance.RemoveBrokenSquads(group.squadIds);
+                if (commandable.Count != selectedSquadIds.Count) continue;
+                if (!commandable.All(selectedSquadIds.Contains)) continue;
+
+                if (!commandable.All(group.LockedSlots.ContainsKey)) SnapshotLockedFormation(group);
+                if (group.LockedSlots.Count == 0) continue;
+                lockedGroup = group;
+                return true;
             }
             return false;
         }
+        /// <summary>
+        /// Where the block currently is: centroid and mean facing of the commandable members' intended
+        /// poses. Because the slots were taken in that same frame, this recovers the block's rotation
+        /// after any number of whole-group moves.
+        /// </summary>
+        public bool TryGetLockedGroupPose(SquadGroup group, out float3 anchor, out quaternion facing)
+        {
+            UnitPositioningManager positioning = BattleManager.Instance.UnitPositioningManager;
+            List<LockedFormation.Pose> poses = new();
+            foreach (int squadId in group.LockedSlots.Keys)
+            {
+                if (!positioning.TryGetSquadIntendedPose(squadId, out float3 center, out quaternion rotation)) continue;
+                poses.Add(new LockedFormation.Pose { SquadId = squadId, Center = center, Rotation = rotation });
+            }
+            return LockedFormation.TryGetBlockPose(poses, out anchor, out facing);
+        }
+        /// <summary>
+        /// A member ordered on its own changes the arrangement the lock stands for, so the group
+        /// re-snapshots around the new intended poses. A whole-group order leaves the slots as they are.
+        /// </summary>
+        public void OnSquadsOrderedToMove(List<int> movedSquadIds, bool movedAsLockedGroup)
+        {
+            if (movedAsLockedGroup) return;
+            foreach (SquadGroup group in squadGroups)
+            {
+                if (!group.IsLocked) continue;
+                if (!group.squadIds.Any(movedSquadIds.Contains)) continue;
+                SnapshotLockedFormation(group);
+            }
+        }
+        private void OnGamePhaseChanged(GamePhase gamePhase)
+        {
+            // Deployment teleports members one at a time, so the lock re-reads the final layout.
+            if (gamePhase != GamePhase.Battle) return;
+            foreach (SquadGroup group in squadGroups)
+            {
+                if (group.IsLocked && group.squadIds.Count > 0) SnapshotLockedFormation(group);
+            }
+        }
+        private static void DropLockedSlot(SquadGroup group, int squadId)
+        {
+            if (!group.LockedSlots.Remove(squadId) || group.LockedSlots.Count == 0) return;
+
+            // Keep the anchor at the centroid of the survivors so the block still lands centred on the click.
+            float3 mean = float3.zero;
+            foreach (LockedSlot slot in group.LockedSlots.Values) mean += slot.LocalOffset;
+            mean /= group.LockedSlots.Count;
+            foreach (int id in new List<int>(group.LockedSlots.Keys))
+            {
+                LockedSlot slot = group.LockedSlots[id];
+                slot.LocalOffset -= mean;
+                group.LockedSlots[id] = slot;
+            }
+        }
+        #endregion
         public void OnDestroy()
         {
             if(InputHandler.HasInstance)
@@ -370,6 +484,9 @@ public class SquadGroup
 
             if(BattleManager.HasInstance && BattleManager.Instance.UnitSelectionManager != null)
                 BattleManager.Instance.UnitSelectionManager.OnSelectedSquadsChanged -= OnSelectedSquadsChanged;
+
+            if(BattleManager.HasInstance)
+                BattleManager.Instance.OnGamePhaseChanged -= OnGamePhaseChanged;
         }
         public void RemoveSquadFromGroups(int _squadId)
         {
@@ -378,6 +495,7 @@ public class SquadGroup
                 if(squadGroup.squadIds.Contains(_squadId))
                 {
                     squadGroup.squadIds.Remove(_squadId);
+                    DropLockedSlot(squadGroup, _squadId);
                     Debug.Log($"Removed squad {_squadId} from its group.");
                 }
             }
@@ -418,11 +536,17 @@ public class SquadGroup
         public void LoadGroupsFromSave(List<SavedSquadGroup> savedGroups)
         {
             foreach (var group in squadGroups)
+            {
                 group.squadIds.Clear();
+                group.IsLocked = false;
+                group.LockedSlots.Clear();
+            }
 
             foreach (SavedSquadGroup saved in savedGroups)
             {
                 if (saved.slotIndex < 0 || saved.slotIndex >= squadGroups.Length) continue;
+                // Slots come later, on first use: the squads are still in the staging rows here.
+                squadGroups[saved.slotIndex].IsLocked = saved.isLocked;
                 foreach (string uniqueId in saved.squadUniqueIds)
                 {
                     int squadId = BattleManager.Instance.ArmySpawnManager.GetSquadIDFromUnitUniqueID(uniqueId);
@@ -458,7 +582,7 @@ public class SquadGroup
             {
                 group.squadIds.Clear();
                 group.IsLocked = false;
-                group.LockedPositions.Clear();
+                group.LockedSlots.Clear();
             }
             // Clear UI...
             foreach (var ui in groupUIs) Destroy(ui.gameObject);

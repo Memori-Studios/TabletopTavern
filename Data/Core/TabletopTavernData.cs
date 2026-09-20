@@ -76,6 +76,7 @@ namespace TJ
             ArmyGenerationRuleData.ClearModRules();
             EconomyOverrideLoader.ClearOverrides();
             RaceBonusRuleData.ClearOverrides();
+            WeatherOverrideLoader.ClearOverrides();
             Memori.Localization.LocalizationOverrides.Clear();
             foreach (string modFolder in modFolders)
             {
@@ -85,6 +86,7 @@ namespace TJ
                 ArmyGenerationRuleOverrideLoader.ApplyOverridesFromModFolder(modFolder);
                 EconomyOverrideLoader.ApplyOverridesFromModFolder(modFolder);
                 RaceBonusOverrideLoader.ApplyOverridesFromModFolder(modFolder);
+                WeatherOverrideLoader.ApplyOverridesFromModFolder(modFolder);
                 LocalizationOverrideLoader.ApplyOverridesFromModFolder(modFolder);
             }
             HeroData.LoadFromResourcesAndOverrides(modFolders);

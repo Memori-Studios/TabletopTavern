@@ -53,7 +53,8 @@ namespace TJ
                             DestinationPosition = order.Goal,
                             DestinationRotation = order.Rotation,
                             TargetSquadId = 0,
-                            WidthAndDepth = order.WidthAndDepth
+                            WidthAndDepth = order.WidthAndDepth,
+                            SpeedCap = order.SpeedCap
                         };
 
                         entityCommandBuffer.AddComponent(squadEntity.SelfEntity, squadDestination);

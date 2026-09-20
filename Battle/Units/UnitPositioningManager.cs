@@ -10,6 +10,7 @@ using ProjectDawn.Navigation;
 using Memori.Utilities;
 using Memori.Notifications;
 using Memori.Localization;
+using TJ.Battle;
 
 public class UnitPositioningManager : MonoBehaviour
 {
@@ -34,13 +35,19 @@ public class UnitPositioningManager : MonoBehaviour
     public void TeleportUnits(bool _generateNoise)
     {
         EntityManager entityManager = World.DefaultGameObjectInjectionWorld.EntityManager;
-        quaternion desiredRotation = quaternion.AxisAngle(math.up(), (battleInputManager.Angle+90) * Mathf.Deg2Rad);
+        quaternion sharedRotation = quaternion.AxisAngle(math.up(), (battleInputManager.Angle+90) * Mathf.Deg2Rad);
         NativeArray<float3> movePositionArray = positionDrawer.UnitPrefabPointPositions().ToNativeArray(Allocator.Temp);
         int unitIndexOffset = 0;
+        bool lockedMove = positionDrawer.HasLockedLayout;
+        List<int> movedSquadIds = new(unitSelectionManager.SelectedSquadIds);
 
         foreach (KeyValuePair<int, List<Entity>> kvp in unitSelectionManager.GetSelectedSquadIDsAndAllUnits())
         {
             Unit unit = entityManager.GetComponentData<Unit>(kvp.Value[0]);
+            // A locked block gives every squad its own facing; a box preview shares one.
+            quaternion desiredRotation = positionDrawer.TryGetLockedSquadPose(kvp.Key, out _, out quaternion lockedRotation)
+                ? lockedRotation
+                : sharedRotation;
             SquadEntity squadEntity = BattleManager.Instance.SquadManager.GetSquadEntityFromId(kvp.Key);
             if (squadEntity.SelfEntity != Entity.Null)
             {
@@ -93,6 +100,7 @@ public class UnitPositioningManager : MonoBehaviour
         }
         movePositionArray.Dispose();
         positionDrawer.TurnOff();
+        BattleManager.Instance.GroupManager.OnSquadsOrderedToMove(movedSquadIds, lockedMove);
         IAudioRequester.Instance.PlaySFX(SFXData.RepositionCommand);
     }
     //rewrote entire function 8/22 to make sure that the destination position matches point prefab
@@ -134,11 +142,31 @@ public class UnitPositioningManager : MonoBehaviour
         var entityCommandBuffer = new EntityCommandBuffer(Allocator.Temp);
         NativeArray<float3> movePositionArray = positionDrawer.UnitPrefabPointPositions().ToNativeArray(Allocator.Temp);
 
+        Dictionary<int, List<Entity>> selectedSquads = unitSelectionManager.GetSelectedSquadIDsAndAllUnits();
+        List<int> orderedSquadIds = new(selectedSquads.Keys);
+
+        // A locked block marches at its slowest member's pace and spreads an attack across its front.
+        bool lockedMove = _squadCommand == SquadCommand.Move && positionDrawer.HasLockedLayout;
+        float speedCap = lockedMove ? GetSlowestUnitSpeed(selectedSquads) : 0f;
+        Dictionary<int, int> lockedTargets = null;
+        if (_squadCommand == SquadCommand.Attack &&
+            BattleManager.Instance.GroupManager.TryGetLockedGroup(unitSelectionManager.SelectedSquadIds, out SquadGroup _))
+        {
+            lockedTargets = AssignLockedGroupTargets(orderedSquadIds, _squadToAttack);
+        }
+
         int unitIndexOffset = 0;
         bool chargeSFXPlayed = false;
-        foreach(KeyValuePair<int, List<Entity>> kvp in unitSelectionManager.GetSelectedSquadIDsAndAllUnits())
+        foreach(KeyValuePair<int, List<Entity>> kvp in selectedSquads)
         {
             // Debug.Log($"Requesting Queueing {_squadCommand} command to squad {kvp.Key} to attack squad {_squadToAttack}");
+
+            // A selected enemy squad is for viewing only; the Halt hotkey reached here with one selected.
+            if (kvp.Key < 0)
+            {
+                unitIndexOffset += kvp.Value.Count;
+                continue;
+            }
 
             SquadEntity squadEntity = BattleManager.Instance.SquadManager.GetSquadEntityFromId(kvp.Key);
             if(squadEntity.SelfEntity == Entity.Null)
@@ -171,12 +199,20 @@ public class UnitPositioningManager : MonoBehaviour
                 averagePosition = new float3(averagePosition.x, 0, averagePosition.z);
                 unitIndexOffset += kvp.Value.Count;
 
+                // The slot centre is exact; the point average drifts when the last rank is short.
+                if (positionDrawer.TryGetLockedSquadPose(kvp.Key, out float3 lockedGoal, out quaternion lockedRotation))
+                {
+                    averagePosition = lockedGoal;
+                    desiredRotation = lockedRotation;
+                }
+
                 queuedOrder = new ()
                 {
                     Type = QueuedOrderType.Move,
                     Goal = averagePosition,
                     Rotation = desiredRotation,
-                    WidthAndDepth = positionDrawer.Formation.GetWidthAndDepth(squadEntity.SquadId)
+                    WidthAndDepth = positionDrawer.Formation.GetWidthAndDepth(squadEntity.SquadId),
+                    SpeedCap = speedCap
                 };
             }
             else if(_squadCommand == SquadCommand.Attack)
@@ -186,10 +222,13 @@ public class UnitPositioningManager : MonoBehaviour
                     IAudioRequester.Instance.PlayVoice(TabletopTavernData.Instance.GetRandomChargeSFX(squadEntity.UnitName));
                     chargeSFXPlayed = true;
                 }
+                int targetSquadId = _squadToAttack;
+                if (lockedTargets != null && lockedTargets.TryGetValue(kvp.Key, out int assignedTarget))
+                    targetSquadId = assignedTarget;
                 queuedOrder = new ()
                 {
                     Type = QueuedOrderType.Attack,
-                    TargetSquadId = _squadToAttack
+                    TargetSquadId = targetSquadId
                 };
             }
             else if(_squadCommand == SquadCommand.HaltAndFreeze) 
@@ -243,6 +282,56 @@ public class UnitPositioningManager : MonoBehaviour
         entityCommandBuffer.Playback(entityManager);
         entityCommandBuffer.Dispose();
         positionDrawer.TurnOff();
+        if (_squadCommand == SquadCommand.Move)
+            BattleManager.Instance.GroupManager.OnSquadsOrderedToMove(orderedSquadIds, lockedMove);
+    }
+    private static float GetSlowestUnitSpeed(Dictionary<int, List<Entity>> squads)
+    {
+        EntityManager entityManager = World.DefaultGameObjectInjectionWorld.EntityManager;
+        float slowest = float.MaxValue;
+        foreach (List<Entity> units in squads.Values)
+        {
+            foreach (Entity unit in units)
+            {
+                if (!entityManager.Exists(unit) || !entityManager.HasComponent<AgentLocomotion>(unit)) continue;
+                slowest = math.min(slowest, entityManager.GetComponentData<AgentLocomotion>(unit).Speed);
+            }
+        }
+        return slowest == float.MaxValue ? 0f : slowest;
+    }
+    private Dictionary<int, int> AssignLockedGroupTargets(List<int> memberSquadIds, int clickedSquadId)
+    {
+        EntityManager entityManager = World.DefaultGameObjectInjectionWorld.EntityManager;
+        SquadManager squadManager = BattleManager.Instance.SquadManager;
+
+        List<LockedGroupTargeting.SquadPoint> members = new();
+        foreach (int squadId in memberSquadIds)
+        {
+            if (squadId < 0) continue;
+            SquadEntity squad = squadManager.GetSquadEntityFromId(squadId, silentlyFail: true);
+            if (squad.SelfEntity == Entity.Null || !entityManager.HasComponent<SquadMovementComponent>(squad.SelfEntity)) continue;
+            members.Add(new LockedGroupTargeting.SquadPoint
+            {
+                SquadId = squadId,
+                Center = entityManager.GetComponentData<SquadMovementComponent>(squad.SelfEntity).SquadCenter
+            });
+        }
+
+        List<LockedGroupTargeting.SquadPoint> enemies = new();
+        using NativeArray<SquadEntity> enemySquads = squadManager.RetrieveSquadEntities(ComponentType.ReadOnly<EnemySquad>());
+        foreach (SquadEntity enemy in enemySquads)
+        {
+            if (!entityManager.Exists(enemy.SelfEntity)) continue;
+            if (entityManager.HasComponent<BrokenSquadTag>(enemy.SelfEntity)) continue;
+            if (!entityManager.HasComponent<SquadMovementComponent>(enemy.SelfEntity)) continue;
+            enemies.Add(new LockedGroupTargeting.SquadPoint
+            {
+                SquadId = enemy.SquadId,
+                Center = entityManager.GetComponentData<SquadMovementComponent>(enemy.SelfEntity).SquadCenter
+            });
+        }
+
+        return LockedGroupTargeting.Assign(members, enemies, clickedSquadId);
     }
     public void OrderSquadToDestination(SquadEntity _squadEntity, SquadDestination _squadDestination, EntityCommandBuffer? externalEcb = null)
     {
@@ -274,6 +363,11 @@ public class UnitPositioningManager : MonoBehaviour
         {
             entityCommandBuffer.AddComponent(_squadEntity.SelfEntity, new SquadMoveOverrideTag() { DistanceGoal = 0 });
         }
+
+        if (_squadDestination.SpeedCap > 0f)
+            entityCommandBuffer.AddComponent(_squadEntity.SelfEntity, new FormationSpeedCap { MaxSpeed = _squadDestination.SpeedCap });
+        else if (entityManager.HasComponent<FormationSpeedCap>(_squadEntity.SelfEntity))
+            entityCommandBuffer.RemoveComponent<FormationSpeedCap>(_squadEntity.SelfEntity);
 
         //actually wtf was this
         // Debug.Log($"SquadMoveOverrideTag already exists on squad {_squadEntity.SquadId}!!!!!!!!!!!!!!");
@@ -485,6 +579,8 @@ public class UnitPositioningManager : MonoBehaviour
         float3 startingPosition = SquadMovementComponent.SquadCenter;
         float3 goalPosition = GetWithdrawPosition(startingPosition, _squadEntity.SquadId > 0, skirmishRetreat);
         ecb.AddComponent(_squadEntity.SelfEntity, new SquadMoveOverrideTag() { DistanceGoal = 0 });
+        if (entityManager.HasComponent<FormationSpeedCap>(_squadEntity.SelfEntity))
+            ecb.RemoveComponent<FormationSpeedCap>(_squadEntity.SelfEntity);
         List<Entity> squadUnits = BattleManager.Instance.SquadManager.GetEntitiesFromSquad(_squadEntity.SquadId);
 
         //Set squad movement component goal position and rotation to face away from enemy
@@ -589,6 +685,40 @@ public class UnitPositioningManager : MonoBehaviour
                 QueueSquadCommand(SquadCommand.Move, _addToQueue);
                 break;
         }
+    }
+    /// <summary>
+    /// Where the squad is ordered to stand: its latest queued Move, else the mean of its units' ordered
+    /// slots. SquadCenter is not used because a Move pops off the queue at 80 percent of the way and the
+    /// centre still lags the slot by up to 16u, which a snapshot taken then would bake into the lock.
+    /// </summary>
+    public bool TryGetSquadIntendedPose(int squadId, out float3 center, out quaternion rotation)
+    {
+        center = float3.zero;
+        rotation = quaternion.identity;
+        EntityManager entityManager = World.DefaultGameObjectInjectionWorld.EntityManager;
+        SquadEntity squad = BattleManager.Instance.SquadManager.GetSquadEntityFromId(squadId, silentlyFail: true);
+        if (squad.SelfEntity == Entity.Null || !entityManager.Exists(squad.SelfEntity)) return false;
+        if (!entityManager.HasComponent<SquadMovementComponent>(squad.SelfEntity)) return false;
+
+        SquadMovementComponent movement = entityManager.GetComponentData<SquadMovementComponent>(squad.SelfEntity);
+        center = entityManager.HasBuffer<EntityReferenceBufferElement>(squad.SelfEntity)
+            ? GetAverageUnitPositionOfSquad(movement)
+            : movement.SquadCenter;
+        rotation = movement.SquadRotation;
+
+        if (entityManager.HasBuffer<QueuedOrder>(squad.SelfEntity))
+        {
+            DynamicBuffer<QueuedOrder> orders = entityManager.GetBuffer<QueuedOrder>(squad.SelfEntity);
+            for (int i = orders.Length - 1; i >= 0; i--)
+            {
+                if (orders[i].Type != QueuedOrderType.Move) continue;
+                center = orders[i].Goal;
+                rotation = orders[i].Rotation;
+                break;
+            }
+        }
+        center.y = 0f;
+        return true;
     }
     public float3 GetAverageUnitPositionOfSquad(SquadMovementComponent _squadEntity)
     {

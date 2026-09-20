@@ -46,6 +46,8 @@ namespace TJ
         [SerializeField] private RawImage spellTargetHintIcon;
         [SerializeField] private TMP_Text spellTargetHintText;
         private bool isOverUI;
+        // Which words the auto-retarget button currently carries, so the tooltip is rewritten on a change only.
+        private bool autoRetargetReadsAsFreeCast;
 
         [Header("Battle")]
         [SerializeField] private Button startBattleButton;
@@ -64,6 +66,7 @@ namespace TJ
         [SerializeField] private AttackArrowDrawer attackArrowPrefab;
         [SerializeField] private Transform drawingParent;
         private Dictionary<AttackArrowDrawer, int> attackArrowsDict = new();
+        public AttackArrowDrawer AttackArrowPrefab => attackArrowPrefab;
 
         [Header("Hovered Squad")]
         [SerializeField] private SquadHoveredTooltip squadHoveredTooltip;
@@ -521,6 +524,34 @@ namespace TJ
                     break;
             }
         }
+        /// <summary>1-based position of the squad's card in the bottom row, 0 if it has no card.</summary>
+        public int GetSquadCardNumber(int squadId)
+        {
+            for (int i = 0; i < squadDisplays.Count; i++)
+                if (squadDisplays[i] != null && squadDisplays[i].SquadId == squadId) return i + 1;
+            return 0;
+        }
+        public SquadDisplayCardBattle GetSquadCard(int squadId)
+        {
+            for (int i = 0; i < squadDisplays.Count; i++)
+                if (squadDisplays[i] != null && squadDisplays[i].SquadId == squadId) return squadDisplays[i];
+            return null;
+        }
+        // The strip's authored height above the cards, and how far it moves up while mage tiles stand on them.
+        private float spellTargetHintRestY;
+        private bool spellTargetHintRestYCached;
+        private const float SPELL_TARGET_HINT_LIFT = 74f;
+        public void SetSpellTargetHintLifted(bool lifted)
+        {
+            if (spellTargetHint == null) return;
+            RectTransform rect = (RectTransform)spellTargetHint.transform;
+            if (!spellTargetHintRestYCached)
+            {
+                spellTargetHintRestY = rect.anchoredPosition.y;
+                spellTargetHintRestYCached = true;
+            }
+            rect.anchoredPosition = new Vector2(rect.anchoredPosition.x, spellTargetHintRestY + (lifted ? SPELL_TARGET_HINT_LIFT : 0f));
+        }
         public void RefreshSelectedSquadButtonStates()
         {
             OnSelectedSquadsChanged(BattleManager.Instance.UnitSelectionManager.SelectedSquadIds);
@@ -586,6 +617,11 @@ namespace TJ
                 if(TabletopTavernConstants.Casts(squad.UnitType))
                 {
                     selectedSquadsContainMageUnits = true;
+                    // AutoTarget doubles as Free Cast for a mage.
+                    if (!squad.AutoTarget)
+                    {
+                        allSelectedSquadsAutoRetarget = false;
+                    }
                 }
 
                 if(TabletopTavernConstants.HoldsFire(squad.UnitType))
@@ -850,7 +886,10 @@ namespace TJ
             }
             else
             {
-                autoRetargetButton.gameObject.SetActive(false);
+                // A mage-only selection still gets the auto-retarget button, read as Free Cast: the
+                // same AutoTarget flag, the same B key, only the words change.
+                autoRetargetButton.gameObject.SetActive(selectedSquadsContainMageUnits);
+                if (selectedSquadsContainMageUnits) autoRetargetButton.SetOnOrOff(allSelectedSquadsAutoRetarget);
                 meleeModeButton.gameObject.SetActive(false);
                 fireAtWillButton.gameObject.SetActive(false);
                 volleyFireButton.gameObject.SetActive(false);
@@ -860,6 +899,18 @@ namespace TJ
             // CeaseFireTag, and RegisterSquad adds the tag to every squad regardless of type, so this
             // is the only thing that was gating the command off for them. The button still reads
             // "Cease Fire" on a mage.
+            bool mageOnlyFreeCast = selectedSquadsContainMageUnits && !selectedSquadsContainRangedUnits;
+            if (mageOnlyFreeCast != autoRetargetReadsAsFreeCast)
+            {
+                autoRetargetReadsAsFreeCast = mageOnlyFreeCast;
+                string key = InputControlPath.ToHumanReadableString(
+                    InputHandler.Instance.GameControls.Battle.ToggleAutoRetarget.bindings[0].effectivePath,
+                    InputControlPath.HumanReadableStringOptions.OmitDevice);
+                autoRetargetButton.SetTooltip(
+                    $"{LocalizationManager.Instance.GetText(mageOnlyFreeCast ? "MageFreeCastTitle" : "AutoRetargetTitle")} ({key})",
+                    LocalizationManager.Instance.GetText(mageOnlyFreeCast ? "MageFreeCastDesc" : "AutoRetargetDesc"));
+            }
+
             bool anySelectedSquadCanHoldFire = selectedSquadsContainArtilleryUnits || selectedSquadsContainRangedUnits || selectedSquadsContainMageUnits;
             ceaseFireButton.gameObject.SetActive(anySelectedSquadCanHoldFire);
             if (anySelectedSquadCanHoldFire)
@@ -1137,7 +1188,7 @@ namespace TJ
         {
             weatherTitleText.text = LocalizationManager.Instance.GetText("Weather") +" " + 
                 LocalizationManager.Instance.GetText(weather.ToString());
-            weatherDescriptionText.text = LocalizationManager.Instance.GetText(weather.ToString() + "Desc");
+            weatherDescriptionText.text = WeatherInfo.GetDescription(weather);
         }
         private void EnableAddingOrQueuingIcon()
         {

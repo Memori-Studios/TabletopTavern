@@ -30,7 +30,7 @@ partial struct UnitStateMachineSystem : ISystem
                 AgentBody,
                 RefRW<AnimationDataHolder>,
                 RefRW<AgentSonarAvoid>
-                >().WithPresent<AgentSonarAvoid, AgentCollider, AgentSeparation>().WithEntityAccess())
+                >().WithPresent<AgentSonarAvoid, AgentSeparation>().WithEntityAccess())
         {
             switch (unit.ValueRO.unitState)
             {
@@ -51,9 +51,6 @@ partial struct UnitStateMachineSystem : ISystem
                         {
                             unit.ValueRW.unitState = UnitState.Moving;
                             // Debug.Log($"UnitStateMachineSystem: Entity {entity} is now Moving");
-                            // Disable hard collision while moving so units flow through stationary
-                            // friendly formations. AgentSeparation handles soft spacing instead.
-                            entityCommandBuffer.SetComponentEnabled<AgentCollider>(entity, false);
                             agentSonarAvoid.ValueRW.BlockedStop = false;
                             // Large units use a narrower sonar cone so they push straight through
                             // infantry rather than arcing around them.
@@ -70,7 +67,6 @@ partial struct UnitStateMachineSystem : ISystem
                         {
                             unit.ValueRW.unitState = UnitState.Idle;
                             entityCommandBuffer.SetComponentEnabled<RotateUnit>(entity, true);
-                            entityCommandBuffer.SetComponentEnabled<AgentCollider>(entity, true);
                         }
                         break;
                     }
@@ -84,7 +80,6 @@ partial struct UnitStateMachineSystem : ISystem
                         agentSonarAvoid.ValueRW.BlockedStop = false;
                         agentSonarAvoid.ValueRW.MaxAngle = math.radians(120);
                         entityCommandBuffer.SetComponentEnabled<AgentSonarAvoid>(entity, true);
-                        entityCommandBuffer.SetComponentEnabled<AgentCollider>(entity, true);
                         entityCommandBuffer.SetComponentEnabled<AgentSeparation>(entity, false);
                         break;
                     }
@@ -101,7 +96,6 @@ partial struct UnitStateMachineSystem : ISystem
                         agentSonarAvoid.ValueRW.BlockedStop = true;
                         agentSonarAvoid.ValueRW.MaxAngle = math.radians(120);
                         entityCommandBuffer.SetComponentEnabled<AgentSonarAvoid>(entity, true);
-                        entityCommandBuffer.SetComponentEnabled<AgentCollider>(entity, true);
                         entityCommandBuffer.SetComponentEnabled<AgentSeparation>(entity, false);
 
                         // Stop the nav system from auto-rotating units based on velocity direction.
@@ -177,7 +171,6 @@ partial struct UnitStateMachineSystem : ISystem
                             entityCommandBuffer.SetComponent(entity, new Target { targetEntity = Entity.Null });
                             entityCommandBuffer.SetComponentEnabled<UnitFindTarget>(entity, false);
                         }
-                        entityCommandBuffer.SetComponentEnabled<AgentCollider>(entity, false);
                         entityCommandBuffer.SetComponentEnabled<AgentSeparation>(entity, true);
                         agentSonarAvoid.ValueRW.BlockedStop = false;
                         agentSonarAvoid.ValueRW.MaxAngle = math.radians(360);

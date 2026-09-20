@@ -247,9 +247,9 @@ namespace TJ
                                     }
                                     // Swamp and Rain both scale remaining speed by a fraction (e.g. 0.5 = half) and compound multiplicatively,
                                     // so stack them as a running multiplier instead of subtracting from the base amount.
-                                    // Rain reads the constant BattlefieldBonusSystem actually multiplies AgentLocomotion.Speed by rather than
+                                    // Rain reads the value BattlefieldBonusSystem actually multiplies AgentLocomotion.Speed by rather than
                                     // the authored bonus value, which that branch never touches (only large units carry the buffer element).
-                                    float speedFraction = isSwamp ? bonus.Value.Value : TabletopTavernConstants.RAIN_SPEED_MODIFIER;
+                                    float speedFraction = isSwamp ? bonus.Value.Value : WeatherRuleData.Rain.LargeUnitSpeedModifier;
                                     speedMultiplier *= speedFraction;
                                     string localisedBonusName = LocalizationManager.Instance.GetText(bonus.Value.BattlefieldBonusEnum.ToString());
                                     description += $"\n<color {ColorData.Error}>{localisedBonusName}: -{Mathf.RoundToInt((1f - speedFraction) * 100f)}% </color>";
@@ -265,9 +265,11 @@ namespace TJ
                                 }
                                 else if (bonus.Value.BattlefieldBonusEnum == BattlefieldBonusEnum.Fog)
                                 {
-                                    totalBonus -= (int)(amount * 0.5f);
+                                    // Same per-stat modifier and rounding as BattlefieldBonusSystem's Fog branch.
+                                    float fogModifier = unitStat == UnitStat.Range ? WeatherRuleData.Fog.RangeModifier : WeatherRuleData.Fog.AccuracyModifier;
+                                    totalBonus -= (int)amount - (int)(amount * fogModifier);
                                     string localisedBonusName = LocalizationManager.Instance.GetText(bonus.Value.BattlefieldBonusEnum.ToString());
-                                    description += $"\n<color {ColorData.Error}>{localisedBonusName}: -50% </color>";
+                                    description += $"\n<color {ColorData.Error}>{localisedBonusName}: -{Mathf.RoundToInt((1f - fogModifier) * 100f)}% </color>";
                                 }
                                 else
                                 {

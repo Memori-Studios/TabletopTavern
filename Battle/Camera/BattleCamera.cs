@@ -31,12 +31,15 @@ namespace TJ
         [SerializeField] private float _baseMoveSpeed = 150f;
         [SerializeField] private float _baseRotationSpeed = 450f;
         [SerializeField] private float scrollSpeedMultiplier = 10f;
+        [SerializeField] private float _baseZoomStep = 24f;
+        [SerializeField] private float zoomSharpness = 8f;
         [SerializeField] private float keyRotationSpeedMultiplier = 3.5f;
         [SerializeField] private float lerpSpeed = 0.05f;
 
         [Header("Runtime Values")]
         [SerializeField] private float _moveSpeed;
         [SerializeField] private float _rotationSpeed;
+        [SerializeField] private float _zoomStep;
 
         [SerializeField] private CameraShaker cameraShaker;
         public CameraShaker CameraShaker => cameraShaker;
@@ -48,6 +51,7 @@ namespace TJ
         private float pitch = 0f; // Rotation around the X-axis
         bool slowCamera;
         Vector3 velocity = Vector3.zero;
+        float pendingZoom;
         float cameraShakeCooldown = 0f;
         private Entity _cameraPositionEntity = Entity.Null;
         private void Start()
@@ -62,10 +66,12 @@ namespace TJ
             
             SettingsManager.Instance.CameraRotationSpeed.OnValueChanged += OnCameraRotationSpeedChanged;
             SettingsManager.Instance.CameraMovementSpeed.OnValueChanged += OnCameraMovementSpeedChanged;
+            SettingsManager.Instance.CameraZoomSpeed.OnValueChanged += OnCameraZoomSpeedChanged;
             EdgePanningToggle.OnEdgePanningChanged += OnEdgePanningChanged;
             edgePanning = PlayerPrefs.GetInt(EdgePanningToggle.PlayerPrefKey, 0) == 1;
             _rotationSpeed = _baseRotationSpeed * SettingsManager.Instance.CameraRotationSpeed.Value;
             _moveSpeed = _baseMoveSpeed * SettingsManager.Instance.CameraMovementSpeed.Value;
+            OnCameraZoomSpeedChanged(SettingsManager.Instance.CameraZoomSpeed.Value);
             BattleManager.Instance.OnGamePhaseChanged += OnGamePhaseChanged;
         }
 
@@ -105,6 +111,13 @@ namespace TJ
                 }
 
                 moveY -= InputHandler.Instance.MoveY * moveSpeed * scrollSpeedMultiplier * Time.unscaledDeltaTime;
+
+                // A wheel notch is a fixed distance spent over a few frames, so zoom feels the same at any frame rate.
+                pendingZoom -= InputHandler.Instance.ZoomScroll * _zoomStep * heightModifier;
+                pendingZoom = Mathf.Clamp(pendingZoom, minMaxHeight.x - cameraTarget.position.y, minMaxHeight.y - cameraTarget.position.y);
+                float zoomThisFrame = pendingZoom * (1f - Mathf.Exp(-zoomSharpness * Time.unscaledDeltaTime));
+                pendingZoom -= zoomThisFrame;
+                moveY += zoomThisFrame;
 
                 // Calculate movement direction in world space
                 Vector3 inputDirection = new Vector3(moveX, moveY, moveZ);
@@ -423,6 +436,7 @@ namespace TJ
             {
                 SettingsManager.Instance.CameraRotationSpeed.OnValueChanged -= OnCameraRotationSpeedChanged;
                 SettingsManager.Instance.CameraMovementSpeed.OnValueChanged -= OnCameraMovementSpeedChanged;
+                SettingsManager.Instance.CameraZoomSpeed.OnValueChanged -= OnCameraZoomSpeedChanged;
             }
             EdgePanningToggle.OnEdgePanningChanged -= OnEdgePanningChanged;
             if (BattleManager.HasInstance)
@@ -441,6 +455,11 @@ namespace TJ
         {
             value = Mathf.Clamp(value, 0.1f, 1f);
             _moveSpeed = _baseMoveSpeed * value;
+        }
+        private void OnCameraZoomSpeedChanged(float value)
+        {
+            value = Mathf.Clamp(value, 0.1f, 1f);
+            _zoomStep = _baseZoomStep * value;
         }
     }
 }

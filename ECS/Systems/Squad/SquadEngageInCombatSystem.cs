@@ -89,6 +89,12 @@ partial struct SquadEngageInCombatSystem : ISystem
                 squad.ValueRW.SquadCommand = SquadCommand.None;
                 // Debug.Log($"[SquadEngageInCombatSystem] Squad {squad.ValueRO.SquadId} had SquadMoveOverrideTag while engaging — cleared it.");
             }
+            // A charge that lands on a skirmishing archer squad strips its move tag a frame before this runs,
+            // so the Retreat command would outlive the retreat and the squad would idle after the fight.
+            else if (squad.ValueRO.SquadCommand == SquadCommand.Retreat)
+            {
+                squad.ValueRW.SquadCommand = SquadCommand.None;
+            }
            
             entityCommandBuffer.AddComponent<InCombat>(squad.ValueRO.SelfEntity);
             // Debug.Log($"SquadEngageInCombatSystem: squad {squad.ValueRO.SquadId} is engaging in combat");

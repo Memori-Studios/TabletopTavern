@@ -781,6 +781,28 @@ public class SquadManager : MonoBehaviour
             );
         }
     }
+    /// <summary>A live player squad as the custom battle roster sees it.</summary>
+    internal struct LiveSquad
+    {
+        public int SquadId;
+        public UnitName UnitName;
+        public int Prestige;
+        public string UniqueId;
+    }
+    /// <summary>
+    /// The roster a custom battle saves: the live squads in order with summons dropped and slots
+    /// renumbered, so a summon can never come back as a real unit on the next load.
+    /// </summary>
+    internal static SquadToLoad[] BuildCustomBattleRoster(IReadOnlyList<LiveSquad> liveSquads, Func<int, bool> isSummoned)
+    {
+        List<SquadToLoad> roster = new();
+        foreach (LiveSquad squad in liveSquads)
+        {
+            if (isSummoned(squad.SquadId)) continue;
+            roster.Add(new SquadToLoad(squad.UnitName, _prestige: squad.Prestige, roster.Count) { UniqueID = squad.UniqueId });
+        }
+        return roster.ToArray();
+    }
     public void SaveFormation(bool savingPlayer, bool isCustomBattle)
     {
         CampaignSaveData saveData = SaveDataHandler.Load();
@@ -832,7 +854,7 @@ public class SquadManager : MonoBehaviour
             for (int j = 0; j < squadGroups.Length; j++)
             {
                 if (squadGroups[j].squadIds.Count == 0) continue;
-                SavedSquadGroup savedGroup = new() { slotIndex = j };
+                SavedSquadGroup savedGroup = new() { slotIndex = j, isLocked = squadGroups[j].IsLocked };
                 foreach (int squadId in squadGroups[j].squadIds)
                 {
                     // Same reason as the battle positions above - a summoned squad's GUID would fail
@@ -854,21 +876,18 @@ public class SquadManager : MonoBehaviour
                 // Unlike the campaign branch below, this one builds the saved army from the live
                 // squads, so summons must be filtered out here or they would persist into the
                 // custom battle's roster and come back as real units next load.
-                var playerArmyList = new List<SquadToLoad>();
+                List<LiveSquad> liveSquads = new();
                 for (int j = 0; j < playerSquadEntities.Length; j++)
                 {
-                    if (BattleManager.Instance.ArmySpawnManager.IsSummonedSquad(playerSquadEntities[j].SquadId)) continue;
-
-                    playerArmyList.Add(new SquadToLoad(
-                        playerSquadEntities[j].UnitName,
-                        _prestige: GetSquadPrestige(playerSquadEntities[j].SquadId),
-                        playerArmyList.Count
-                    )
+                    liveSquads.Add(new LiveSquad
                     {
-                        UniqueID = BattleManager.Instance.ArmySpawnManager.GetUnitUniqueIDFromSquadID(playerSquadEntities[j].SquadId)
+                        SquadId = playerSquadEntities[j].SquadId,
+                        UnitName = playerSquadEntities[j].UnitName,
+                        Prestige = GetSquadPrestige(playerSquadEntities[j].SquadId),
+                        UniqueId = BattleManager.Instance.ArmySpawnManager.GetUnitUniqueIDFromSquadID(playerSquadEntities[j].SquadId),
                     });
                 }
-                customBattleData.playerCustomBattleArmy = playerArmyList.ToArray();
+                customBattleData.playerCustomBattleArmy = BuildCustomBattleRoster(liveSquads, BattleManager.Instance.ArmySpawnManager.IsSummonedSquad);
                 customBattleData.playerCustomBattleSquadBattlePositions = battlePositions;
                 customBattleData.playerCustomBattleSquadGroups = savedGroups;
 #if SPELLS

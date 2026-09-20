@@ -66,12 +66,18 @@ namespace TJ
             }
             return possibleBiomes[0].biome;
         }
+        // A weather_overrides.json region table replaces the authored list without touching the asset.
+        public List<WeatherLikelihood> GetPossibleWeathers()
+        {
+            return WeatherOverrideLoader.TryGetRegionWeathers(Race, out List<WeatherLikelihood> overridden) ? overridden : possibleWeathers;
+        }
         public Weather GetRandomWeather(System.Random random)
         {
+            List<WeatherLikelihood> table = GetPossibleWeathers();
             List<WeatherLikelihood> weatherLikelihoods = new();
             float totalLikelihood = 0f;
 
-            foreach (var weatherLikelihood in possibleWeathers)
+            foreach (var weatherLikelihood in table)
             {
                 totalLikelihood += weatherLikelihood.likelihood;
                 weatherLikelihoods.Add(weatherLikelihood);
@@ -86,7 +92,7 @@ namespace TJ
                     return weatherLikelihood.weather;
                 }
             }
-            return possibleWeathers[0].weather;
+            return table[0].weather;
         }
     }
 }

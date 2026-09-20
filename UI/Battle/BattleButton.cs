@@ -48,6 +48,11 @@ namespace TJ
             offGameObject.SetActive(true);
                 tooltipTrigger.SetUpToolTip(tooltipTitle, tooltipDescription);
         }
+        /// <summary>Rewrites the words only; the click wiring stays.</summary>
+        public void SetTooltip(string tooltipTitle, string tooltipDescription)
+        {
+            if (tooltipTrigger != null) tooltipTrigger.SetUpToolTip(tooltipTitle, tooltipDescription);
+        }
         public void SetOnOrOff(bool _isOn)
         {
             isOn = _isOn;

@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using UnityEditor;
@@ -40,6 +41,9 @@ namespace TJ
             File.WriteAllText(Path.Combine(templateFolder, RaceBonusOverrideLoader.FileName),
                 RaceBonusOverrideLoader.ExportTemplate());
 
+            File.WriteAllText(Path.Combine(templateFolder, WeatherOverrideLoader.FileName),
+                WeatherOverrideLoader.ExportTemplate(LoadAllMapRegions()));
+
             File.WriteAllText(Path.Combine(templateFolder, LocalizationOverrideLoader.FileName),
                 LocalizationOverrideLoader.ExportTemplate());
 
@@ -52,6 +56,16 @@ namespace TJ
 
             Debug.Log($"[ModTemplateExporter] Exported mod template to {templateFolder}");
             EditorUtility.RevealInFinder(templateFolder);
+        }
+
+        // MapRegion assets are not in Resources, so the template reads them through the AssetDatabase.
+        public static List<MapRegion> LoadAllMapRegions()
+        {
+            return AssetDatabase.FindAssets("t:MapRegion")
+                .Select(guid => AssetDatabase.LoadAssetAtPath<MapRegion>(AssetDatabase.GUIDToAssetPath(guid)))
+                .Where(region => region != null)
+                .OrderBy(region => (int)region.Race)
+                .ToList();
         }
     }
 }

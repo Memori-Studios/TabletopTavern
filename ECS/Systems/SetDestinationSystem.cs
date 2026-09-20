@@ -95,7 +95,9 @@ public partial struct SetDestinationJob : IJobEntity {
             );
         }
 
-        if(setDestination.destinationPosition.Equals(agentBody.Destination)) return;
+        // Compare in XZ: the nav agent remaps the destination's Y to the navmesh, so a 3D compare
+        // re-issued the destination every frame and every idle unit re-sought its slot unguarded.
+        if(setDestination.destinationPosition.xz.Equals(agentBody.Destination.xz)) return;
 
         if(setDestination.delayRemaining > 0) {
             setDestination.delayRemaining -= DeltaTime;

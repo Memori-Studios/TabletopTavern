@@ -11,6 +11,9 @@ public class ArcherRangeDrawer : MonoBehaviour
 {
     [SerializeField] private Line leftLine, rightLine;
     [SerializeField] private Disc arc, arc2;
+    // One Quad per side line, coloured on the line edge and clear one BandWidth into the cone. That
+    // is the same inner/outer fade arc2 draws along the arc, so the whole cone edge glows the same way.
+    [SerializeField] private Quad leftBand, rightBand;
     [SerializeField] private Color playerColor, enemyColor;
     // A caster's ring is a different shape from an archer's cone (see ApplyCasterShape), and reusing
     // the archer's gold made the two read as the same kind of threat. Blue says "spell range" at a
@@ -18,15 +21,23 @@ public class ArcherRangeDrawer : MonoBehaviour
     // is created for enemy squads too, unlike AttackArrowDrawer which destroys itself for them.
     [SerializeField] private Color casterPlayerColor = new Color(0.235f, 0.647f, 0.960f, 1f);
     [SerializeField] private Color casterEnemyColor = new Color(0.612f, 0.325f, 0.941f, 1f);
-    // arc2 is the wide soft band sitting inside the ring, and unlike everything else here it is not
-    // team-tinted - the prefab authors one pale yellow that both the player's gold arc and the
-    // enemy's red arc glow against. Against a blue caster ring that yellow reads as a different
-    // effect altogether. This is the same treatment the pale yellow gets from the gold arc, applied
-    // to the caster blue: each channel lifted toward white by the same amount, hue kept.
-    [SerializeField] private Color casterArc2Color = new Color(0.494f, 0.878f, 1f, 1f);
     [SerializeField] private float _fadeDuration = 0.11f;
 
+    // The soft band inside the cone edge is the team colour with every channel lifted toward white
+    // by this much, hue kept. On the player gold that gives the pale yellow the prefab used to author.
+    const float BandLift = 0.26f;
+
+    // Depth of the soft glow inside the cone edge. arc2 and both side bands share it so they meet flush.
+    const float BandWidth = 4f;
+    // The cone starts this many model-spacings outside the formation's front corners, so the lines
+    // clear the outermost models instead of cutting through them.
+    const float CornerMarginInSpreads = 0.5f;
+    // Half-angle of the cone. The prefab authors 45 for the discs, but the value here wins: the
+    // discs and the line ends are all set from it so the arc never sticks out past the lines.
+    const float ConeHalfAngleDeg = 40f;
+
     float range;
+    float _spread;
     ShapesBloom leftLineBloom, rightLineBloom, arcBloom, arc2Bloom;
     Entity cachedEntity;
     bool isSetUp = false, cachedOn;
@@ -89,6 +100,7 @@ public class ArcherRangeDrawer : MonoBehaviour
         // SquadRanOutOfAmmoSystem strips MageSquad once the last charge is spent, so the component
         // is not a durable answer to "is this a caster" while the type is.
         _isCaster = TabletopTavernConstants.Casts(TJ.TabletopTavernData.Instance.GetUnitTypeFromUnitName(_squadEntity.UnitName));
+        _spread = TabletopTavernConstants.GetSpread(TJ.TabletopTavernData.Instance.GetUnitSizeFromUnitName(_squadEntity.UnitName));
 
         Color teamColor = _isCaster
             ? (squadId > 0 ? casterPlayerColor : casterEnemyColor)
@@ -97,9 +109,10 @@ public class ArcherRangeDrawer : MonoBehaviour
         rightLineBloom.SetColor(teamColor);
         arcBloom.SetColor(teamColor);
 
-        // Only casters override arc2, so the archer band stays exactly the pale yellow the prefab
-        // authors for both teams. Bloom() below is what pushes this onto the Disc.
-        if (_isCaster) arc2Bloom.SetColor(casterArc2Color);
+        arc2Bloom.SetColor(new Color(
+            Mathf.Min(1f, teamColor.r + BandLift),
+            Mathf.Min(1f, teamColor.g + BandLift),
+            Mathf.Min(1f, teamColor.b + BandLift), 1f));
 
         Recalculate();
 
@@ -118,8 +131,22 @@ public class ArcherRangeDrawer : MonoBehaviour
         arc.Color       = new Color(_arcTargetColor.r,  _arcTargetColor.g,  _arcTargetColor.b,  0f);
         arc2.ColorInner = new Color(_arc2TargetOuter.r, _arc2TargetOuter.g, _arc2TargetOuter.b, 0f);
         arc2.ColorOuter = new Color(_arc2TargetOuter.r, _arc2TargetOuter.g, _arc2TargetOuter.b, 0f);
+        SetBandAlpha(0f);
 
         isSetUp = true;
+    }
+
+    // The bands borrow arc2's bloomed colour instead of carrying a ShapesBloom of their own, so the
+    // pale yellow (or the caster blue) is the same value by construction. ColorRight is the edge
+    // inside the cone and stays clear; only the line-side edge fades.
+    private void SetBandAlpha(float alpha)
+    {
+        Color edge  = new Color(_arc2TargetOuter.r, _arc2TargetOuter.g, _arc2TargetOuter.b, alpha);
+        Color clear = new Color(_arc2TargetOuter.r, _arc2TargetOuter.g, _arc2TargetOuter.b, 0f);
+        leftBand.ColorLeft   = edge;
+        leftBand.ColorRight  = clear;
+        rightBand.ColorLeft  = edge;
+        rightBand.ColorRight = clear;
     }
 
     public void Recalculate()
@@ -136,9 +163,12 @@ public class ArcherRangeDrawer : MonoBehaviour
             return;
         }
         SquadMovementComponent squadMovementComponent = entityManager.GetComponentData<SquadMovementComponent>(cachedEntity);
+        // Models sit on a grid of _spread, so the formation's half extent is count * spread / 2. This
+        // used to be a hardcoded 0.75 per model, which was half of an older infantry spread and drew
+        // the cone narrower than the squad once the spacing changed.
         int2 widthAndDepth = squadMovementComponent.SquadWidthAndDepth;
-        float width  = widthAndDepth.x * 0.75f;
-        float height = widthAndDepth.y * 0.75f;
+        float width  = (widthAndDepth.x + CornerMarginInSpreads * 2f) * _spread * 0.5f;
+        float height = widthAndDepth.y * _spread * 0.5f;
 
         if (entityManager.HasComponent<RangedSquad>(cachedEntity))
             range = entityManager.GetComponentData<RangedSquad>(cachedEntity).AttackRange;
@@ -150,8 +180,8 @@ public class ArcherRangeDrawer : MonoBehaviour
             range = entityManager.GetComponentData<MageSquad>(cachedEntity).AttackRange;
 
         arc.Radius     = range;
-        arc2.Radius    = range - 3.75f;
-        arc2.Thickness = 7.5f;
+        arc2.Radius    = range - BandWidth * 0.5f;
+        arc2.Thickness = BandWidth;
 
         if (_isCaster) ApplyCasterShape();
 
@@ -165,13 +195,37 @@ public class ArcherRangeDrawer : MonoBehaviour
             return new Vector3(x, center.y, z);
         }
 
-        Vector3 startPoint = CalculateArcPoint(center, range, 45f);
-        Vector3 endPoint   = CalculateArcPoint(center, range, 135f);
+        float startDeg = 90f - ConeHalfAngleDeg;
+        float endDeg   = 90f + ConeHalfAngleDeg;
+        arc.AngRadiansStart  = startDeg * Mathf.Deg2Rad;
+        arc.AngRadiansEnd    = endDeg   * Mathf.Deg2Rad;
+        arc2.AngRadiansStart = startDeg * Mathf.Deg2Rad;
+        arc2.AngRadiansEnd   = endDeg   * Mathf.Deg2Rad;
+
+        Vector3 startPoint = CalculateArcPoint(center, range, startDeg);
+        Vector3 endPoint   = CalculateArcPoint(center, range, endDeg);
 
         leftLine.Start  = center - (width * Vector3.right) + (height * Vector3.forward);
         leftLine.End    = endPoint;
         rightLine.Start = center + (width * Vector3.right) + (height * Vector3.forward);
         rightLine.End   = startPoint;
+
+        PlaceBand(leftBand,  leftLine.Start,  leftLine.End,  rightLine.Start);
+        PlaceBand(rightBand, rightLine.Start, rightLine.End, leftLine.Start);
+    }
+
+    // A and B sit on the line, C and D are pushed BandWidth into the cone. The normal is flipped
+    // toward the other line's start so both bands fall inside the cone whichever side they are on.
+    private static void PlaceBand(Quad band, Vector3 start, Vector3 end, Vector3 otherLineStart)
+    {
+        Vector3 dir = (end - start).normalized;
+        Vector3 n   = Vector3.Cross(dir, Vector3.up).normalized;
+        if (Vector3.Dot(n, otherLineStart - start) < 0f) n = -n;
+
+        band.A = start;
+        band.B = end;
+        band.C = end   + n * BandWidth;
+        band.D = start + n * BandWidth;
     }
 
     // An archer faces its target, and the prefab authors that honestly: both discs are DiscType.Arc
@@ -196,6 +250,8 @@ public class ArcherRangeDrawer : MonoBehaviour
 
         leftLine.enabled  = false;
         rightLine.enabled = false;
+        leftBand.enabled  = false;
+        rightBand.enabled = false;
     }
 
     public void TurnOn()
@@ -206,6 +262,19 @@ public class ArcherRangeDrawer : MonoBehaviour
         _fadeRoutine = StartCoroutine(Fade(1f));
         isOn = true;
     }
+
+    // The band inside the ring at full strength instead of its usual half, while a rail tile is hovered.
+    private bool _highlighted;
+    public void SetHighlighted(bool highlighted)
+    {
+        if (_highlighted == highlighted) return;
+        _highlighted = highlighted;
+        if (!isOn) return;
+        // Re-run the fade-in: it lands on the band strength for the new state.
+        if (_fadeRoutine != null) StopCoroutine(_fadeRoutine);
+        _fadeRoutine = StartCoroutine(Fade(1f));
+    }
+    private float BandStrength => _highlighted ? 1f : 0.5f;
 
     public void TurnOff()
     {
@@ -234,9 +303,10 @@ public class ArcherRangeDrawer : MonoBehaviour
             arc.Color = new Color(_arcTargetColor.r, _arcTargetColor.g, _arcTargetColor.b,
                 Mathf.Lerp(startAlphaArc, _arcTargetColor.a * targetAlpha, t));
 
-            float outerA = Mathf.Lerp(startAlphaArc2Out, _arc2TargetOuter.a * targetAlpha / 2f, t);
+            float outerA = Mathf.Lerp(startAlphaArc2Out, _arc2TargetOuter.a * targetAlpha * BandStrength, t);
             arc2.ColorInner = new Color(_arc2TargetOuter.r, _arc2TargetOuter.g, _arc2TargetOuter.b, 0f);
             arc2.ColorOuter = new Color(_arc2TargetOuter.r, _arc2TargetOuter.g, _arc2TargetOuter.b, outerA);
+            SetBandAlpha(outerA);
 
             yield return null;
         }

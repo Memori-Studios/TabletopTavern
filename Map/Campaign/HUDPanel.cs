@@ -891,7 +891,7 @@ namespace TJ.Map
             string weatherName = LocalizationManager.Instance.GetText(weather.ToString());
             string title = $"<color={ColorData.Primary}>{weatherWord}</color> {weatherName}";
             weatherHoverTitle.text = title;
-            weatherHoverDescription.text = $"<color={ColorData.Tier1}>{LocalizationManager.Instance.GetText(weather.ToString() + "Desc")}</color>";
+            weatherHoverDescription.text = $"<color={ColorData.Tier1}>{WeatherInfo.GetDescription(weather)}</color>";
             weatherHoverPanel.CGEnable();
         }
         public void DisplayJuiceOnSquad(ArmyJuice _armyJuice)

@@ -64,7 +64,8 @@ partial struct BattlefieldBonusSystem : ISystem
         _moraleComponentLookup   = state.GetComponentLookup<MoraleComponent>(false);
     }
 
-    [BurstCompile]
+    // Not Burst-compiled: it reads the managed WeatherRuleData statics a mod may have patched. The
+    // job below stays Bursted and takes the values as plain fields.
     public void OnUpdate(ref SystemState state)
     {
         _removeRainLookup.Update(ref state);
@@ -98,6 +99,11 @@ partial struct BattlefieldBonusSystem : ISystem
         state.Dependency = new BattlefieldBonusJob
         {
             ElapsedTime             = SystemAPI.Time.ElapsedTime,
+            RainSpeedModifier       = WeatherRuleData.Rain.LargeUnitSpeedModifier,
+            RainRemovesCharge       = WeatherRuleData.Rain.RemovesChargeBonus,
+            SnowMoralePenalty       = WeatherRuleData.Snow.MoralePenalty,
+            FogAccuracyModifier     = WeatherRuleData.Fog.AccuracyModifier,
+            FogRangeModifier        = WeatherRuleData.Fog.RangeModifier,
             RemoveRainLookup        = _removeRainLookup,
             RemoveSnowLookup        = _removeSnowLookup,
             RemoveFogLookup         = _removeFogLookup,
@@ -129,6 +135,11 @@ partial struct BattlefieldBonusSystem : ISystem
 [BurstCompile]
 partial struct BattlefieldBonusJob : IJobEntity
 {
+    public float RainSpeedModifier;
+    public bool RainRemovesCharge;
+    public float SnowMoralePenalty;
+    public float FogAccuracyModifier;
+    public float FogRangeModifier;
     [ReadOnly] public ComponentLookup<RemoveBattlefieldBonusRain>  RemoveRainLookup;
     [ReadOnly] public ComponentLookup<RemoveBattlefieldBonusSnow>  RemoveSnowLookup;
     [ReadOnly] public ComponentLookup<RemoveBattlefieldBonusFog>   RemoveFogLookup;
@@ -184,8 +195,8 @@ partial struct BattlefieldBonusJob : IJobEntity
                     Entity unitEntity = entityBuffer[j].Entity;
                     if (!ExistsLookup.HasComponent(unitEntity)) continue;
                     var loc = AgentLocomotionLookup[unitEntity];
-                    loc.Speed /= TabletopTavernConstants.RAIN_SPEED_MODIFIER;
-                    loc.Acceleration /= TabletopTavernConstants.RAIN_SPEED_MODIFIER;
+                    loc.Speed /= RainSpeedModifier;
+                    loc.Acceleration /= RainSpeedModifier;
                     AgentLocomotionLookup[unitEntity] = loc;
                     Ecb.RemoveComponent<InRainTag>(sortKey, unitEntity);
                 }
@@ -196,8 +207,8 @@ partial struct BattlefieldBonusJob : IJobEntity
             if (hasRemoveSnow && bonus.BattlefieldBonusEnum == BattlefieldBonusEnum.Snow)
             {
                 var morale = MoraleComponentLookup[entity];
-                morale.MaxMorale -= TabletopTavernConstants.SNOW_MORALE_PENALTY;
-                morale.CurrentMorale -= TabletopTavernConstants.SNOW_MORALE_PENALTY;
+                morale.MaxMorale -= SnowMoralePenalty;
+                morale.CurrentMorale -= SnowMoralePenalty;
                 MoraleComponentLookup[entity] = morale;
                 Ecb.RemoveComponent<InSnowTag>(sortKey, entity);
                 bonusBuffer.RemoveAt(i--);
@@ -388,15 +399,15 @@ partial struct BattlefieldBonusJob : IJobEntity
                     if (!InRainLookup.HasComponent(entity) && LargeTagLookup.HasComponent(entity))
                     {
                         Ecb.AddComponent<InRainTag>(sortKey, entity);
-                        Ecb.AddComponent<RemoveChargeBonusTag>(sortKey, entity);
+                        if (RainRemovesCharge) Ecb.AddComponent<RemoveChargeBonusTag>(sortKey, entity);
                         for (int j = 0; j < entityBuffer.Length; j++)
                         {
                             Entity unitEntity = entityBuffer[j].Entity;
                             if (!ExistsLookup.HasComponent(unitEntity)) continue;
                             Ecb.AddComponent<InRainTag>(sortKey, unitEntity);
                             var loc = AgentLocomotionLookup[unitEntity];
-                            loc.Speed *= TabletopTavernConstants.RAIN_SPEED_MODIFIER;
-                            loc.Acceleration *= TabletopTavernConstants.RAIN_SPEED_MODIFIER;
+                            loc.Speed *= RainSpeedModifier;
+                            loc.Acceleration *= RainSpeedModifier;
                             AgentLocomotionLookup[unitEntity] = loc;
                         }
                         bonusBuffer.Add(new BattlefieldBonusBufferElement { Value = bonus });
@@ -411,8 +422,8 @@ partial struct BattlefieldBonusJob : IJobEntity
                     {
                         Ecb.AddComponent<InSnowTag>(sortKey, entity);
                         var morale = MoraleComponentLookup[entity];
-                        morale.MaxMorale += TabletopTavernConstants.SNOW_MORALE_PENALTY;
-                        morale.CurrentMorale += TabletopTavernConstants.SNOW_MORALE_PENALTY;
+                        morale.MaxMorale += SnowMoralePenalty;
+                        morale.CurrentMorale += SnowMoralePenalty;
                         MoraleComponentLookup[entity] = morale;
                     }
                 }
@@ -457,7 +468,7 @@ partial struct BattlefieldBonusJob : IJobEntity
                                 if (ShootAttackLookup.HasComponent(unitEntity))
                                 {
                                     var sa = ShootAttackLookup[unitEntity];
-                                    int reduction = sa.Accuracy - (int)(sa.Accuracy * 0.5f);
+                                    int reduction = sa.Accuracy - (int)(sa.Accuracy * FogAccuracyModifier);
                                     bonus.Value = reduction;
                                     sa.Accuracy -= reduction;
                                     ShootAttackLookup[unitEntity] = sa;
@@ -467,7 +478,7 @@ partial struct BattlefieldBonusJob : IJobEntity
                                 if (ShootAttackLookup.HasComponent(unitEntity))
                                 {
                                     var sa = ShootAttackLookup[unitEntity];
-                                    int reduction = (int)sa.Range - (int)(sa.Range * 0.5f);
+                                    int reduction = (int)sa.Range - (int)(sa.Range * FogRangeModifier);
                                     bonus.Value = reduction;
                                     sa.Range -= reduction;
                                     ShootAttackLookup[unitEntity] = sa;

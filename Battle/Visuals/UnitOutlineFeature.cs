@@ -18,6 +18,9 @@ public class UnitOutlineFeature : ScriptableRendererFeature
     [SerializeField] private LayerMask modelLayers = 1;
     [Tooltip("How far in front of an outline or marker the terrain may be before it hides them. Lets grass through, not hills.")]
     [SerializeField] private float grassHeight = 1.5f;
+    [Tooltip("A marker line never draws thinner than this many pixels, so distant markers do not break into dots.")]
+    [Range(1f, 4f)]
+    [SerializeField] private float markerMinPixels = 1.2f;
     [Range(1f, 6f)]
     [SerializeField] private float widthPixels = 2f;
     [Tooltip("Depth ratio between neighbouring soldiers that draws a line between them. 0 = silhouette only.")]
@@ -47,15 +50,13 @@ public class UnitOutlineFeature : ScriptableRendererFeature
     {
         if (_pass == null) return;
         if (renderingData.cameraData.cameraType != CameraType.Game) return;
+        // Only the camera that draws the units; the tavern base camera and the minimap share its type.
+        if ((renderingData.cameraData.camera.cullingMask & (1 << TabletopTavernConstants.UNITS_LAYER)) == 0) return;
 
-        // The outline ships with the Spell Update; the ground marker ships in every build.
         uint activeOutlines = UnitOutlineState.ActiveMask;
-#if !SPELLS
-        activeOutlines = 0;
-#endif
         if (activeOutlines == 0 && UnitMarkerState.Count == 0) return;
 
-        _pass.Configure(activeOutlines, modelLayers, grassHeight, widthPixels, interiorEdgeRatio, hoverPlayerColor, hoverEnemyColor, selectedColor);
+        _pass.Configure(activeOutlines, modelLayers, grassHeight, markerMinPixels, widthPixels, interiorEdgeRatio, hoverPlayerColor, hoverEnemyColor, selectedColor);
         renderer.EnqueuePass(_pass);
     }
 
@@ -83,7 +84,10 @@ public class UnitOutlineFeature : ScriptableRendererFeature
         private class MarkerPassData
         {
             public Material material;
+            public MaterialPropertyBlock properties;
             public Mesh mesh;
+            public GraphicsBuffer buffer;
+            public int count;
         }
 
         private static readonly ShaderTagId DepthOnlyTag = new("DepthOnly");
@@ -94,6 +98,8 @@ public class UnitOutlineFeature : ScriptableRendererFeature
         private static readonly int ColorId = Shader.PropertyToID("_UnitOutlineColor");
         private static readonly int ParamsId = Shader.PropertyToID("_UnitOutlineParams");
         private static readonly int BlitScaleBiasId = Shader.PropertyToID("_BlitScaleBias");
+        private static readonly int MarkersId = Shader.PropertyToID("_UnitMarkers");
+        private static readonly int MarkerWidthId = Shader.PropertyToID("_UnitMarkerWidth");
 
         private readonly Material _outlineMaterial;
         private readonly Material _markerMaterial;
@@ -109,10 +115,13 @@ public class UnitOutlineFeature : ScriptableRendererFeature
         private uint _activeOutlines;
         private int _modelLayers;
         private float _grassHeight;
+        private float _markerMinPixels;
         private float _widthPixels;
         private float _interiorEdgeRatio;
         private RTHandle _compatOutlineDepth;
         private RTHandle _compatModelDepth;
+        private GraphicsBuffer _markerBuffer;
+        private readonly MaterialPropertyBlock _markerProperties = new();
 
         public UnitOutlinePass(Material outlineMaterial, Material markerMaterial)
         {
@@ -121,9 +130,10 @@ public class UnitOutlineFeature : ScriptableRendererFeature
             profilingSampler = new ProfilingSampler("Unit Outline");
         }
 
-        public void Configure(uint activeOutlines, LayerMask modelLayers, float grassHeight, float widthPixels, float interiorEdgeRatio, Color hoverPlayer, Color hoverEnemy, Color selected)
+        public void Configure(uint activeOutlines, LayerMask modelLayers, float grassHeight, float markerMinPixels, float widthPixels, float interiorEdgeRatio, Color hoverPlayer, Color hoverEnemy, Color selected)
         {
             _activeOutlines = activeOutlines;
+            _markerMinPixels = markerMinPixels;
             _modelLayers = modelLayers;
             _grassHeight = grassHeight;
             _widthPixels = widthPixels;
@@ -139,6 +149,32 @@ public class UnitOutlineFeature : ScriptableRendererFeature
             _compatOutlineDepth = null;
             _compatModelDepth?.Release();
             _compatModelDepth = null;
+            _markerBuffer?.Dispose();
+            _markerBuffer = null;
+        }
+
+        private static bool DrawMarkers => UnitMarkerState.Count > 0 && UnitMarkerState.Mesh != null;
+
+        // Uploads this frame's instances (ECS units first, then the placement preview) and returns the count.
+        private int UploadMarkers(CommandBuffer cmd)
+        {
+            int units = UnitMarkerState.UnitCount;
+            int preview = UnitMarkerState.Preview.Count;
+            int total = units + preview;
+            if (total == 0) return 0;
+
+            if (_markerBuffer == null || _markerBuffer.count < total)
+            {
+                _markerBuffer?.Dispose();
+                int capacity = Mathf.Max(256, Mathf.NextPowerOfTwo(total));
+                _markerBuffer = new GraphicsBuffer(GraphicsBuffer.Target.Structured, capacity, UnitMarkerInstance.Stride);
+            }
+
+            if (units > 0) cmd.SetBufferData(_markerBuffer, UnitMarkerState.Units.AsArray(), 0, 0, units);
+            if (preview > 0) cmd.SetBufferData(_markerBuffer, UnitMarkerState.Preview, 0, units, preview);
+            _markerProperties.SetBuffer(MarkersId, _markerBuffer);
+            _markerProperties.SetVector(MarkerWidthId, new Vector4(UnitMarkerState.LineThickness * 0.5f, _markerMinPixels * 0.5f, 0f, 0f));
+            return total;
         }
 
         private static RenderTextureDescriptor DepthDescriptor(in RenderTextureDescriptor cameraDescriptor)
@@ -161,8 +197,6 @@ public class UnitOutlineFeature : ScriptableRendererFeature
             properties.SetVector(BlitScaleBiasId, new Vector4(1f, 1f, 0f, 0f));
             return properties;
         }
-
-        private static bool DrawMarkers => UnitMarkerState.Count > 0 && UnitMarkerState.Mesh != null;
 
         #region Render Graph path
 
@@ -228,14 +262,24 @@ public class UnitOutlineFeature : ScriptableRendererFeature
 
             if (drawMarkers)
             {
-                using (IRasterRenderGraphBuilder builder = renderGraph.AddRasterRenderPass("Unit Markers", out MarkerPassData data, profilingSampler))
+                using (IUnsafeRenderGraphBuilder builder = renderGraph.AddUnsafePass("Unit Markers", out MarkerPassData data, profilingSampler))
                 {
                     data.material = _markerMaterial;
+                    data.properties = _markerProperties;
                     data.mesh = UnitMarkerState.Mesh;
+                    builder.UseTexture(resourceData.activeColorTexture, AccessFlags.ReadWrite);
                     builder.UseGlobalTexture(ModelDepthId);
                     builder.UseGlobalTexture(CameraDepthTextureId);
-                    builder.SetRenderAttachment(resourceData.activeColorTexture, 0, AccessFlags.ReadWrite);
-                    builder.SetRenderFunc((MarkerPassData d, RasterGraphContext context) => context.cmd.DrawMesh(d.mesh, Matrix4x4.identity, d.material, 0, 0));
+                    builder.AllowPassCulling(false);
+                    TextureHandle target = resourceData.activeColorTexture;
+                    builder.SetRenderFunc((MarkerPassData d, UnsafeGraphContext context) =>
+                    {
+                        CommandBuffer cmd = CommandBufferHelpers.GetNativeCommandBuffer(context.cmd);
+                        int count = UploadMarkers(cmd);
+                        if (count == 0) return;
+                        cmd.SetRenderTarget(target);
+                        cmd.DrawMeshInstancedProcedural(d.mesh, 0, d.material, 0, count, d.properties);
+                    });
                 }
             }
         }
@@ -296,8 +340,12 @@ public class UnitOutlineFeature : ScriptableRendererFeature
 
             if (drawMarkers)
             {
-                BindCameraTargets(cmd, renderer);
-                cmd.DrawMesh(UnitMarkerState.Mesh, Matrix4x4.identity, _markerMaterial, 0, 0);
+                int count = UploadMarkers(cmd);
+                if (count > 0)
+                {
+                    BindCameraTargets(cmd, renderer);
+                    cmd.DrawMeshInstancedProcedural(UnitMarkerState.Mesh, 0, _markerMaterial, 0, count, _markerProperties);
+                }
             }
 
             // Leaving the camera targets bound keeps URP's tracked attachments true for the next pass.

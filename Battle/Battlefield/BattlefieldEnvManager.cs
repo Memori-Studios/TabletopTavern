@@ -26,6 +26,8 @@ namespace TJ
         [SerializeField] private Volume rainVolume;
         [SerializeField] private GameObject rainObject;
         [SerializeField] private AudioSource rainAudioSource;
+        // Placeholder loop sits near full scale; scale keeps rain a bed under the battle mix.
+        private const float RainVolumeScale = 0.12f;
         [SerializeField] private BattlefieldBonusGameObject[] rainBattlefieldBonusObjects;
         private BattlefieldBonusGameObject[] cachedRainObjects;
         [SerializeField] private Light rainLight;
@@ -73,7 +75,7 @@ namespace TJ
         public void LoadBattleConditions()
         {
             IAudioRequester.Instance.effectsVolume.OnValueChanged += RainSoundLevelChange;
-            rainAudioSource.volume = IAudioRequester.Instance.effectsVolume.GetValue();
+            rainAudioSource.volume = RainVolumeScale * IAudioRequester.Instance.effectsVolume.GetValue();
 
             PlayerSaveData playerSaveData = SaveDataHandler.LoadPlayerSaveData();
             battleFieldPreset = SaveDataHandler.Load().battleFieldPreset;
@@ -89,7 +91,7 @@ namespace TJ
         public void RainSoundLevelChange(float _volume)
         {
             if(rainAudioSource != null)
-                rainAudioSource.volume = _volume;
+                rainAudioSource.volume = RainVolumeScale * _volume;
         }
         public void ToggleWeather(Weather selectedWeather)
         {

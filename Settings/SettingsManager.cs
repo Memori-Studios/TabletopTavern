@@ -57,9 +57,11 @@ namespace TJ
 
         public MonitoredData<float> CameraRotationSpeed;
         public MonitoredData<float> CameraMovementSpeed;
+        public MonitoredData<float> CameraZoomSpeed;
 
         [SerializeField] private MonitoredDataSlider cameraRotationSpeedSlider;
         [SerializeField] private MonitoredDataSlider cameraMovementSpeedSlider;
+        [SerializeField] private MonitoredDataSlider cameraZoomSpeedSlider;
 
         MemoriCanvasGroup activeCanvasGroup;
         float cachedTimeValue;
@@ -125,8 +127,10 @@ namespace TJ
 
             CameraRotationSpeed.Value = PlayerPrefs.GetFloat("cameraRotationSpeed", 0.5f);
             CameraMovementSpeed.Value = PlayerPrefs.GetFloat("cameraMovementSpeed", 0.5f);
+            CameraZoomSpeed.Value = PlayerPrefs.GetFloat("cameraZoomSpeed", 0.5f);
             cameraRotationSpeedSlider.AssignMonitoredData(CameraRotationSpeed);
             cameraMovementSpeedSlider.AssignMonitoredData(CameraMovementSpeed);
+            cameraZoomSpeedSlider.AssignMonitoredData(CameraZoomSpeed);
         }
         /// <summary>
         /// Opens the Collection as an additive overlay. The Settings panel deliberately stays open

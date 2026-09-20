@@ -33,6 +33,9 @@ public class SpellManager : MonoBehaviour
     // The one ActiveSpell prefab every cast starts from (AOE Spell); per-spell art is SpellData.SpellVisualPrefab.
     [SerializeField] private ActiveSpell aoeSpellPrefab;
     [SerializeField] private SpellCastButton[] spellCastButtons;
+    [Header("Caster rail")]
+    // Optional until the scene is wired: every call is null-guarded so the hotbar works without it.
+    [SerializeField] private MageCastRail mageCastRail;
 
     [Header("Pre-Battle Browsing (custom battle only)")]
     // The pool the player can swap from is every registered spell (SpellRegistry.All). It used to be
@@ -62,6 +65,10 @@ public class SpellManager : MonoBehaviour
     private SpellData armedMageSpell;
     public bool MageSpellArmed => armedMageSquadId != 0;
     public int ArmedMageSquadId => armedMageSquadId;
+    // Read each frame while a mage spell is armed, for the leash line and the approach hint.
+    public Vector3 ArmedMageCenter { get; private set; }
+    public float ArmedMageRange { get; private set; }
+    public bool ArmedMageOutOfRange { get; private set; }
     // How far inside casting range an out-of-range ground cast walks the mage, so it stops in range
     // rather than exactly on the edge where the squad's own footprint can leave it short.
     private const float APPROACH_RANGE_FRACTION = 0.9f;
@@ -127,10 +134,16 @@ public class SpellManager : MonoBehaviour
         BattleManager.Instance.OnGamePhaseChanged += GamePhaseChanged;
         InputHandler.Instance.OnSpellMenuDigit -= OnSpellMenuDigit;
         InputHandler.Instance.OnSpellMenuDigit += OnSpellMenuDigit;
+        InputHandler.Instance.OnSpellMenu -= OnSpellMenuOpened;
+        InputHandler.Instance.OnSpellMenu += OnSpellMenuOpened;
+        InputHandler.Instance.OnSpellMenuCanceled -= OnSpellMenuClosed;
+        InputHandler.Instance.OnSpellMenuCanceled += OnSpellMenuClosed;
         if(UnitSelectionManager.Instance != null)
         {
             UnitSelectionManager.Instance.OnSelectedSquadsChanged -= OnSelectedSquadsChangedForPlacement;
             UnitSelectionManager.Instance.OnSelectedSquadsChanged += OnSelectedSquadsChangedForPlacement;
+            UnitSelectionManager.Instance.OnSelectedSquadsChanged -= OnSelectedSquadsChangedForRail;
+            UnitSelectionManager.Instance.OnSelectedSquadsChanged += OnSelectedSquadsChangedForRail;
         }
 #endif
     }
@@ -211,6 +224,12 @@ public class SpellManager : MonoBehaviour
         // After the wiring pass - LoadSpellUI resets each button's affordability to true.
         RefreshAffordability();
         OnManaChanged?.Invoke(manaRemaining, manaMax);
+
+        if(mageCastRail != null)
+        {
+            mageCastRail.Initialize(hotbarSlotCount, ArmMageSpell, OnMageTileHover, () => armedMageSquadId, RefreshMageRail);
+            RefreshMageRail();
+        }
 
         if(browsingEnabled && spellBrowseMenu != null)
             spellBrowseMenu.Initialize(new List<SpellData>(SpellRegistry.All).ToArray(), SwapSpell, OnBrowseMenuHoverEnter, OnBrowseMenuHoverExit);
@@ -515,7 +534,10 @@ public class SpellManager : MonoBehaviour
         List<int> mages = GetSelectedMageSquadIds();
         if(mageIndex < mages.Count) ArmMageSpell(mages[mageIndex]);
     }
-    /// <summary>Selected player squads that still carry MageSquad (a spent mage is a melee body), in selection order.</summary>
+    /// <summary>
+    /// Selected player squads that still carry MageSquad (a spent mage is a melee body), in card
+    /// order left to right, which is the order the tiles sit in and the digits count in.
+    /// </summary>
     public List<int> GetSelectedMageSquadIds()
     {
         List<int> mages = new();
@@ -526,6 +548,8 @@ public class SpellManager : MonoBehaviour
             if(squad.SelfEntity == Entity.Null || !entityManager.HasComponent<MageSquad>(squad.SelfEntity)) continue;
             mages.Add(squadId);
         }
+        UIManager ui = BattleManager.Instance.UIManager;
+        mages.Sort((a, b) => ui.GetSquadCardNumber(a).CompareTo(ui.GetSquadCardNumber(b)));
         return mages;
     }
 
@@ -785,8 +809,10 @@ public class SpellManager : MonoBehaviour
     }
     public void DeselectSpell()
     {
+        int wasArmed = armedMageSquadId;
         armedMageSquadId = 0;
         armedMageSpell = null;
+        if(wasArmed != 0) RefreshRingHighlight(wasArmed);
         if(selectedSpellIndex < 0) return;
 
         spellCastButtons[selectedSpellIndex].SetSelected(false);
@@ -844,6 +870,7 @@ public class SpellManager : MonoBehaviour
         DeselectSpell();
         armedMageSquadId = squadId;
         armedMageSpell = spell;
+        RefreshRingHighlight(squadId);
 
         if(BattleManager.Instance.CursorMode != CursorMode.CastSpell)
             BattleManager.Instance.SetCursorMode(CursorMode.CastSpell);
@@ -907,6 +934,78 @@ public class SpellManager : MonoBehaviour
         // Leaving CastSpell runs CursorModeChanged, which clears the armed mage through DeselectSpell.
         bool squadsStillSelected = BattleManager.Instance.UnitSelectionManager.SelectedSquadIds.Count > 0;
         BattleManager.Instance.SetCursorMode(squadsStillSelected ? CursorMode.UnitsSelected : CursorMode.Free);
+    }
+
+    private void OnSelectedSquadsChangedForRail(List<int> selectedSquadIds) => RefreshMageRail();
+
+    /// <summary>Rebuilds the rail from the current selection. Also the rail's own callback when a tile's mage is spent.</summary>
+    private void RefreshMageRail()
+    {
+        if(mageCastRail == null || slotStates == null) return;
+
+        List<MageTileInfo> mages = new();
+        EntityManager entityManager = World.DefaultGameObjectInjectionWorld.EntityManager;
+        foreach(int squadId in GetSelectedMageSquadIds())
+        {
+            SquadEntity squad = BattleManager.Instance.SquadManager.GetSquadEntityFromId(squadId, true);
+            SpellData spell = TabletopTavernData.Instance.SquadAssetsDictionary[squad.UnitName].mageSpell;
+            if(spell == null) continue;
+
+            float cooldown = 0f;
+            DynamicBuffer<EntityReferenceBufferElement> units = entityManager.GetBuffer<EntityReferenceBufferElement>(squad.SelfEntity);
+            if(units.Length > 0 && entityManager.HasComponent<MageCast>(units[0].Entity))
+                cooldown = entityManager.GetComponentData<MageCast>(units[0].Entity).Cooldown;
+
+            SquadDisplayCardBattle card = BattleManager.Instance.UIManager.GetSquadCard(squadId);
+            mages.Add(new MageTileInfo
+            {
+                SquadId = squadId,
+                Entity = squad.SelfEntity,
+                Card = card != null ? card.transform : null,
+                UnitName = squad.UnitName,
+                Spell = spell,
+                CardNumber = BattleManager.Instance.UIManager.GetSquadCardNumber(squadId),
+                // Same sum SquadManager.SetUpSquadFlag uses for the flag's charge bar.
+                MaxCharges = TabletopTavernData.Instance.GetSquadStats(squad.UnitName).Ammunition
+                    + TabletopTavernConstants.PRESTIGE_AMMO_BONUS_MAGE * BattleManager.Instance.SquadManager.GetSquadPrestige(squadId),
+                Range = entityManager.GetComponentData<MageSquad>(squad.SelfEntity).AttackRange,
+                Cooldown = cooldown,
+            });
+        }
+        mageCastRail.Refresh(mages);
+        // The hint strip sits just above the card row; the tiles need that space while they show.
+        BattleManager.Instance.UIManager.SetSpellTargetHintLifted(mageCastRail.TileCount > 0);
+    }
+
+    // The mage's range ring holds its bright band while its tile is hovered or its spell is armed, so
+    // with four Hexenjäger on the field the player can tell which one they are about to spend.
+    private int hoveredTileSquadId;
+    private void OnMageTileHover(int squadId, bool hovered)
+    {
+        int previous = hoveredTileSquadId;
+        hoveredTileSquadId = hovered ? squadId : (hoveredTileSquadId == squadId ? 0 : hoveredTileSquadId);
+        RefreshRingHighlight(previous);
+        RefreshRingHighlight(squadId);
+    }
+    private void RefreshRingHighlight(int squadId)
+    {
+        if(squadId == 0) return;
+        if(BattleManager.Instance.SquadManager.SquadRangeDrawers.TryGetValue(squadId, out ArcherRangeDrawer drawer) && drawer != null)
+            drawer.SetHighlighted(squadId == armedMageSquadId || squadId == hoveredTileSquadId);
+    }
+
+    // While Y is held every spell tile lights its digit.
+    private void OnSpellMenuOpened() => SetSpellMenuOpen(true);
+    private void OnSpellMenuClosed() => SetSpellMenuOpen(false);
+    private void SetSpellMenuOpen(bool open)
+    {
+        if(spellCastButtons != null)
+        {
+            int count = hotbarSlotCount > 0 ? Mathf.Min(hotbarSlotCount, spellCastButtons.Length) : spellCastButtons.Length;
+            for(int i = 0; i < count; i++)
+                if(spellCastButtons[i] != null) spellCastButtons[i].SetMenuOpen(open);
+        }
+        if(mageCastRail != null) mageCastRail.SetMenuOpen(open);
     }
     #endregion
     public IEnumerator GetMouseCursorPosition()
@@ -975,9 +1074,27 @@ public class SpellManager : MonoBehaviour
                 spellCursorOrigin = MouseWorldPosition.Instance.GetWorldPosition();
             }
 
+            if(MageSpellArmed) UpdateArmedMageRange();
             UpdateTargetingFeedback(selectedSpellData, validSpellCastPoint);
             yield return null;
         }
+    }
+    // Where the armed mage stands and whether the cursor point is past its reach. A mage that stopped
+    // existing mid-aim (killed, or spent and converted) drops the arm.
+    private void UpdateArmedMageRange()
+    {
+        EntityManager entityManager = World.DefaultGameObjectInjectionWorld.EntityManager;
+        SquadEntity squad = BattleManager.Instance.SquadManager.GetSquadEntityFromId(armedMageSquadId, true);
+        Entity self = squad.SelfEntity;
+        if(self == Entity.Null || !entityManager.Exists(self) || !entityManager.HasComponent<MageSquad>(self)
+           || !entityManager.HasComponent<SquadMovementComponent>(self)) {
+            ExitMageCast();
+            return;
+        }
+        float3 center = entityManager.GetComponentData<SquadMovementComponent>(self).SquadCenter;
+        ArmedMageCenter = new Vector3(center.x, center.y, center.z);
+        ArmedMageRange = entityManager.GetComponentData<MageSquad>(self).AttackRange;
+        ArmedMageOutOfRange = Vector3.Distance(ArmedMageCenter, spellCursorOrigin) > ArmedMageRange;
     }
     // Cursor and the label above the unit cards. Runs every frame in cast mode; only writes on a change.
     private void UpdateTargetingFeedback(SpellData spell, bool valid)
@@ -987,6 +1104,8 @@ public class SpellManager : MonoBehaviour
             activeCursor = cursor;
             Cursor.SetCursor(cursor, Vector2.zero, UnityEngine.CursorMode.Auto);
         }
+        // A valid point past the armed mage's reach is still a cast and reads as one; the leash's
+        // colour, not the hint, says the mage will walk first.
         if(targetHintSpell == spell && targetHintValid == valid) return;
         targetHintSpell = spell;
         targetHintValid = valid;
@@ -996,7 +1115,7 @@ public class SpellManager : MonoBehaviour
             : $"<color=#E04040>{loc.GetText("SpellTargetInvalid")}</color> {string.Format(loc.GetText("SpellTargetValidTargets"), ValidTargetsLabel(spell))}";
         BattleManager.Instance.UIManager.ShowSpellTargetHint(cursor, message);
     }
-    private static string ValidTargetsLabel(SpellData spell)
+    public static string ValidTargetsLabel(SpellData spell)
     {
         LocalizationManager loc = LocalizationManager.Instance;
         if(spell.SpellTargetingType != SpellTargetingType.Squad) return loc.GetText("SpellTargetsGround");
@@ -1141,9 +1260,14 @@ public class SpellManager : MonoBehaviour
         if(InputHandler.HasInstance)
         {
             InputHandler.Instance.OnSpellMenuDigit -= OnSpellMenuDigit;
+            InputHandler.Instance.OnSpellMenu -= OnSpellMenuOpened;
+            InputHandler.Instance.OnSpellMenuCanceled -= OnSpellMenuClosed;
         }
         if(UnitSelectionManager.Instance != null)
+        {
             UnitSelectionManager.Instance.OnSelectedSquadsChanged -= OnSelectedSquadsChangedForPlacement;
+            UnitSelectionManager.Instance.OnSelectedSquadsChanged -= OnSelectedSquadsChangedForRail;
+        }
 #endif
     }
 }

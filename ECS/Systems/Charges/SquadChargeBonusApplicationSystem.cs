@@ -43,7 +43,7 @@ partial struct SquadChargeBonusApplicationSystem : ISystem
             if (!empowered &&
                (SystemAPI.HasComponent<InForestTag>(squad.SelfEntity) ||
                 SystemAPI.HasComponent<InSwampTag>(squad.SelfEntity) ||
-                SystemAPI.HasComponent<InRainTag>(squad.SelfEntity)))
+                (WeatherRuleData.Rain.RemovesChargeBonus && SystemAPI.HasComponent<InRainTag>(squad.SelfEntity))))
             {
                 Debug.LogWarning($"SquadChargeBonusApplicationSystem: Squad {squad.SquadId} is in forest or swamp or rain, dont apply charge bonus.");
                 continue;

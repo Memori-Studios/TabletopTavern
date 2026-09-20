@@ -14,6 +14,7 @@ partial struct MeleeUnitAttackSystem : ISystem
     private ComponentLookup<LocalTransform> localTransformComponentLookup;
     private ComponentLookup<MoveOverride> moveOverrideComponentLookup;
     private ComponentLookup<InMeleeRange> inMeleeRangeLookup;
+    private ComponentLookup<AgentShape> agentShapeLookup;
     private Unity.Mathematics.Random _random;
     private EntityQuery _infantryMeleeQuery;
     private EntityQuery _largeMeleeQuery;
@@ -25,15 +26,16 @@ partial struct MeleeUnitAttackSystem : ISystem
         localTransformComponentLookup = state.GetComponentLookup<LocalTransform>(true);
         moveOverrideComponentLookup = state.GetComponentLookup<MoveOverride>(true);
         inMeleeRangeLookup = state.GetComponentLookup<InMeleeRange>(false);
+        agentShapeLookup = state.GetComponentLookup<AgentShape>(true);
         _random = Unity.Mathematics.Random.CreateFromIndex(0);
         _infantryMeleeQuery = SystemAPI.QueryBuilder()
-            .WithAll<MeleeAttack, Target, SetDestination>()
+            .WithAll<MeleeAttack, Target, SetDestination, UnitCollisionBody>()
             .WithPresent<InCombat>()
             .WithAbsent<ThrowUnit, LargeTag, GarrisonGateUnit>()
             .WithDisabled<MoveOverride>()
             .Build();
         _largeMeleeQuery = SystemAPI.QueryBuilder()
-            .WithAll<MeleeAttack, Target, SetDestination, LargeTag>()
+            .WithAll<MeleeAttack, Target, SetDestination, LargeTag, UnitCollisionBody>()
             .WithPresent<InCombat>()
             .WithAbsent<ThrowUnit, GarrisonGateUnit>()
             .WithDisabled<MoveOverride>()
@@ -230,15 +232,15 @@ partial struct MeleeUnitAttackSystem : ISystem
         localTransformComponentLookup.Update(ref state);
         moveOverrideComponentLookup.Update(ref state);
         inMeleeRangeLookup.Update(ref state);
+        agentShapeLookup.Update(ref state);
 
         MeleeUnitCombatJob infantryJob = new MeleeUnitCombatJob {
             LocalTransformComponentLookup = localTransformComponentLookup,
             MoveOverrideComponentLookup = moveOverrideComponentLookup,
             InMeleeRangeLookup = inMeleeRangeLookup,
+            AgentShapeLookup = agentShapeLookup,
             DeltaTime = SystemAPI.Time.DeltaTime,
             random = _random,
-            AttackDistance = TabletopTavernConstants.MELEE_ATTACK_DISTANCE,
-            IsLargeJob = false
         };
         state.Dependency = infantryJob.Schedule(_infantryMeleeQuery, state.Dependency);
 
@@ -246,10 +248,9 @@ partial struct MeleeUnitAttackSystem : ISystem
             LocalTransformComponentLookup = localTransformComponentLookup,
             MoveOverrideComponentLookup = moveOverrideComponentLookup,
             InMeleeRangeLookup = inMeleeRangeLookup,
+            AgentShapeLookup = agentShapeLookup,
             DeltaTime = SystemAPI.Time.DeltaTime,
             random = _random,
-            AttackDistance = TabletopTavernConstants.MELEE_ATTACK_DISTANCE * 1.5f,
-            IsLargeJob = true
         };
         state.Dependency = largeJob.Schedule(_largeMeleeQuery, state.Dependency);
         }
@@ -263,12 +264,11 @@ public partial struct MeleeUnitCombatJob : IJobEntity {
     [ReadOnly] public ComponentLookup<LocalTransform> LocalTransformComponentLookup;
     [ReadOnly] public ComponentLookup<MoveOverride> MoveOverrideComponentLookup;
     public ComponentLookup<InMeleeRange> InMeleeRangeLookup;
+    [ReadOnly] public ComponentLookup<AgentShape> AgentShapeLookup;
     [ReadOnly] public float DeltaTime;
     public Unity.Mathematics.Random random;
-    [ReadOnly] public float AttackDistance;
-    [ReadOnly] public bool IsLargeJob;
 
-    public void Execute (ref MeleeAttack meleeAttack, ref Target target, ref SetDestination setDestination, Entity entity)
+    public void Execute (ref MeleeAttack meleeAttack, ref Target target, ref SetDestination setDestination, in UnitCollisionBody collisionBody, Entity entity)
     {
         if (target.targetEntity == Entity.Null) return;
         if(entity == Entity.Null) return;
@@ -287,8 +287,11 @@ public partial struct MeleeUnitCombatJob : IJobEntity {
         meleeAttack.timer -= DeltaTime;
 
         LocalTransform targetLocalTransform = LocalTransformComponentLookup[target.targetEntity];
-        float distanceToTarget = math.distancesq(localTransform.Position, targetLocalTransform.Position);
-        bool isCloseEnoughToAttack = distanceToTarget < AttackDistance;
+        // Range is contact (both radii) plus reach, so a unit attacks from the target's surface, not its centre.
+        float attackDistance = AgentShapeLookup[entity].Radius + collisionBody.Reach
+            + (AgentShapeLookup.TryGetComponent(target.targetEntity, out AgentShape targetShape) ? targetShape.Radius : 0.75f);
+        float distanceToTarget = math.distance(localTransform.Position, targetLocalTransform.Position);
+        bool isCloseEnoughToAttack = distanceToTarget < attackDistance;
 
         if (InMeleeRangeLookup.HasComponent(entity))
             InMeleeRangeLookup.SetComponentEnabled(entity, isCloseEnoughToAttack);

@@ -312,25 +312,21 @@ public class BattleInputManager : MonoBehaviour
             //casualties since the last selection change would otherwise leave the cached counts high
             unitSelectionManager.RefreshSelectedUnitCounts();
 
-            List<SetDestination> livePositions = unitSelectionManager.GetSelectedUnitsRepositionPositions();
-            List<SetDestination> positions = livePositions;
-            if (BattleManager.Instance.GroupManager.AreSelectedSquadsInLockedGroup(
-                    unitSelectionManager.SelectedSquadIds, out TJ.Battle.SquadGroup lockedGroup))
+            if (!unitSelectionManager.TryBeginLockedPreview(MouseWorldPosition.Instance.GetWorldPosition(), false))
             {
-                //a locked layout that no longer matches the live squads would preview stale points
-                if (lockedGroup.LockedPositions != null && lockedGroup.LockedPositions.Count == livePositions.Count)
-                    positions = lockedGroup.LockedPositions;
+                positionDrawer.PreviewMoveFormation(
+                    unitSelectionManager.GetMousePositionOffsetByFormationCenter(),
+                    unitSelectionManager.GetSelectedUnitsRepositionPositions()
+                );
             }
-
-            positionDrawer.PreviewMoveFormation(
-                unitSelectionManager.GetMousePositionOffsetByFormationCenter(),
-                positions
-            );
         }
         else if (_leftClickHeldDown && !rotateRepositioningFormation)
         {
+            // The locked block was parented at the raw mouse point, so it drags by the raw delta.
             positionDrawer.MovePositionToMouse(
-                unitSelectionManager.GetMousePositionOffsetByFormationCenter(),
+                positionDrawer.HasLockedLayout
+                    ? MouseWorldPosition.Instance.GetWorldPosition()
+                    : unitSelectionManager.GetMousePositionOffsetByFormationCenter(),
                 true
             );
         }
@@ -387,8 +383,16 @@ public class BattleInputManager : MonoBehaviour
         rotateRepositioningFormation = _turnOn;
         if (rotateRepositioningFormation)
         {
-            float3 offset = unitSelectionManager.GetFormationCenterPoint() - (float3)MouseWorldPosition.Instance.GetWorldPosition();
-            SetInitialMouseWorldPosition(unitSelectionManager.GetFormationCenterPoint() - offset);
+            if (positionDrawer.HasLockedLayout)
+            {
+                // A locked block spins about its own centre, wherever it has been dragged to.
+                SetInitialMouseWorldPosition(positionDrawer.LockedAnchorWorld);
+            }
+            else
+            {
+                float3 offset = unitSelectionManager.GetFormationCenterPoint() - (float3)MouseWorldPosition.Instance.GetWorldPosition();
+                SetInitialMouseWorldPosition(unitSelectionManager.GetFormationCenterPoint() - offset);
+            }
             Cursor.SetCursor(rotateCursor, hotSpot, UnityEngine.CursorMode.Auto);
 
             positionDrawer.ParentTheParented(initialMouseWorldPosition);
@@ -483,6 +487,7 @@ public class BattleInputManager : MonoBehaviour
     public void CancelPendingMouseActions(bool unitsAreSelected)
     {
         selectionAreaStarted = false;
+        unitSelectionManager.ClearSelectionAreaHover();
         if (cursorMode != CursorMode.MouseDown) return;
 
         positionDrawer.TurnOff();
@@ -504,6 +509,9 @@ public class BattleInputManager : MonoBehaviour
         // Debug.Log($"HandleUnitSelection");
         Vector2 selectionEndMousePosition = Input.mousePosition;
         //check if over a unit card
+
+        // Before the select, so the range drawers the selection turns on are not turned off again.
+        unitSelectionManager.ClearSelectionAreaHover();
 
         EntityManager entityManager = World.DefaultGameObjectInjectionWorld.EntityManager;
         EntityQuery entityQuery = new EntityQueryBuilder(Allocator.Temp).WithAll<Selected>().Build(entityManager);

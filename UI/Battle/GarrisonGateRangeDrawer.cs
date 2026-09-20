@@ -34,7 +34,7 @@ namespace TJ
 
             range = _squadData.stats.BaseRange;
             if (SaveDataHandler.Load().battleFieldPreset.weather == Weather.Fog)
-                range *= 0.5f;
+                range *= WeatherRuleData.Fog.RangeModifier;
             Apply();
 
             if (_arc != null)

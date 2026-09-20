@@ -274,6 +274,17 @@ namespace Memori.SaveData
             _playerCache = null;
         }
 
+#if UNITY_EDITOR
+        // Runs before any scene Awake, so a redirected Editor boot never reads the real save folder.
+        [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
+        static void ApplyDevSaveRoot()
+        {
+            string root = Memori.Scenes.DevOverrides.SaveRoot;
+            SetSaveRoot(string.IsNullOrEmpty(root) ? null : root);
+            if (!string.IsNullOrEmpty(root)) UnityEngine.Debug.LogWarning($"[SaveDataHandler] Dev save root: {root}");
+        }
+#endif
+
         public static bool CheckForGear(GearID _gearID)
         {
             return Load().Gear.Contains(_gearID);

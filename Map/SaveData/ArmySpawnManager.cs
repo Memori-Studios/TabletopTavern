@@ -1421,6 +1421,13 @@ namespace Memori.SaveData
                     entityManager.AddComponentData(entity, new GarrisonGateUnit());
                     entityManager.AddComponentData(entity, new MissileResistance { DamageMultiplier = 0.5f });
 
+                    // The arch has no navmesh obstacle, so the gate unit's collider must span the opening.
+                    float2 gateAxis = new float2(1f, 0f);
+                    if (_gateGameObjects.TryGetValue(_spawnIndex - 9000, out GameObject gateGO) && gateGO != null)
+                        gateAxis = math.normalizesafe(new float2(gateGO.transform.right.x, gateGO.transform.right.z), new float2(1f, 0f));
+                    float gateHalfWidth = _pendingGateWallsData != null ? _pendingGateWallsData.wallSegmentWidth * 0.5f : 5f;
+                    entityManager.AddComponentData(entity, new GateCollisionShape { Axis = gateAxis, HalfWidth = gateHalfWidth });
+
                     Entity arrowPrefab = entitiesReferences.GetProjectileEntityForUnitName(UnitName.Gate, false);
                     entityManager.AddComponentData(entity, new ShootAttack {
                         timer = 0f,

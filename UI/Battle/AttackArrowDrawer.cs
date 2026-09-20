@@ -34,6 +34,10 @@ namespace TJ
         [Header("Settings")]
         [SerializeField] private Color attackColor, movementColor;
         [SerializeField] private AnimationCurve polylineCurve;
+        // Dash sizes of the cast leg, in line widths. The caster leash reads them too, so both match.
+        [Header("Cast Approach")]
+        [SerializeField] private float approachDashSize = 3f;
+        [SerializeField] private float approachDashSpacing = 2f;
 
         //Local
         private EntityManager EntityManager;
@@ -55,6 +59,22 @@ namespace TJ
         // Lifts the blast ring clear of the ground it is drawn on. Matches the 0.5 the Archer
         // Range Drawer prefab authors on its own ground discs.
         private const float BLAST_RING_GROUND_OFFSET = 0.5f;
+        // A mage ordered at a target out of range walks in first. The movement line and head show
+        // that walk, ending where the squad centre first sits within casting range; this dashed red
+        // leg covers the rest, the same picture the leash showed before the click.
+        private Line castApproachLine;
+        private bool _isApproachingCast;
+        private float _approachRange;
+
+        #region Style shared with the caster leash
+        // ShapesDrawingManager reads these off the prefab so the leash matches the arrow the order becomes.
+        public Color AttackColor => attackColor;
+        public Color MovementColor => movementColor;
+        public Polyline MovementLine => movementLine;
+        public ShapeRenderer PointTriangle => pointTriangle;
+        public float ApproachDashSize => approachDashSize;
+        public float ApproachDashSpacing => approachDashSpacing;
+        #endregion
 
 
         private void Start()
@@ -138,6 +158,7 @@ namespace TJ
             gameObject.name = $"AttackArrow_{squadEntity.SquadId}_{squadEntity.UnitName}";
 
             SetUpBlastRadiusRing();
+            SetUpCastApproachLine();
 
             SetArrowState(ArrowState.Off);
             SetArrowToggleState(ArrowToggleState.ToggledOff);
@@ -281,6 +302,45 @@ namespace TJ
             return true;
         }
 
+        // Built at runtime from the Movement Line so it inherits every width and bloom tune on the prefab.
+        private void SetUpCastApproachLine()
+        {
+            if (!_isCaster) return;
+
+            GameObject lineObject = new GameObject("Cast Approach Line");
+            lineObject.transform.SetParent(movementLine.transform.parent, false);
+            lineObject.layer = movementLine.gameObject.layer;
+            castApproachLine = lineObject.AddComponent<Line>();
+            castApproachLine.Geometry = LineGeometry.Billboard;
+            castApproachLine.EndCaps = LineEndCap.Round;
+            castApproachLine.Thickness = movementLine.Thickness;
+            castApproachLine.ThicknessSpace = movementLine.ThicknessSpace;
+            castApproachLine.BlendMode = movementLine.BlendMode;
+            castApproachLine.ZTest = movementLine.ZTest;
+            castApproachLine.Dashed = true;
+            castApproachLine.DashSpace = DashSpace.Relative;
+            castApproachLine.DashSize = approachDashSize;
+            castApproachLine.DashSpacing = approachDashSpacing;
+            castApproachLine.Color = new Color(attackColor.r, attackColor.g, attackColor.b, movementLineBloom.BloomAmount);
+            lineObject.SetActive(false);
+        }
+
+        // True when the final leg of the queued path is a player cast the mage cannot make from that
+        // leg's start. Only an enabled MageManualCastOrder marks a cast: a right-click attack order
+        // walks the mage in to fight in melee and keeps the plain red arrow. A spent caster has no
+        // MageSquad and is excluded the same way.
+        private bool IsApproachingCast(bool isCasting, bool lastOrderIsAttack)
+        {
+            if (!_isCaster || isCasting || !lastOrderIsAttack) return false;
+            Entity self = squadEntity.SelfEntity;
+            if (!EntityManager.HasComponent<MageSquad>(self)) return false;
+            if (!EntityManager.HasComponent<MageManualCastOrder>(self) || !EntityManager.IsComponentEnabled<MageManualCastOrder>(self)) return false;
+
+            _approachRange = EntityManager.GetComponentData<MageSquad>(self).AttackRange;
+            Vector3 legStart = _destinationPoints.Count >= 2 ? _destinationPoints[^2] : startPoint;
+            return Vector3.Distance(legStart, _destinationPoints[^1]) > _approachRange;
+        }
+
         #endregion
 
         private void Update()
@@ -318,15 +378,12 @@ namespace TJ
             // on/off path cannot express "no arrow, but still show the footprint".
             bool isCasting = false;
             Vector3 castTargetCenter = Vector3.zero;
-            if (_isCaster)
-            {
-                isCasting = TryGetCastTargetCenter(out castTargetCenter);
-                UpdateBlastRadiusRing(isCasting, castTargetCenter);
-            }
+            if (_isCaster) isCasting = TryGetCastTargetCenter(out castTargetCenter);
 
             DynamicBuffer<QueuedOrder> queuedOrders = EntityManager.GetBuffer<QueuedOrder>(squadEntity.SelfEntity);
             if (queuedOrders.Length == 0)
             {
+                if (_isCaster) UpdateBlastRadiusRing(isCasting, castTargetCenter);
                 // Debug.Log($"[AttackArrow] Squad {squadEntity.SquadId}: SquadCommand is None → turning off");
                 if(_activeArrowState != ArrowState.Off)
                 {
@@ -360,6 +417,7 @@ namespace TJ
                         SquadEntity targetSquadEntity = BattleManager.Instance.SquadManager.GetSquadEntityFromId(targetSquadId, true);
                         if(targetSquadEntity.SelfEntity == Entity.Null)
                         {
+                            if (_isCaster) UpdateBlastRadiusRing(isCasting, castTargetCenter);
                             // Debug.Log($"[AttackArrow] Squad {squadEntity.SquadId}: Attack order target ID {targetSquadId} not found → turning off");
                             if(_activeArrowState != ArrowState.Off)
                                 SetArrowState(ArrowState.Off);
@@ -393,6 +451,13 @@ namespace TJ
             // was resolved at the top of Update, above the no-orders early-out.
             if (_isCaster)
             {
+                bool lastOrderIsAttack = _destinationPoints.Count > 0
+                    && queuedOrders[queuedOrders.Length - 1].Type == QueuedOrderType.Attack;
+                _isApproachingCast = IsApproachingCast(isCasting, lastOrderIsAttack);
+                // The ring sits on the pending target while the mage walks in, as it did on the leash.
+                Vector3 ringCenter = isCasting ? castTargetCenter : _isApproachingCast ? _destinationPoints[^1] : Vector3.zero;
+                UpdateBlastRadiusRing(isCasting || _isApproachingCast, ringCenter);
+
                 if (isCasting && !isInRangedFire) TurnOnRangedFire();
                 else if (!isCasting && isInRangedFire) TurnOffRangedFire();
             }
@@ -489,6 +554,20 @@ namespace TJ
             {
                 points[i + 1] = _destinationPoints[i];
             }
+            if (_isApproachingCast)
+            {
+                Vector3 target = points[^1];
+                Vector3 split = target - (target - points[^2]).normalized * _approachRange;
+                points[^1] = split;
+                castApproachLine.Start = split;
+                castApproachLine.End = target;
+                castApproachLine.gameObject.SetActive(true);
+            }
+            else if (_isCaster)
+            {
+                castApproachLine.gameObject.SetActive(false);
+            }
+
             movementLine.SetPoints(points);
             movementLine.UpdateMesh(true);
             
@@ -523,7 +602,8 @@ namespace TJ
         }
         private void SetArrowColor()
         {
-            Color color = (_squadDestinationType == SquadDestinationType.Attack) ? attackColor : movementColor;
+            // The walk in to casting range is a move; the cast leg carries the red on its own line.
+            Color color = (_squadDestinationType == SquadDestinationType.Attack && !_isApproachingCast) ? attackColor : movementColor;
             movementLineBloom.SetColor(color);
             triangleBloom.SetColor(color);
             archerRangeBloom.SetColor(color);

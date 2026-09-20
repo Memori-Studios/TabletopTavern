@@ -5,6 +5,8 @@ using Memori.Core;
 [RequireComponent(typeof(AudioSource))]
 public class FireplaceSFX : MonoBehaviour
 {
+    // Placeholder loop sits near full scale; scale keeps it under the Townspeople chatter bed.
+    const float FireplaceVolumeScale = 0.06f;
     AudioSource fireplaceAudioSource;
     private void Start()
     {
@@ -19,6 +21,6 @@ public class FireplaceSFX : MonoBehaviour
     }
     private void FireplaceSFXLevelChange(float volume) 
     {
-        fireplaceAudioSource.volume = 0.2f * volume;
+        fireplaceAudioSource.volume = FireplaceVolumeScale * volume;
     }
 }

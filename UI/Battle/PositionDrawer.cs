@@ -7,6 +7,7 @@ using TJ.IrregularGrid;
 using Unity.VisualScripting;
 using TJ.Shapes;
 using Memori.Localization;
+using TJ.Battle;
 
 namespace TJ
 {
@@ -31,6 +32,13 @@ namespace TJ
         [SerializeField] private bool validPositions = true;
         public bool ValidPositions => validPositions;
         [SerializeField] private Quaternion lookRotation = Quaternion.Euler(0, 0, 0);
+        // Locked-group preview state. Slot rotations are group-frame; the anchor is parent-local so the
+        // block keeps its centre while the parent is dragged or spun. Cleared by every other preview.
+        private readonly Dictionary<int, quaternion> _lockedSlotRotations = new();
+        private readonly Dictionary<int, float3> _lockedSlotOffsets = new();
+        private Vector3 _lockedAnchorLocal;
+        public bool HasLockedLayout => _lockedSlotRotations.Count > 0;
+        public Vector3 LockedAnchorWorld => positionsParent.TransformPoint(_lockedAnchorLocal);
 
         [Header("Spawn Zones")]
         [SerializeField]
@@ -59,6 +67,8 @@ namespace TJ
         [SerializeField] private Polyline secondaryPlayerDeploymentZoneLine;
         [SerializeField] private Polyline secondaryEnemyDeploymentZoneLine;
         [SerializeField] private Color validColor, invalidColor;
+        [Tooltip("Bloom intensity of the preview chevrons, carried in the colour alpha like the unit markers.")]
+        private Color _previewColor;
         [SerializeField] private LayerMask layerMask;
         private string positionError1, positionError2, positionError3, positionErrorBattle;
         private BattleLayoutType _layoutType;
@@ -78,10 +88,25 @@ namespace TJ
             BattleManager.Instance.OnGateDestroyed += GateDestroyedHandler;
             formation = boxFormation;
 
+            // Every zone line gets a wall; only the battle boundary hides away from the cursor.
+            AddZoneWall(battleZoneLine, true);
+            AddZoneWall(playerDeploymentZoneLine, false);
+            AddZoneWall(enemyDeploymentZoneLine, false);
+            AddZoneWall(secondaryPlayerDeploymentZoneLine, false);
+            AddZoneWall(secondaryEnemyDeploymentZoneLine, false);
+
             positionError1 = LocalizationManager.Instance.GetText("positionError");
             positionError2 = LocalizationManager.Instance.GetText("positionError2");
             positionError3 = LocalizationManager.Instance.GetText("positionError3");
             positionErrorBattle = LocalizationManager.Instance.GetText("positionErrorBattle");
+        }
+
+        private static void AddZoneWall(Polyline zoneLine, bool proximityFade)
+        {
+            if (zoneLine == null) return;
+            BoundaryProximityReveal wall = zoneLine.GetComponent<BoundaryProximityReveal>();
+            if (wall == null) wall = zoneLine.gameObject.AddComponent<BoundaryProximityReveal>();
+            wall.ProximityFade = proximityFade;
         }
 
         /// <summary>
@@ -256,18 +281,20 @@ namespace TJ
                 enemyDeploymentZoneLine.gameObject.SetActive(true);
             }
 
-            points = new Vector3[80];
-            //make 20 points along each side
-            for (int i = 0; i < 20; i++)
+            // 40 points per side so the cursor-proximity fade tapers smoothly along the long edges.
+            const int boundarySteps = 40;
+            points = new Vector3[boundarySteps * 4];
+            for (int i = 0; i < boundarySteps; i++)
             {
-                Vector3 pointA = new Vector3(math.lerp(battleZone.max.x, battleZone.min.x, i / 20f), 0, battleZone.min.z);
+                float t = i / (float)boundarySteps;
+                Vector3 pointA = new Vector3(math.lerp(battleZone.max.x, battleZone.min.x, t), 0, battleZone.min.z);
                 points[i] = GetPointOnTerrain(pointA);
-                Vector3 pointB = new Vector3(battleZone.min.x, 0, math.lerp(battleZone.min.z, battleZone.max.z, i / 20f));
-                points[i + 20] = GetPointOnTerrain(pointB);
-                Vector3 pointC = new Vector3(math.lerp(battleZone.min.x, battleZone.max.x, i / 20f), 0, battleZone.max.z);
-                points[i + 40] = GetPointOnTerrain(pointC);
-                Vector3 pointD = new Vector3(battleZone.max.x, 0, math.lerp(battleZone.max.z, battleZone.min.z, i / 20f));
-                points[i + 60] = GetPointOnTerrain(pointD);
+                Vector3 pointB = new Vector3(battleZone.min.x, 0, math.lerp(battleZone.min.z, battleZone.max.z, t));
+                points[i + boundarySteps] = GetPointOnTerrain(pointB);
+                Vector3 pointC = new Vector3(math.lerp(battleZone.min.x, battleZone.max.x, t), 0, battleZone.max.z);
+                points[i + boundarySteps * 2] = GetPointOnTerrain(pointC);
+                Vector3 pointD = new Vector3(battleZone.max.x, 0, math.lerp(battleZone.max.z, battleZone.min.z, t));
+                points[i + boundarySteps * 3] = GetPointOnTerrain(pointD);
             }
             battleZoneLine.SetPoints(points);
             battleZoneLine.gameObject.SetActive(true);
@@ -380,6 +407,7 @@ namespace TJ
             // Debug.Log($"Turning on position drawer with lookRotation: {lookRotation}");
             positionsParent.SetLocalPositionAndRotation(mousePosition, lookRotation);
 
+            ClearLockedLayout();
             MakePool();
             formation.SetUnitCounts(selectedSquadEntityAndEntitiesCountDict);
             // formation.CalculateUnitDepthAndWidth(formation.CachedDistance);
@@ -387,6 +415,7 @@ namespace TJ
         public void TurnOff()
         {
             // Debug.Log($"Turning off position drawer");
+            ClearLockedLayout();
             activePointCount = 0;
             foreach (UnitPrefabPoint point in unitPoints)
             {
@@ -401,6 +430,7 @@ namespace TJ
             positionsParent.SetLocalPositionAndRotation(mousePosition, lookRotation);
             // Debug.Log($"settings rotation to {lookRotation}");
 
+            ClearLockedLayout();
             MakePool();
             formation.CalculateUnitDepthAndWidthForSpawn(unitCount, _spread);
         }
@@ -423,6 +453,7 @@ namespace TJ
 
             positionsParent.SetPositionAndRotation(mousePosition, positionsParent.rotation);
 
+            ClearLockedLayout();
             MakePool();
 
             //reposition unitPoints to be at each entity's position
@@ -435,6 +466,62 @@ namespace TJ
                 i++;
             }
             activePointCount = i;
+        }
+        /// <summary>
+        /// Lays the pool out on a locked group's slots around anchorWorld. The parent keeps the
+        /// +X-facing angle convention of the box previews (facing = parent.rotation * RotateY(90)), so
+        /// RotateFormationToMouse and the Ctrl-rotate grandparent spin this block like any other preview.
+        /// </summary>
+        public void PreviewLockedFormation(Vector3 parentPosition, float parentAngleY, Vector3 anchorWorld, Dictionary<int, LockedSlot> slots)
+        {
+            SetMousePosition(parentPosition);
+            positionsParent.SetPositionAndRotation(mousePosition, Quaternion.Euler(0f, parentAngleY, 0f));
+
+            List<(int squadId, float3 position)> layout = formation.GenerateLockedPointPositions(slots);
+            unitCount = layout.Count;
+            ClearLockedLayout();
+            MakePool();
+            if (unitCount == 0)
+            {
+                activePointCount = 0;
+                return;
+            }
+
+            quaternion groupRotation = GroupRotation;
+            for (int i = 0; i < layout.Count; i++)
+            {
+                LockedSlot slot = slots[layout[i].squadId];
+                if (!_lockedSlotRotations.ContainsKey(layout[i].squadId))
+                {
+                    _lockedSlotRotations[layout[i].squadId] = slot.LocalRotation;
+                    _lockedSlotOffsets[layout[i].squadId] = slot.LocalOffset;
+                }
+                Transform point = unitPoints[i].transform;
+                point.position = anchorWorld + (Vector3)math.mul(groupRotation, layout[i].position);
+                point.rotation = math.mul(groupRotation, slot.LocalRotation);
+            }
+            _lockedAnchorLocal = positionsParent.InverseTransformPoint(anchorWorld);
+            activePointCount = layout.Count;
+        }
+        /// <summary>
+        /// The squad's goal and facing for the block as it currently sits under the cursor. False when
+        /// no locked preview is active or the squad has no slot in it.
+        /// </summary>
+        public bool TryGetLockedSquadPose(int squadId, out float3 goal, out quaternion rotation)
+        {
+            goal = float3.zero;
+            rotation = quaternion.identity;
+            if (!_lockedSlotRotations.TryGetValue(squadId, out quaternion localRotation)) return false;
+            LockedSlot slot = new() { LocalOffset = _lockedSlotOffsets[squadId], LocalRotation = localRotation };
+            LockedFormation.Project(slot, LockedAnchorWorld, GroupRotation, out goal, out rotation);
+            goal.y = 0f;
+            return true;
+        }
+        private quaternion GroupRotation => math.mul((quaternion)positionsParent.rotation, quaternion.RotateY(math.radians(90f)));
+        private void ClearLockedLayout()
+        {
+            _lockedSlotRotations.Clear();
+            _lockedSlotOffsets.Clear();
         }
         public void MovePositionToMouse(Vector3 _position, bool overrideRotation = false)
         {
@@ -497,8 +584,12 @@ namespace TJ
                     unitPoints.Add(Instantiate(unitPointPrefab, positionsParent));
                 }
                 unitPoints[i].gameObject.SetActive(true);
-                unitPoints[i].SelectedShape.GetComponent<ShapesBloom>().Bloom(validColor);
+                // A locked preview writes world rotations per point; the box previews rely on the prefab's local 90.
+                unitPoints[i].transform.localRotation = Quaternion.Euler(0f, 90f, 0f);
+                // The point keeps its transform for the zone checks; the visual is a chevron instance drawn by UnitOutlineFeature.
+                unitPoints[i].SelectedShape.gameObject.SetActive(false);
             }
+            _previewColor = validColor;
         }
         public void ConfirmValidityOfPositions(Team _team, bool _outrider)
         {
@@ -597,12 +688,31 @@ namespace TJ
         }
         private void ColorPoints(Color color)
         {
-            foreach (UnitPrefabPoint point in unitPoints)
+            _previewColor = color;
+        }
+
+        // Runs after every Update that moved the points, before the renderer feature uploads the instances.
+        private void LateUpdate()
+        {
+            UnitMarkerState.Preview.Clear();
+            float4 color = new(_previewColor.r, _previewColor.g, _previewColor.b, TabletopTavernConstants.TRIANGLE_PREVIEW_BLOOM);
+            for (int i = 0; i < unitPoints.Count; i++)
             {
-                // point.SelectedShape.Color = color;
-                // point.SpawningShape.Color = color;
-                point.SelectedShape.GetComponent<ShapesBloom>().Bloom(color);
+                UnitPrefabPoint point = unitPoints[i];
+                if (!point.gameObject.activeInHierarchy) continue;
+                Transform t = point.transform;
+                UnitMarkerState.Preview.Add(new UnitMarkerInstance
+                {
+                    Position = new float4(t.position, 0f),
+                    Rotation = new float4(t.rotation.x, t.rotation.y, t.rotation.z, t.rotation.w),
+                    Color = color,
+                });
             }
+        }
+
+        private void OnDisable()
+        {
+            UnitMarkerState.Preview.Clear();
         }
         private void OnCursorModeChanged(CursorMode _cursorMode)
         {

@@ -288,7 +288,7 @@ namespace TJ.Engagement
         int ChargeBonus = squadStats.ChargeBonus;
         float shieldBlockChance = 0;
 
-        if (rain) accuracyMultiplier *= 0.5f;
+        if (rain) accuracyMultiplier *= WeatherRuleData.Rain.AutoResolveAccuracyModifier;
 
         // Hero rules, player squads only, ahead of gear as in UnitSetUpSystem. Each stat lands on
         // the same local the rest of this method reads, so a rule reaches the simulation the way

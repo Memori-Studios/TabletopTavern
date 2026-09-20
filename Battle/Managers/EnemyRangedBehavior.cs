@@ -39,6 +39,13 @@ namespace TJ
         private bool _desperationPhaseTriggered;
         private bool _armyLossesFireAtWillTriggered;
 
+        // Idle watchdog: a ranged squad that neither moves, fights, shoots nor gets an order for this
+        // long is logged once with its full state, so a "frozen enemy" report carries the cause.
+        private const float IdleWarningSeconds = 30f;
+        private readonly Dictionary<Entity, float>  _idleSince   = new();
+        private readonly Dictionary<Entity, float3> _lastCenter  = new();
+        private readonly HashSet<Entity>            _idleLogged  = new();
+
         #region Lifecycle
 
         public void SetUp()
@@ -80,6 +87,9 @@ namespace TJ
         {
             _artillerySquads.Clear();
             _archerSquads.Clear();
+            _idleSince.Clear();
+            _lastCenter.Clear();
+            _idleLogged.Clear();
 
             NativeArray<Entity> enemyEntities = _enemySquadQuery.ToEntityArray(Allocator.Temp);
             foreach (Entity entity in enemyEntities)
@@ -123,6 +133,7 @@ namespace TJ
         {
             CheckDesperationPhase();
             CheckVolleyToFireAtWillSwitch();
+            WatchForIdleSquads();
         }
 
         /// <summary>
@@ -376,6 +387,128 @@ namespace TJ
 
         #endregion
 
+        #region Idle watchdog
+
+        private void WatchForIdleSquads()
+        {
+            float now = Time.time;
+            WatchList(_archerSquads, now);
+            WatchList(_artillerySquads, now);
+        }
+
+        private void WatchList(List<Entity> squads, float now)
+        {
+            foreach (Entity entity in squads)
+            {
+                if (!_entityManager.Exists(entity) || _entityManager.HasComponent<BrokenSquadTag>(entity))
+                {
+                    ForgetIdle(entity);
+                    continue;
+                }
+
+                float3 center = _entityManager.GetComponentData<SquadMovementComponent>(entity).SquadCenter;
+                bool moved = _lastCenter.TryGetValue(entity, out float3 last) && math.distancesq(center, last) > 1f;
+                _lastCenter[entity] = center;
+
+                if (moved || IsSquadBusy(entity))
+                {
+                    ForgetIdle(entity);
+                    continue;
+                }
+
+                if (!_idleSince.TryGetValue(entity, out float since))
+                {
+                    _idleSince[entity] = now;
+                    continue;
+                }
+
+                if (now - since < IdleWarningSeconds || _idleLogged.Contains(entity)) continue;
+                _idleLogged.Add(entity);
+                Debug.LogWarning(DescribeIdleSquad(entity, now - since, center));
+            }
+        }
+
+        private void ForgetIdle(Entity entity)
+        {
+            _idleSince.Remove(entity);
+            _idleLogged.Remove(entity);
+        }
+
+        // Busy = fighting, shooting or being moved. Standing still with a live target and no unit firing is not busy.
+        private bool IsSquadBusy(Entity entity)
+        {
+            if (_entityManager.HasComponent<InCombat>(entity)) return true;
+            if (_entityManager.HasComponent<FormationEngagedInRangedCombat>(entity)) return true;
+            if (_entityManager.HasComponent<SquadMoveOverrideTag>(entity)) return true;
+            if (_entityManager.HasComponent<ChargeSquad>(entity)) return true;
+
+            DynamicBuffer<EntityReferenceBufferElement> units = _entityManager.GetBuffer<EntityReferenceBufferElement>(entity);
+            for (int i = 0; i < units.Length; i++)
+            {
+                Entity unit = units[i].Entity;
+                if (!_entityManager.Exists(unit) || !_entityManager.HasComponent<Target>(unit)) continue;
+                if (_entityManager.GetComponentData<Target>(unit).targetEntity != Entity.Null) return true;
+            }
+            return false;
+        }
+
+        private string DescribeIdleSquad(Entity entity, float idleSeconds, float3 center)
+        {
+            SquadEntity squad = _entityManager.GetComponentData<SquadEntity>(entity);
+            string target = SquadLabel(squad.TargetSquadEntity);
+
+            DynamicBuffer<QueuedOrder> orders = _entityManager.GetBuffer<QueuedOrder>(entity);
+            string queue = orders.Length == 0
+                ? "empty"
+                : $"{orders[0].Type}/{orders[0].Status}/target {orders[0].TargetSquadId} (+{orders.Length - 1})";
+
+            var tags = new List<string>();
+            if (Enabled<WaitingForCommand>(entity))    tags.Add("WaitingForCommand");
+            if (Enabled<JustFollowingOrders>(entity))  tags.Add("JustFollowingOrders");
+            if (Enabled<DisengageFromCombat>(entity))  tags.Add("DisengageFromCombat");
+            if (_entityManager.HasComponent<HaltCommandTag>(entity))             tags.Add("HaltCommandTag");
+            if (_entityManager.HasComponent<OpponentRanAwayTag>(entity))         tags.Add("OpponentRanAwayTag");
+            if (_entityManager.HasComponent<IssueSquadCommand>(entity))          tags.Add("IssueSquadCommand");
+            if (_entityManager.HasComponent<RangedSquadSkirmishTag>(entity))     tags.Add("RangedSquadSkirmishTag");
+            if (_entityManager.HasComponent<CeaseFireTag>(entity) && _entityManager.IsComponentEnabled<CeaseFireTag>(entity)) tags.Add("CeaseFire");
+            SquadOverridesComponent overrides = _entityManager.GetComponentData<SquadOverridesComponent>(entity);
+            if (overrides.GuardMode) tags.Add("GuardMode");
+
+            int alive = 0;
+            DynamicBuffer<EntityReferenceBufferElement> units = _entityManager.GetBuffer<EntityReferenceBufferElement>(entity);
+            for (int i = 0; i < units.Length; i++) if (_entityManager.Exists(units[i].Entity)) alive++;
+
+            float range = _entityManager.HasComponent<RangedSquad>(entity) ? _entityManager.GetComponentData<RangedSquad>(entity).AttackRange : 0f;
+            string nearest = "none";
+            float nearestDist = float.MaxValue;
+            NativeArray<Entity> players = _playerSquadQuery.ToEntityArray(Allocator.Temp);
+            foreach (Entity player in players)
+            {
+                float dist = math.distance(center, _entityManager.GetComponentData<SquadMovementComponent>(player).SquadCenter);
+                if (dist >= nearestDist) continue;
+                nearestDist = dist;
+                nearest = $"{SquadLabel(player)} at {dist:F0}";
+            }
+            players.Dispose();
+
+            return $"[EnemyRangedWatchdog] squad {squad.SquadId} ({squad.UnitName}) idle {idleSeconds:F0}s: " +
+                   $"cmd={squad.SquadCommand}, target={target}, queue={queue}, tags=[{string.Join(", ", tags)}], " +
+                   $"units={alive}, center=({center.x:F0}, {center.z:F0}), range={range:F0}, nearest player={nearest}";
+        }
+
+        private bool Enabled<T>(Entity entity) where T : unmanaged, IComponentData, IEnableableComponent
+            => _entityManager.HasComponent<T>(entity) && _entityManager.IsComponentEnabled<T>(entity);
+
+        private string SquadLabel(Entity squadEntity)
+        {
+            if (squadEntity == Entity.Null || !_entityManager.Exists(squadEntity) || !_entityManager.HasComponent<SquadEntity>(squadEntity)) return "none";
+            SquadEntity squad = _entityManager.GetComponentData<SquadEntity>(squadEntity);
+            string broken = _entityManager.HasComponent<BrokenSquadTag>(squadEntity) ? " broken" : "";
+            return $"{squad.SquadId} ({squad.UnitName}{broken})";
+        }
+
+        #endregion
+
         #region Utility
 
         private void IssueAttackOrder(Entity squadEntity, int targetSquadId)
@@ -384,6 +517,7 @@ namespace TJ
             orders.Clear();
             orders.Add(new QueuedOrder { Type = QueuedOrderType.Attack, TargetSquadId = targetSquadId });
             _entityManager.SetComponentEnabled<WaitingForCommand>(squadEntity, false);
+            ForgetIdle(squadEntity);
         }
 
         private void SetSquadToFireAtWill(Entity squadEntity)

@@ -408,7 +408,7 @@ namespace TJ.Engagement
                     battlefieldWeatherText.SetText(localizedWeather);
 
                     battlefieldWeatherTooltip.gameObject.SetActive(weather != Weather.ClearSkies);
-                    string localizedDescription = LocalizationManager.Instance.GetText(weather.ToString() + "Desc");
+                    string localizedDescription = WeatherInfo.GetDescription(weather);
                     string tooltipMessage = weather == Weather.ClearSkies ? "" : localizedDescription;
                     battlefieldWeatherTooltip.SetUpToolTip(localizedWeather, tooltipMessage);
 
@@ -444,7 +444,7 @@ namespace TJ.Engagement
                 {
                     MapRegion region = campaignSaveManager.SaveData.battleFieldPreset.mapRegion;
                     _cachedWeatherNames = new Dictionary<Weather, string>();
-                    foreach (var w in region.possibleWeathers)
+                    foreach (var w in region.GetPossibleWeathers())
                         _cachedWeatherNames[w.weather] = LocalizationManager.Instance.GetText(w.weather.ToString());
                 }
             }
@@ -644,7 +644,7 @@ namespace TJ.Engagement
             Weather currentWeather = campaignSaveManager.SaveData.battleFieldPreset.weather;
             MapRegion mapRegion = campaignSaveManager.SaveData.battleFieldPreset.mapRegion;
             bool blockRain = CampaignManager.Instance.GearManager.CheckForGear(GearID.BraceletoftheSunGoddess);
-            var candidates = mapRegion.possibleWeathers.Where(w => w.weather != currentWeather && !(blockRain && w.weather == Weather.Rain)).ToList();
+            var candidates = mapRegion.GetPossibleWeathers().Where(w => w.weather != currentWeather && !(blockRain && w.weather == Weather.Rain)).ToList();
             if (candidates.Count == 0) return;
 
             heavensongButton.gameObject.SetActive(false);
@@ -663,7 +663,7 @@ namespace TJ.Engagement
         private System.Collections.IEnumerator RollWeatherText(Weather finalWeather, MapRegion mapRegion, Weather excludeWeather)
         {
             bool blockRain = CampaignManager.Instance.GearManager.CheckForGear(GearID.BraceletoftheSunGoddess);
-            var possibleWeathers = mapRegion.possibleWeathers.Where(w => w.weather != excludeWeather && !(blockRain && w.weather == Weather.Rain)).ToList();
+            var possibleWeathers = mapRegion.GetPossibleWeathers().Where(w => w.weather != excludeWeather && !(blockRain && w.weather == Weather.Rain)).ToList();
             float elapsed = 0f;
             float duration = 0.35f;
             float interval = 0.035f;

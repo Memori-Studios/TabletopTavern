@@ -4,6 +4,7 @@ using System.Collections.Generic;
 using UnityEngine;
 using Unity.Mathematics;
 using System.Linq;
+using TJ.Battle;
 
 public class BoxFormation : MonoBehaviour
 {
@@ -137,6 +138,26 @@ public class BoxFormation : MonoBehaviour
         }
 
         BattleManager.Instance.PositionDrawer.SetUnitPointsPositions();
+    }
+    /// <summary>
+    /// Group-frame layout (+Z = group facing) of every selected squad on its locked slot. Squads are
+    /// emitted in the same order as GeneratePointPositions so the flat index still matches the entity
+    /// consumption order in QueueSquadCommand and TeleportUnits.
+    /// </summary>
+    public List<(int squadId, float3 position)> GenerateLockedPointPositions(Dictionary<int, LockedSlot> slots)
+    {
+        List<(int squadId, float3 position)> layout = new();
+        foreach (KeyValuePair<int, int> pair in selectedSquadEntityAndEntitiesCountDict)
+        {
+            if (!slots.TryGetValue(pair.Key, out LockedSlot slot)) continue;
+            if (!SE_WidthDepthSpreadDict.TryGetValue(pair.Key, out float3 widthDepthSpread)) continue;
+            if (pair.Value <= 0) continue;
+
+            int2 widthAndDepth = new((int)widthDepthSpread.x, (int)widthDepthSpread.y);
+            foreach (float3 unitLocal in GeneratePositionsForSquad(widthAndDepth, pair.Value, widthDepthSpread.z))
+                layout.Add((pair.Key, slot.LocalOffset + math.mul(slot.LocalRotation, unitLocal)));
+        }
+        return layout;
     }
     public List<float3> GeneratePositionsForSquad(int2 widthAndDepth, int unitCount, float spread)
     {

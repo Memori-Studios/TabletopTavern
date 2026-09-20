@@ -43,11 +43,12 @@ public class UnitDebugUnitPosition : MonoBehaviour
                     float3 targetPosition = EntityManager.GetComponentData<LocalTransform>(target.targetEntity).Position;
                     line.Start = new Vector3(0, 0, 0);
                     line.End = targetPosition - position;
-                    // Unit unit = EntityManager.GetComponentData<Unit>(EntityToFollow);
-                    float meleeAttackDistanceSq = TabletopTavernConstants.MELEE_ATTACK_DISTANCE;
-                    // float meleeAttackDistanceSq = unit.unitType == UnitType.Pike ? GameAssets.PIKE_ATTACK_DISTANCE : GameAssets.MELEE_ATTACK_DISTANCE;
+                    // Same range rule as MeleeUnitCombatJob: both radii plus the attacker's reach.
+                    float meleeAttackDistance = EntityManager.GetComponentData<ProjectDawn.Navigation.AgentShape>(EntityToFollow).Radius
+                        + EntityManager.GetComponentData<ProjectDawn.Navigation.AgentShape>(target.targetEntity).Radius
+                        + EntityManager.GetComponentData<UnitCollisionBody>(EntityToFollow).Reach;
 
-                    bool isCloseEnoughToAttack = math.distancesq(position, targetPosition) < meleeAttackDistanceSq;
+                    bool isCloseEnoughToAttack = math.distance(position, targetPosition) < meleeAttackDistance;
                     line.Color = isCloseEnoughToAttack ? canReachColor : cantReachColor;
 
                 } else {

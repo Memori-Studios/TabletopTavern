@@ -10,6 +10,7 @@ namespace TJ.Shapes
         [SerializeField] private float bloomAmount;
         [SerializeField] private Color color;
         [SerializeField] private bool bloomOnEnable = true;
+        public float BloomAmount => bloomAmount;
 
         private void OnEnable()
         {

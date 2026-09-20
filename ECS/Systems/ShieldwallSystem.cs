@@ -4,8 +4,8 @@ using ProjectDawn.Navigation;
 
 // Bjorn's Shieldwall: brace a friendly squad - its units become knockback-immune and move at half speed
 // for a duration. Cast via SpellData.BracesTarget (ActiveSpell adds ShieldwallTag to the squad).
-// Knockback immunity reuses the existing ResistKnockbackTag that SpellSystem / ExplosionSystem /
-// LargeUnitPushSystem already honor; ShieldwallResistGrantedTag marks only the units WE made immune, so
+// Knockback immunity reuses the existing ResistKnockbackTag that SpellSystem / ExplosionSystem
+// already honor; ShieldwallResistGrantedTag marks only the units WE made immune, so
 // a unit that was immune from spawn never has that immunity stripped on expiry. Speed is scaled by a
 // multiply/divide pair (like the Rain modifier) so it restores exactly regardless of the base value.
 [UpdateInGroup(typeof(SimulationSystemGroup))]

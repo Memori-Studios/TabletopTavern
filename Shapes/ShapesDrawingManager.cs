@@ -62,6 +62,23 @@ public class ShapesDrawingManager : ImmediateModeShapeDrawer
     [SerializeField] private GameObject _edgeParticlesPrefab;
 
     private float _ringAlpha;
+
+    [Header("Mage leash")]
+    // From the armed mage to the cursor: caster blue while the point is in reach. Out of range it
+    // splits where the mage would come into reach: a solid movement-green leg with an arrow head up
+    // to that point, then dashed attack-red on to the target.
+    [SerializeField] [ColorUsage(true, true)] private Color _leashInRangeColor = new Color(0.235f, 0.647f, 0.960f, 1f);
+    // Width, red and green, glow, dashes and the head shape are read off the Attack Arrow prefab, so
+    // the leash matches the arrow the order becomes and follows every tune of that prefab.
+    private bool _arrowStyleChecked, _arrowStyleValid;
+    private float _arrowThickness, _arrowLineBloom, _arrowHeadBloom, _arrowHeadRoundness;
+    private float _arrowDashSize, _arrowDashSpacing;
+    private Color _arrowAttackColor, _arrowMovementColor;
+    private Vector3 _arrowHeadA, _arrowHeadB, _arrowHeadC;
+    private float _leashAlpha;
+    private Vector3 _leashStart, _leashEnd;
+    private bool _leashOutOfRange;
+    private float _leashRange;
     // The cast point without the ground offset, for the particle overlays.
     private Vector3 _castPoint;
     private GameObject _magicCircle;
@@ -102,14 +119,33 @@ public class ShapesDrawingManager : ImmediateModeShapeDrawer
         float target = show ? 1f : 0f;
         _ringAlpha = _spellRingFadeSeconds <= 0f ? target
             : Mathf.MoveTowards(_ringAlpha, target, Time.unscaledDeltaTime / _spellRingFadeSeconds);
+
+        // The leash follows the cursor whether or not the point is valid: the question it answers
+        // is "can it reach", which the player asks before they find a target.
+        bool leash = BattleManager.Instance.CursorMode == CursorMode.CastSpell
+                     && _spellManager.MouseReleased
+                     && _spellManager.MageSpellArmed;
+        if(leash) {
+            _leashStart = _spellManager.ArmedMageCenter + Vector3.up * _groundOffset;
+            _leashEnd = _spellManager.SpellCursorOrigin + Vector3.up * _groundOffset;
+            _leashOutOfRange = _spellManager.ArmedMageOutOfRange;
+            _leashRange = _spellManager.ArmedMageRange;
+        }
+        float leashTarget = leash ? 1f : 0f;
+        _leashAlpha = _spellRingFadeSeconds <= 0f ? leashTarget
+            : Mathf.MoveTowards(_leashAlpha, leashTarget, Time.unscaledDeltaTime / _spellRingFadeSeconds);
     }
 
     public override void DrawShapes( Camera cam )
     {
-        if(_ringAlpha <= 0f) return;
+        if(_ringAlpha <= 0f && _leashAlpha <= 0f) return;
 
         // Before the transparent pass: the squad flags do not write depth, so they must draw after this to sit on top.
         using( Draw.Command( cam, UnityEngine.Rendering.Universal.RenderPassEvent.AfterRenderingSkybox ) ){
+            // The leash shows through units and terrain, as the Attack Arrow prefab does (ZTest Always).
+            Draw.ZTest = UnityEngine.Rendering.CompareFunction.Always;
+            if(_leashAlpha > 0f) DrawLeash();
+            if(_ringAlpha <= 0f) return;
             // Normal depth test: units in front hide the drawing, as a ground decal should.
             Draw.ZTest = UnityEngine.Rendering.CompareFunction.LessEqual;
             DrawAreaBand();
@@ -129,6 +165,85 @@ public class ShapesDrawingManager : ImmediateModeShapeDrawer
             if(_showStar) DrawPentagram(starColor);
             DrawWisps(ringColor, starColor);
         }
+    }
+    private bool LoadArrowStyle()
+    {
+        if(_arrowStyleChecked) return _arrowStyleValid;
+        _arrowStyleChecked = true;
+        AttackArrowDrawer arrow = BattleManager.Instance.UIManager.AttackArrowPrefab;
+        if(arrow == null || arrow.MovementLine == null || arrow.PointTriangle == null) {
+            Debug.LogError("ShapesDrawingManager: UIManager has no Attack Arrow prefab, or it is missing its line or triangle - the mage leash will not draw.");
+            return false;
+        }
+        Triangle head = arrow.PointTriangle as Triangle;
+        if(head == null) {
+            Debug.LogError("ShapesDrawingManager: the Attack Arrow prefab's point triangle is not a Shapes Triangle - the mage leash will not draw.");
+            return false;
+        }
+        _arrowAttackColor = arrow.AttackColor;
+        _arrowMovementColor = arrow.MovementColor;
+        _arrowThickness = arrow.MovementLine.Thickness;
+        _arrowLineBloom = arrow.MovementLine.GetComponent<ShapesBloom>().BloomAmount;
+        _arrowHeadBloom = head.GetComponent<ShapesBloom>().BloomAmount;
+        _arrowHeadRoundness = head.Roundness;
+        _arrowDashSize = arrow.ApproachDashSize;
+        _arrowDashSpacing = arrow.ApproachDashSpacing;
+        Vector3 scale = head.transform.localScale;
+        _arrowHeadA = Vector3.Scale(head.A, scale);
+        _arrowHeadB = Vector3.Scale(head.B, scale);
+        _arrowHeadC = Vector3.Scale(head.C, scale);
+        _arrowStyleValid = true;
+        return true;
+    }
+    // Glow works as on the prefab: Lighten blend with the bloom amount in the alpha, which the shader multiplies into the colour.
+    private Color ArrowColor(Color color, float bloom)
+    {
+        color.a = bloom * _leashAlpha;
+        return color;
+    }
+    // In reach: one solid blue line. Out of reach: the walk (green, arrow head where the mage enters
+    // range) and then the remaining gap to the target (dashed red).
+    private void DrawLeash()
+    {
+        if(!LoadArrowStyle()) return;
+
+        Draw.BlendMode = ShapesBlendMode.Lighten;
+        Draw.ThicknessSpace = ThicknessSpace.Meters;
+        Draw.LineGeometry = LineGeometry.Billboard;
+        Draw.LineEndCaps = LineEndCap.Round;
+
+        if(!_leashOutOfRange) {
+            Draw.Line(_leashStart, _leashEnd, _arrowThickness, ArrowColor(_leashInRangeColor, _arrowLineBloom));
+            Draw.BlendMode = ShapesBlendMode.Transparent;
+            return;
+        }
+
+        Vector3 delta = _leashEnd - _leashStart;
+        float distance = delta.magnitude;
+        if(distance <= 0.001f) return;
+        Vector3 direction = delta / distance;
+        // Where the squad centre first sits within range of the point: the approach order's own goal.
+        Vector3 split = _leashStart + direction * Mathf.Max(0f, distance - _leashRange);
+
+        Draw.Line(_leashStart, split, _arrowThickness, ArrowColor(_arrowMovementColor, _arrowLineBloom));
+        DrawArrowHead(split, direction);
+
+        DashStyle dashes = DashStyle.defaultDashStyle;
+        dashes.size = _arrowDashSize;
+        dashes.spacing = _arrowDashSpacing;
+        using(Draw.DashedScope(dashes)) {
+            Draw.Line(split, _leashEnd, _arrowThickness, ArrowColor(_arrowAttackColor, _arrowLineBloom));
+        }
+        Draw.BlendMode = ShapesBlendMode.Transparent;
+    }
+    // The prefab's triangle in world space: AttackArrowDrawer.RecalculateArrowPath sets its pivot one
+    // unit short of the end point and LookAt turns its local z along the arrow.
+    private void DrawArrowHead(Vector3 end, Vector3 direction)
+    {
+        Vector3 pivot = end - direction;
+        Vector3 right = Vector3.Cross(Vector3.up, direction);
+        Vector3 ToWorld(Vector3 local) => pivot + right * local.x + Vector3.up * local.y + direction * local.z;
+        Draw.Triangle(ToWorld(_arrowHeadA), ToWorld(_arrowHeadB), ToWorld(_arrowHeadC), _arrowHeadRoundness, ArrowColor(_arrowMovementColor, _arrowHeadBloom));
     }
     private void DrawAreaBand()
     {

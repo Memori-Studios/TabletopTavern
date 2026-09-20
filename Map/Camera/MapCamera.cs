@@ -137,7 +137,8 @@ namespace TJ.Map
 
             float moveX = InputHandler.Instance.MoveX * speed * Time.unscaledDeltaTime;
             float moveZ = InputHandler.Instance.MoveZ * speed * Time.unscaledDeltaTime;
-            float moveY = InputHandler.Instance.MoveY * speed * Time.unscaledDeltaTime;
+            // The wheel used to arrive inside MoveY; adding ZoomScroll keeps the map zoom exactly as it was.
+            float moveY = (InputHandler.Instance.MoveY + InputHandler.Instance.ZoomScroll) * speed * Time.unscaledDeltaTime;
 
             moveY -= UnityEngine.Input.mouseScrollDelta.y * speed * 2 * Time.deltaTime;
 

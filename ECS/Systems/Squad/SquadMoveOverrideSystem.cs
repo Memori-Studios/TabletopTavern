@@ -60,6 +60,8 @@ partial struct SquadMoveOverrideSystem : ISystem
                 // Debug.Log($"SquadMoveOverrideSystem: Cancelling move override for squad {squad.ValueRO.SquadId}");
                 entityCommandBuffer.RemoveComponent<CancelSquadMoveOverrideTag>(squad.ValueRO.SelfEntity);
                 entityCommandBuffer.RemoveComponent<SquadMoveOverrideTag>(squad.ValueRO.SelfEntity);
+                if (entityManager.HasComponent<FormationSpeedCap>(squad.ValueRO.SelfEntity))
+                    entityCommandBuffer.RemoveComponent<FormationSpeedCap>(squad.ValueRO.SelfEntity);
                 // Only clear JustFollowingOrders when completing a Move. If the queue was
                 // replaced with an Attack, the attack is still in progress and this flag
                 // should not be cleared until that order resolves.

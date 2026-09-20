@@ -22,9 +22,6 @@ partial struct UnitOutlineSystem : ISystem
 
     public void OnUpdate(ref SystemState state)
     {
-#if !SPELLS
-        return;
-#endif
         // Units vanish without events on scene unload, so the counts restart with the next battle.
         if (_unitQuery.IsEmptyIgnoreFilter)
         {
@@ -36,8 +33,8 @@ partial struct UnitOutlineSystem : ISystem
         NativeList<uint> setBits = new(Allocator.Temp);
         NativeList<uint> clearBits = new(Allocator.Temp);
 
-        foreach ((RefRO<Hovered> hovered, RefRO<AnimationDataHolder> anim, RefRO<Unit> unit)
-            in SystemAPI.Query<RefRO<Hovered>, RefRO<AnimationDataHolder>, RefRO<Unit>>())
+        foreach ((RefRO<Hovered> hovered, RefRO<AnimationDataHolder> anim, RefRO<Unit> unit, Entity entity)
+            in SystemAPI.Query<RefRO<Hovered>, RefRO<AnimationDataHolder>, RefRO<Unit>>().WithEntityAccess())
         {
             Hovered h = hovered.ValueRO;
             if (!h.onHover && !h.onUnhover && !h.onSelected && !h.onDeselected) continue;
@@ -49,8 +46,12 @@ partial struct UnitOutlineSystem : ISystem
             uint set = 0, clear = 0;
             if (h.onHover) set |= hoverBit;
             if (h.onUnhover) clear |= hoverBit;
-            if (h.onSelected) set |= TabletopTavernConstants.OUTLINE_LAYER_SELECTED;
-            if (h.onDeselected) clear |= TabletopTavernConstants.OUTLINE_LAYER_SELECTED;
+            // A deselect-all followed by a select in the same frame raises both flags, so the enabled state is the truth.
+            if (h.onSelected || h.onDeselected)
+            {
+                if (SystemAPI.IsComponentEnabled<Selected>(entity)) set |= TabletopTavernConstants.OUTLINE_LAYER_SELECTED;
+                else clear |= TabletopTavernConstants.OUTLINE_LAYER_SELECTED;
+            }
 
             roots.Add(anim.ValueRO.gpuEcsAnimatorEntity);
             setBits.Add(set);

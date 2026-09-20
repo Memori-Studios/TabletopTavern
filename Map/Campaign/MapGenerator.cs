@@ -130,6 +130,22 @@ namespace TJ.Map
             {
                 mapRegion = _testMapRegion;
             }
+            BuildLayers();
+            DrawMap();
+            GetComponent<MapSceneManager>().SetMapLayers(mapLayers);
+            PaintTextures(mapRegion);
+            await SpawnTerrainDetails(mapRegion);
+            await treeSpawner.PruneTrees();
+
+            Debug.Log($"MapGenerator: Finished generating map with seed {seed}");
+            return;
+        }
+        /// <summary>
+        /// The node graph alone: layers, types, connections. Draws nothing, so a test can run it on a
+        /// bare component. Every seeded draw happens here in the same order as before the split.
+        /// </summary>
+        internal void BuildLayers()
+        {
             mapLayers.Clear();
 
             Vector2 GetRandomOffset() =>
@@ -180,15 +196,16 @@ namespace TJ.Map
             // ReplaceEarlyEliteFights();
             // EnforceLayerTypeDiversity();
             CenterLayersWithOnlyTwoNodes();
-            DrawMap();
-            GetComponent<MapSceneManager>().SetMapLayers(mapLayers);
-            PaintTextures(mapRegion);
-            await SpawnTerrainDetails(mapRegion);
-            await treeSpawner.PruneTrees();
-
-            Debug.Log($"MapGenerator: Finished generating map with seed {seed}");
-            return;
         }
+        /// <summary>Seeds the stream and builds the graph for one book, the way GenerateMap does before drawing.</summary>
+        internal void BuildLayers(int seed, int bookNumber)
+        {
+            this.seed = seed;
+            _bookNumber = bookNumber;
+            SeededRandom.Init(seed + (bookNumber * 13));
+            BuildLayers();
+        }
+        internal IReadOnlyList<MapLayer> Layers => mapLayers;
         private void FixIndexing()
         {
             //look at connected node index, get the actual index of the node from that layer

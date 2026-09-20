@@ -47,6 +47,7 @@ namespace Memori.SaveData
     {
         public int slotIndex;
         public List<string> squadUniqueIds = new List<string>();
+        public bool isLocked;
     }
 
     [System.Serializable] [CreateAssetMenu(fileName = "ArmySaveData", menuName = "GC_ScriptableObjects/ArmySaveData", order = 1)]

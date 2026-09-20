@@ -17,7 +17,6 @@ public static class TabletopTavernConstants
     // Animations
     public const float IDLE_ANIMATION_FREQUENCY = 0.001f;
     public const float COMBAT_ANIMATION_FREQUENCY = 0.01f;
-    public const float MELEE_ATTACK_DISTANCE = 8f;
     public const float MELEE_DETECTION_RANGE = 8f;
     public const float DAZED_ON_DISENGAGE_TIME = 3f;
     public const float RANGED_ATTACK_COOLDOWN = 5f;
@@ -53,9 +52,7 @@ public static class TabletopTavernConstants
 
     // Speed Modifiers
     public const float SWAMP_SPEED_MODIFIER = 0.5f;
-    public const float FOG_MODIFIER = 0.5f;
-    public const float RAIN_SPEED_MODIFIER = 0.5f;
-    public const float SNOW_MORALE_PENALTY = -10f;
+    // Rain, snow and fog magnitudes live in WeatherRuleData so weather_overrides.json can patch them.
     public const float FORTIFIED_MORALE_BONUS = 10f;
 
     // Spreads
@@ -65,12 +62,56 @@ public static class TabletopTavernConstants
     public const float ArtillerySpread = 4f;
     public const float SingleUnitSpread = 0.01f;
 
+    #region Unit collision
+    // Contact radius per size. Formation spreads above must leave a gap: cavalry 3.0 spread at 1.1 radius, monsters 5.0 at 1.75.
+    public static float CollisionRadius(UnitSize size) => size switch
+    {
+        UnitSize.Cavalry    => 1.1f,
+        UnitSize.Monstrous  => 1.75f,
+        UnitSize.SingleUnit => 2.5f,
+        UnitSize.Artillery  => 1.2f,
+        _                   => 0.75f,
+    };
+    // Overlap between two units is split by mass ratio; the lighter side moves more.
+    public static float CollisionMass(UnitSize size) => size switch
+    {
+        UnitSize.Cavalry    => 3f,
+        UnitSize.Monstrous  => 8f,
+        UnitSize.SingleUnit => 20f,
+        UnitSize.Artillery  => 6f,
+        _                   => 1f,
+    };
+    // Melee range is contact (both radii) plus reach; infantry vs infantry stays at the old 2.83.
+    public static float MeleeReach(UnitSize size) => size switch
+    {
+        UnitSize.Cavalry    => 1.5f,
+        UnitSize.Monstrous  => 1.6f,
+        UnitSize.SingleUnit => 2f,
+        _                   => 1.33f,
+    };
+    public const float COLLISION_RESOLVE_FACTOR = 0.7f;
+    public const float COLLISION_FRIENDLY_CROSS_RESOLVE = 0.3f;
+    public const float COLLISION_IDLE_YIELD = 0.1f;
+    public const float COLLISION_STANCE_MULT = 2f;
+    public const float COLLISION_PLANTED_MULT = 3f;
+    public const float COLLISION_CHARGE_MULT = 1.5f;
+    public const float COLLISION_BRACED_MULT = 2f;
+    public const float COLLISION_MAX_STEP = 0.4f;
+    public const float COLLISION_MAX_RADIUS = 2.5f;
+    public const float COLLISION_CONTACT_EPSILON = 0.05f;
+    // Walk back to the formation slot only after this much displacement and this long without contact.
+    public const float RETURN_TO_SLOT_DISTANCE = 0.5f;
+    public const float RETURN_TO_SLOT_SETTLE_TIME = 0.5f;
+    public const int RETURN_TO_SLOT_BUDGET = 2;
+    #endregion
+
     // Colors
     public static readonly Color PLAYER_TRIANGLE_COLOR = new(1f, 0.75f, 0f, 1f);
     public static readonly Color ENEMY_TRIANGLE_COLOR = new(1f, 0f, 0f, 1f);
     public static readonly Color DISABLED_TRIANGLE_COLOR = new(0, 0, 0, 0);
     public const int TRIANGLE_HOVER_BLOOM = 3;
     public const int TRIANGLE_SELECTED_BLOOM = 5;
+    public const int TRIANGLE_PREVIEW_BLOOM = 10;
 
     // Rendering-layer bits the outline renderer feature filters on; must stay clear of Volumetric Fog's bit 17.
     public const uint OUTLINE_LAYER_HOVER_PLAYER = 1u << 24;

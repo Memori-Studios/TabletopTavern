@@ -11,6 +11,7 @@ using Memori.Input;
 using Memori.Notifications;
 using TJ.IrregularGrid;
 using System.Linq;
+using TJ.Battle;
 
 public class UnitSelectionManager : MonoBehaviour
 {
@@ -181,11 +182,14 @@ public class UnitSelectionManager : MonoBehaviour
             {
                 RefreshSelectedUnitCounts();
                 BattleManager.Instance.SetCursorMode(CursorMode.MouseDown);
-                positionDrawer.MovePositionToMouse(battleInputManager.InitialMouseWorldPosition);
-                positionDrawer.TurnOn(
-                    battleInputManager.InitialMouseWorldPosition,
-                    selectedSquadEntityAndEntitiesCountDict
-                );
+                if (!TryBeginLockedPreview(battleInputManager.InitialMouseWorldPosition, true))
+                {
+                    positionDrawer.MovePositionToMouse(battleInputManager.InitialMouseWorldPosition);
+                    positionDrawer.TurnOn(
+                        battleInputManager.InitialMouseWorldPosition,
+                        selectedSquadEntityAndEntitiesCountDict
+                    );
+                }
                 battleInputManager.SetMinimumDistanceFromInitialClickHit(true);
                 battleInputManager.SetInitialSquadPosition(true);
             }
@@ -270,11 +274,15 @@ public class UnitSelectionManager : MonoBehaviour
             if (!battleInputManager.SettingInitialSquadPosition)
             {
                 battleInputManager.SetInitialSquadPosition(true);
-                // Debug.Log($"Minimum distance from initial click not hit, holding previous rotation");
-                HoldPreviousRotation();
-                positionDrawer.Formation.GeneratePointPositions();
-                positionDrawer.MovePositionToMouse(GetMousePositionOffsetByFormationCenter());
-                // Debug.Log($"Moving position to mouse: {GetMousePositionOffsetByFormationCenter()}");
+                // A locked block is already laid out on the click; a box relayout would tear it apart.
+                if (!positionDrawer.HasLockedLayout)
+                {
+                    // Debug.Log($"Minimum distance from initial click not hit, holding previous rotation");
+                    HoldPreviousRotation();
+                    positionDrawer.Formation.GeneratePointPositions();
+                    positionDrawer.MovePositionToMouse(GetMousePositionOffsetByFormationCenter());
+                    // Debug.Log($"Moving position to mouse: {GetMousePositionOffsetByFormationCenter()}");
+                }
             }
 
             if (battleInputManager.MinimumDistanceFromInitialClick(battleInputManager.ReformSelectionRotationDeadzone))
@@ -290,7 +298,9 @@ public class UnitSelectionManager : MonoBehaviour
                 // Debug.Log($"Minimum distance from initial click hit, rotating formation to mouse");
 
                 battleInputManager.RotateFormationToMouse();
-                battleInputManager.CalculateMouseDraggedDistance();
+                // Dragging a locked group spins the block; only a loose selection reshapes.
+                if (!positionDrawer.HasLockedLayout)
+                    battleInputManager.CalculateMouseDraggedDistance();
             }
         }
     }
@@ -303,11 +313,30 @@ public class UnitSelectionManager : MonoBehaviour
         BattleManager.Instance.SetCursorMode(CursorMode.MouseDown);
         battleInputManager.SetInitialMousePositions(MouseWorldPosition.Instance.GetWorldPosition());
 
+        if (TryBeginLockedPreview(MouseWorldPosition.Instance.GetWorldPosition(), true)) return;
+
         //need to update the unit counts here
         positionDrawer.TurnOn(
             MouseWorldPosition.Instance.GetWorldPosition(),
             selectedSquadEntityAndEntitiesCountDict
         );
+    }
+    /// <summary>
+    /// Starts a locked-group preview when the selection is a locked group. The block keeps the facing
+    /// it was locked with; a plain click drops it centred on the click (anchorAtParent), the Alt drag
+    /// keeps it where the group stands and drags it by the mouse delta.
+    /// </summary>
+    public bool TryBeginLockedPreview(Vector3 parentPosition, bool anchorAtParent)
+    {
+        GroupManager groupManager = BattleManager.Instance.GroupManager;
+        if (!groupManager.TryGetLockedGroup(selectedSquadIds, out SquadGroup group)) return false;
+        if (!groupManager.TryGetLockedGroupPose(group, out float3 anchor, out quaternion facing)) return false;
+
+        float angle = ((Quaternion)facing).eulerAngles.y - 90f;
+        battleInputManager.SetAngle(angle);
+        positionDrawer.SetLookRotation(Quaternion.Euler(0f, angle, 0f));
+        positionDrawer.PreviewLockedFormation(parentPosition, angle, anchorAtParent ? parentPosition : (Vector3)anchor, group.LockedSlots);
+        return true;
     }
     #endregion
 
@@ -802,6 +831,11 @@ public class UnitSelectionManager : MonoBehaviour
             if (selectionAreaHoveredSquads[i] != _hoveredSquadIds[i]) return false;
         }
         return true;
+    }
+    // The box raises onHover on everything inside it, and nothing else raises onUnhover for those units once the box ends.
+    public void ClearSelectionAreaHover()
+    {
+        HoverSquadsOnSelectionArea(new List<int>());
     }
     public void HoverSquadsOnSelectionArea(List<int> _squadIds)
     {

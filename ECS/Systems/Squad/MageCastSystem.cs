@@ -38,10 +38,11 @@ partial struct MageCastSystem : ISystem
         EntityCommandBuffer entityCommandBuffer = SystemAPI.GetSingleton<EndSimulationEntityCommandBufferSystem.Singleton>().CreateCommandBuffer(state.WorldUnmanaged);
         float deltaTime = SystemAPI.Time.DeltaTime;
 
-        foreach (var (squad, entityBuffer, mageSquad) in SystemAPI.Query<
+        foreach (var (squad, entityBuffer, mageSquad, overrides) in SystemAPI.Query<
             RefRO<SquadEntity>,
             DynamicBuffer<EntityReferenceBufferElement>,
-            RefRO<MageSquad>>()
+            RefRO<MageSquad>,
+            RefRO<SquadOverridesComponent>>()
         .WithNone<BrokenSquadTag, WithdrawSquadTag>())
         {
             if (entityBuffer.Length == 0) continue;
@@ -110,6 +111,10 @@ partial struct MageCastSystem : ISystem
                 continue;
             }
             #endregion
+
+            // Free Cast off: the mage casts only through the rail. A right-click attack order still
+            // walks it to the target, but nothing fires until the player arms and clicks.
+            if (!overrides.ValueRO.AutoTarget) continue;
 
             // Hold Spells. Reuses the existing Cease Fire stance rather than a mage-specific toggle.
             if (entityManager.HasComponent<CeaseFireTag>(squad.ValueRO.SelfEntity)
