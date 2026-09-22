@@ -70,6 +70,10 @@ namespace TJ.Spells
         public bool HitsSingleUnit;
         public SFXCue warmupSound;
         public SFXCue hitSound;
+        // The hit cue re-fires this many seconds apart after the first play; 0 plays it once.
+        public float HitSoundRepeatInterval;
+        // Extra plays after the first; 0 with an interval set means until SpellDuration runs out.
+        public int HitSoundRepeatCount;
         public Team TargetTeam;
         // Optional art spawned under the shared AOE Spell instance (SpellManager.aoeSpellPrefab) at cast.
         // A SpellVisualAddon on its root gets its warm-up and cast objects switched on at the right moments.

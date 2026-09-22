@@ -1,10 +1,12 @@
 using Unity.Burst;
 using Unity.Entities;
 using Unity.Mathematics;
+using Unity.Collections;
 using Unity.Physics;
 using Unity.Transforms;
 using ProjectDawn.Navigation;
 using UnityEngine;
+using UnityEngine.Experimental.AI;
 
 [UpdateInGroup(typeof(LateSimulationSystemGroup))]
 [UpdateBefore(typeof(ProcessUnitDeathSystem))]
@@ -16,6 +18,26 @@ partial struct UnitThrownSystem : ISystem
         EntityCommandBuffer ecb = SystemAPI.GetSingleton<EndSimulationEntityCommandBufferSystem.Singleton>().CreateCommandBuffer(state.WorldUnmanaged);
         PhysicsWorldSingleton physicsWorldSingleton = SystemAPI.GetSingleton<PhysicsWorldSingleton>();
         float deltaTime = SystemAPI.Time.DeltaTime;
+
+        // A thrown unit has NavMeshPath disabled, so UnitCollisionSystem skips it and nothing stops it at a wall or gate.
+        bool hasNavMesh = SystemAPI.TryGetSingleton(out NavMeshQuerySystem.Singleton navmesh);
+        ComponentLookup<NavMeshPath> pathLookup = SystemAPI.GetComponentLookup<NavMeshPath>();
+        BufferLookup<NavMeshNode> nodesLookup = SystemAPI.GetBufferLookup<NavMeshNode>();
+        ComponentLookup<AgentShape> shapeLookup = SystemAPI.GetComponentLookup<AgentShape>(true);
+        NativeList<UnitCollisionSystem.GateData> gates = new NativeList<UnitCollisionSystem.GateData>(4, Allocator.Temp);
+        foreach (var (gate, gateTransform, gateShape, gateEntity) in SystemAPI.Query<RefRO<GateCollisionShape>, RefRO<LocalTransform>, RefRO<AgentShape>>().WithEntityAccess())
+        {
+            gates.Add(new UnitCollisionSystem.GateData
+            {
+                Entity = gateEntity,
+                Centre = gateTransform.ValueRO.Position.xz,
+                Y = gateTransform.ValueRO.Position.y,
+                Height = gateShape.ValueRO.Height,
+                Radius = gateShape.ValueRO.Radius,
+                Axis = gate.ValueRO.Axis,
+                HalfWidth = gate.ValueRO.HalfWidth,
+            });
+        }
 
         foreach (var (ThrowUnit, unit, localTransform, setDestination, agentBody, Entity) in SystemAPI.Query<
             RefRW<ThrowUnit>,
@@ -106,6 +128,39 @@ partial struct UnitThrownSystem : ISystem
 
                 // Update the entity's position with displacement and Y arc
                 localTransform.ValueRW.Position += arcDisplacement;
+
+                // Walls are carved out of the navmesh, so walking the step across it stops at the wall face.
+                if (hasNavMesh && pathLookup.HasComponent(Entity))
+                {
+                    RefRW<NavMeshPath> path = pathLookup.GetRefRW(Entity);
+                    if (!path.ValueRO.Location.polygon.IsNull())
+                    {
+                        NavMeshLocation newLocation = navmesh.MoveLocation(path.ValueRO.Location, localTransform.ValueRO.Position, path.ValueRO.AreaMask);
+                        localTransform.ValueRW.Position.xz = ((float3)newLocation.position).xz;
+                        if (nodesLookup.HasBuffer(Entity))
+                        {
+                            DynamicBuffer<NavMeshNode> nodes = nodesLookup[Entity];
+                            navmesh.ProgressPath(ref nodes, path.ValueRO.Location.polygon, newLocation.polygon);
+                        }
+                        path.ValueRW.Location = newLocation;
+                    }
+                }
+
+                // The gateway has no navmesh obstacle; the gate unit's capsule is the only thing that closes it.
+                float unitRadius = shapeLookup.TryGetComponent(Entity, out AgentShape unitShape) ? unitShape.Radius : 0.75f;
+                for (int g = 0; g < gates.Length; g++)
+                {
+                    UnitCollisionSystem.GateData gate = gates[g];
+                    float2 position = localTransform.ValueRO.Position.xz;
+                    float along = math.clamp(math.dot(position - gate.Centre, gate.Axis), -gate.HalfWidth, gate.HalfWidth);
+                    float2 closest = gate.Centre + gate.Axis * along;
+                    float2 towards = position - closest;
+                    float distance = math.length(towards);
+                    float contactRadius = unitRadius + gate.Radius;
+                    if (distance >= contactRadius) continue;
+                    float2 outward = distance < 1e-4f ? -direction.xz : towards / distance;
+                    localTransform.ValueRW.Position.xz = closest + outward * contactRadius;
+                }
 
                 //clamp it above the starting position
                 if (localTransform.ValueRW.Position.y < ThrowUnit.ValueRO.InitialLocation.y)

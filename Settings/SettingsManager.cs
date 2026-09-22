@@ -169,6 +169,7 @@ namespace TJ
             // disbandConfirmationToggle.OverrideToggleFromSettings();
             settingsCanvasGroup.CGEnable();
             IAudioRequester.Instance.PlaySFX(SFXData.OpenUI);
+            IAudioRequester.Instance.SetAmbienceDuck(AmbienceDuckSource.Settings, true);
             if(InBattle) {
                 cachedTimeValue = Time.timeScale;
                 Time.timeScale = 0;
@@ -181,6 +182,7 @@ namespace TJ
             settingsCanvasGroup.CGDisable();
             infoCanvasGroup.gameObject.SetActive(false);
             IAudioRequester.Instance.PlaySFX(SFXData.CloseUI);
+            IAudioRequester.Instance.SetAmbienceDuck(AmbienceDuckSource.Settings, false);
             if (InBattle)
             {
                 Time.timeScale = cachedTimeValue;

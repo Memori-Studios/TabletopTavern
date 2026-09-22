@@ -11,6 +11,8 @@ public struct SquadAssets
     public VoiceSFX voiceSFX;
     public MeleeAttackSFX meleeAttackSFX;
     public FireProjectileSFX fireProjectileSFX;
+    // Null on units without a mount. Horse cavalry share one Mount Horse asset.
+    public MountSFX mountSFX;
     public FormationDiscipline formationDiscipline;
     public AssetReferenceGameObject ArtilleryCrewPrefab;
 

@@ -139,6 +139,7 @@ namespace TJ.MainMenu
             newSquad.SquadCurrentHealth = baseUnitCount * hitpointsPerUnit;
             newSquad.maxUnitCount = baseUnitCount;
             newSquad.HitPointsPerUnit = hitpointsPerUnit;
+            HeroBonusManager.ApplyHeroBaseUnitCount(ref newSquad, playPanel.hero.HeroID);
 
             updatedSquads.Add(newSquad);
             _squadsToLoad = updatedSquads.ToArray();

@@ -41,6 +41,9 @@ partial struct BulletMoverSystem : ISystem {
 [UpdateAfter(typeof(SquadRemoveUnitSystem))]
 partial struct BulletDestructionSystem : ISystem {
     const float DESTROY_DISTANCE_SQUARED = 0.2f;
+    // Volleys land 30+ arrows at once; only some of them get a hit sound. Artillery always does.
+    const float ARROW_HIT_SFX_CHANCE = 0.35f;
+    const float PROJECTILE_HIT_SFX_MAX_DISTANCE = 40f;
     private Unity.Mathematics.Random _random;
     public void OnCreate(ref SystemState state)
     {
@@ -109,7 +112,14 @@ partial struct BulletDestructionSystem : ISystem {
                     Flaming = arrow.ValueRO.flaming,
                     SourceIsArtillery = arrow.ValueRO.sourceIsArtillery
                 });
-                
+
+                if ((arrow.ValueRO.sourceIsArtillery || _random.NextFloat() < ARROW_HIT_SFX_CHANCE)
+                    && SystemAPI.HasBuffer<SFXBufferElement>(target.ValueRO.targetEntity))
+                {
+                    DynamicBuffer<SFXBufferElement> sfxBuffer = SystemAPI.GetBuffer<SFXBufferElement>(target.ValueRO.targetEntity);
+                    sfxBuffer.Add(new SFXBufferElement { UnitName = arrow.ValueRO.shooterUnitName, SFXEntityType = Memori.Audio.SFXEntityType.ProjectileHit, MaxDistance = PROJECTILE_HIT_SFX_MAX_DISTANCE });
+                }
+
                 entityCommandBuffer.DestroyEntity(entity);
 
             } 

@@ -922,6 +922,7 @@ namespace Memori.SaveData
                 playerArmy[i].SquadCurrentHealth = (int)((baseUnitCount * maxUnitCount) * startingHealth);
                 playerArmy[i].maxUnitCount = baseUnitCount;
                 playerArmy[i].HitPointsPerUnit = maxUnitCount;
+                HeroBonusManager.ApplyHeroBaseUnitCount(ref playerArmy[i], hero.HeroID);
                 recruitedUnitNames.Add(playerArmy[i].UnitName);
             }
             AquiredTroops(recruitedUnitNames);

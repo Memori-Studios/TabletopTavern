@@ -52,6 +52,8 @@ public struct Bullet : IComponentData
     public bool shotIntoFlanks;
     public bool flaming;
     public bool sourceIsArtillery;
+    // Picks the hit sound from the shooter's FireProjectileSFX bank when the shot lands.
+    public UnitName shooterUnitName;
 }
 public struct NewArrowTag : IComponentData 
 { 

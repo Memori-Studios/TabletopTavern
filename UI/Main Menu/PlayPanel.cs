@@ -440,6 +440,8 @@ namespace TJ.MainMenu
         public void SetActiveHero(Hero _hero)
         {
             hero = _hero;
+            // The warband screen and the new-run save read the catalogue, so the hero's overrides go in here.
+            TabletopTavernData.Instance.ApplyHeroConditionalOverrides(_hero.HeroID);
             OnActiveHeroChanged?.Invoke(hero);
             UpdateStartingGoldTooltip(_hero.StartingGold);
         }

@@ -1169,6 +1169,7 @@ namespace Memori.SaveData
             // UnitIndex in campaign battles and _spawnIndex in custom battles, so this lands on the
             // same squadId either way.
             SquadToLoad summon = new SquadToLoad(_unitName) { UnitIndex = SUMMON_UNIT_INDEX_BASE + summonsThisBattle };
+            HeroBonusManager.ApplyHeroBaseUnitCount(ref summon, HeroBonusManager.Instance.ActiveHeroID);
             summonedUniqueIds.Add(summon.UniqueID);
             summonsThisBattle++;
 
@@ -1192,6 +1193,7 @@ namespace Memori.SaveData
             }
 
             SquadToLoad summon = new SquadToLoad(_unitName) { UnitIndex = SUMMON_UNIT_INDEX_BASE + summonsThisBattle };
+            HeroBonusManager.ApplyHeroBaseUnitCount(ref summon, HeroBonusManager.Instance.ActiveHeroID);
             summonedUniqueIds.Add(summon.UniqueID);
             summonsThisBattle++;
 

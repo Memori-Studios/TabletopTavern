@@ -28,6 +28,8 @@ namespace TJ
         public Dictionary<Race, RaceData> RaceDataDictionary = new();
         private static BlobAssetReference<SquadStatsBlob> _cachedBlobRef;
         private static Entity _singletonEntity = Entity.Null;
+        // Hero whose unit_overrides.json heroID entries are in the catalogue right now; -1 is vanilla.
+        private int _appliedHeroID = -1;
 
         
         [Header("Hero Assets")]
@@ -68,10 +70,25 @@ namespace TJ
             LoadStatsFromSOs();
             ApplyModOverrides();
         }
+
+        /// <summary>
+        /// Rebuilds the catalogue with the unit_overrides.json entries gated on this hero. Only the
+        /// managed dictionaries change; the ECS blob is rebuilt by LoadAndInjectData at the next battle
+        /// load, so this is safe to call from any game state. A no-op unless the hero changed and some
+        /// enabled mod has a heroID entry, so unmodded runs never pay for it.
+        /// </summary>
+        public void ApplyHeroConditionalOverrides(int heroID)
+        {
+            if (heroID == _appliedHeroID) return;
+            _appliedHeroID = heroID;
+            if (!SquadStatsOverrideLoader.HasHeroConditionalEntries) return;
+            ReloadData();
+        }
         private void ApplyModOverrides()
         {
             List<string> modFolders = ModLoadOrder.GetEnabledModFolderPathsInOrder();
             ModLoadOrder.SetLoadedSnapshot(modFolders);
+            SquadStatsOverrideLoader.ClearHeroConditionalFlag();
             GearData.ClearModifierOverrides();
             ArmyGenerationRuleData.ClearModRules();
             EconomyOverrideLoader.ClearOverrides();
@@ -80,7 +97,7 @@ namespace TJ
             Memori.Localization.LocalizationOverrides.Clear();
             foreach (string modFolder in modFolders)
             {
-                SquadStatsOverrideLoader.ApplyOverridesFromModFolder(modFolder, SquadStatsDictionary, SquadAssetsDictionary, UnitsOfRaceDictionary);
+                SquadStatsOverrideLoader.ApplyOverridesFromModFolder(modFolder, SquadStatsDictionary, SquadAssetsDictionary, UnitsOfRaceDictionary, _appliedHeroID);
                 RaceDataOverrideLoader.ApplyOverridesFromModFolder(modFolder, RaceDataDictionary);
                 GearOverrideLoader.ApplyOverridesFromModFolder(modFolder);
                 ArmyGenerationRuleOverrideLoader.ApplyOverridesFromModFolder(modFolder);
@@ -405,6 +422,10 @@ namespace TJ
                 case Memori.Audio.SFXEntityType.Death:
                     int deathIndex = UnityEngine.Random.Range(0, squadAssets.voiceSFX.deathSFX.Length);
                     return squadAssets.voiceSFX.deathSFX[deathIndex];
+                case Memori.Audio.SFXEntityType.ProjectileHit:
+                    AudioClip[] hitClips = squadAssets.fireProjectileSFX != null ? squadAssets.fireProjectileSFX.hitSFX : null;
+                    if (hitClips == null || hitClips.Length == 0) return null;
+                    return hitClips[UnityEngine.Random.Range(0, hitClips.Length)];
                 default:
                     Debug.LogError($"GetBattlefieldAudio: Unknown SFXEntityType {_sfxEntityType} for Unit {_unitName}");
                     return null;
@@ -816,6 +837,11 @@ namespace TJ
                         }
                         //the spell a mage casts, so every other unit type leaves it empty
                         if (field.Name == "mageSpell" && !TabletopTavernConstants.Casts(GetUnitTypeFromUnitName(unitName)))
+                        {
+                            continue;
+                        }
+                        //only mounted units carry a mount bank
+                        if (field.Name == "mountSFX")
                         {
                             continue;
                         }

@@ -91,9 +91,11 @@ namespace TJ.Recruit
             goldCostText.color = CampaignManager.Instance.GoldManager.CheckIfCanAfford(cost) ? Color.white : Color.red;
 
             recruitNameText.text = LocalizationManager.Instance.GetText(squadStats.unitName.ToString());
-            unitCountText.text = squadStats.baseUnitCount.ToString();
+            // The count this recruit will actually arrive with, hero rule included.
+            int unitCount = HeroBonusManager.GetPlayerBaseUnitCount(squadStats.unitName, HeroBonusManager.Instance.ActiveHeroID);
+            unitCountText.text = unitCount.ToString();
             unitCountTooltip.SetUpToolTip(_description: LocalizationManager.Instance.GetText("Unit Count"));
-            maxHealthText.text = (squadStats.baseUnitCount * squadStats.HitPointsPerUnit).ToString();
+            maxHealthText.text = (unitCount * squadStats.HitPointsPerUnit).ToString();
             maxHealthTooltip.SetUpToolTip(_description: LocalizationManager.Instance.GetText("HitPoints"));
             recruitImageRaw.texture = _recruitImage;
 
@@ -213,6 +215,8 @@ namespace TJ.Recruit
         }
         private void RefreshCombineState()
         {
+            // The pick itself changes the army; the badges keep showing what the player saw when choosing.
+            if (recruitPanel.HasSelectedRecruitCard) return;
             canCombineGO.SetActive(false);
             canCombine = false;
             if (!isPurchased && !CampaignManager.Instance.CampaignSaveManager.CheckForRoomToRecruit())
@@ -314,8 +318,9 @@ namespace TJ.Recruit
         }
         public void DarkenCard()
         {
+            canInteract = false;
             OnPointerExit(null);
-            StopHoverMotion();
+            FreezeHoverMotion();
             //this is triggered on all cards that are not selected, should get every text and image and set it to it's current color but slightly darker
             Color darkenColor = new Color(0.5f, 0.5f, 0.5f, 1f);
             Image[] images = GetComponentsInChildren<Image>();
@@ -360,6 +365,15 @@ namespace TJ.Recruit
             motionActive = false;
             cardContentRect.localScale = Vector3.one;
             SetCardY(0f);
+        }
+        // Holds the card where its hover left it, so a shrunk neighbour stays shrunk after a purchase.
+        void FreezeHoverMotion()
+        {
+            if (!motionActive) return;
+            motionActive = false;
+            if (motionSettled) return;
+            cardContentRect.localScale = Vector3.one * targetScale;
+            SetCardY(targetY);
         }
         public void SetHoverMotion(HoverMotion state)
         {

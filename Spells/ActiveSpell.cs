@@ -410,6 +410,19 @@ public class ActiveSpell : MonoBehaviour
         if (visualAddon != null && visualAddon.castEffect != null) visualAddon.castEffect.SetActive(true);
         if (visualAddon != null && visualAddon.hideWarmupOnCast && visualAddon.warmupEffect != null) visualAddon.warmupEffect.SetActive(false);
         IAudioRequester.Instance.Play(spellData.hitSound, transform.position, ignoreDucking: true);
+        if (spellData.HitSoundRepeatInterval > 0f && spellData.hitSound != null) StartCoroutine(RepeatHitSound());
+    }
+    // A long effect (Bombardment's staggered shells, Sunder's sparks) must not be one sound at cast. Dies with the object.
+    private IEnumerator RepeatHitSound()
+    {
+        int remaining = spellData.HitSoundRepeatCount > 0 ? spellData.HitSoundRepeatCount : int.MaxValue;
+        float stopAt = Time.time + spellData.SpellDuration;
+        while (remaining-- > 0)
+        {
+            yield return new WaitForSeconds(spellData.HitSoundRepeatInterval);
+            if (spellData.HitSoundRepeatCount <= 0 && Time.time >= stopAt) yield break;
+            IAudioRequester.Instance.Play(spellData.hitSound, transform.position, ignoreDucking: true);
+        }
     }
     // Tag spells (Mark, Shieldwall) expire on their own tag timer; the status entry mirrors that length.
     private void WriteSquadStatus(EntityManager entityManager, Entity squadEntity, int statusSpellId)

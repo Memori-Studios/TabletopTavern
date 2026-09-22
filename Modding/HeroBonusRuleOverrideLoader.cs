@@ -157,6 +157,18 @@ namespace TJ
                 if (!TryParseCondition(dto.condition, context, out BonusCondition condition)) continue;
                 if (!TryParseValue(dto.value, context, out float value)) continue;
                 BonusMagnitudeKind magnitudeKind = ParseMagnitudeKind(dto.magnitudeKind, context);
+                // BaseUnitCount is applied when a squad is recruited and written into the save, so it
+                // cannot depend on the enemy and a percent of a save-time value would drift from the card.
+                if (stat == UnitStat.BaseUnitCount && condition.FilterKind == BonusFilterKind.EnemyRace)
+                {
+                    Debug.LogWarning($"[ModOverride] {context}: BaseUnitCount cannot use an EnemyRace condition, skipping.");
+                    continue;
+                }
+                if (stat == UnitStat.BaseUnitCount && magnitudeKind != BonusMagnitudeKind.Flat)
+                {
+                    Debug.LogWarning($"[ModOverride] {context}: BaseUnitCount must use magnitudeKind Flat, skipping.");
+                    continue;
+                }
 
                 heroIDsTouched.Add(heroID);
                 newRules.Add(new HeroStatBonusRule { HeroID = heroID, LocalizationKey = dto.localizationKey, Condition = condition, Stat = stat, MagnitudeKind = magnitudeKind, Value = value });
@@ -219,6 +231,12 @@ namespace TJ
                 }
                 if (!TryParseValue(dto.value, context, out float value)) continue;
                 BonusMagnitudeKind magnitudeKind = ParseMagnitudeKind(dto.magnitudeKind, context);
+                // The faction gate depends on army composition, which changes after recruitment.
+                if (stat == UnitStat.BaseUnitCount)
+                {
+                    Debug.LogWarning($"[ModOverride] {context}: BaseUnitCount is not available as a faction rule, skipping.");
+                    continue;
+                }
 
                 racesTouched.Add(race);
                 newRules.Add(new FactionBonusRule { Race = race, LocalizationKey = dto.localizationKey, Stat = stat, MagnitudeKind = magnitudeKind, Value = value });

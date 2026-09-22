@@ -156,6 +156,7 @@ partial struct RangedUnitAttackSystem : ISystem
             }
             bullet.ValueRW.flaming = entityManager.HasComponent<FlamingRangedAttackTag>(archerEntity);
             bullet.ValueRW.sourceIsArtillery = entityManager.HasComponent<ArtilleryUnit>(archerEntity);
+            bullet.ValueRW.shooterUnitName = entityManager.GetComponentData<Unit>(archerEntity).unitName;
 
             bool isArmorPiercing = entityManager.HasComponent<ArmorPiercingTag>(archerEntity);
             bool isAntiLarge = entityManager.HasComponent<AntiLargeTag>(archerEntity);

@@ -8,6 +8,7 @@ using UnityEngine.UI;
 using Unity.Collections;
 using Unity.Mathematics;
 using System;
+using System.Collections;
 
 namespace TJ
 {
@@ -46,7 +47,19 @@ namespace TJ
         private BattlefieldBonusGameObject[] cachedFogObjects;
         [SerializeField] private Light fogLight;
 
+        [Header("Weather audio")]
+        [SerializeField] private SFXCue thunderCue;
+        [SerializeField] private AudioClip clearSkiesWindLoop;
+        [SerializeField] private AudioClip snowWindLoop;
+        // Wind sits under the battle mix like the rain bed.
+        private const float WindVolumeScale = 0.12f;
+        private const float ThunderIntervalMin = 12f;
+        private const float ThunderIntervalMax = 35f;
+        private AudioSource windSource;
+        private Coroutine thunderCoroutine;
+
         public Action<Weather> OnWeatherChanged;
+        public Weather CurrentWeather => battleFieldPreset.weather;
 
         private void Awake() 
         {
@@ -92,6 +105,8 @@ namespace TJ
         {
             if(rainAudioSource != null)
                 rainAudioSource.volume = RainVolumeScale * _volume;
+            if (windSource != null)
+                windSource.volume = WindVolumeScale * _volume;
         }
         public void ToggleWeather(Weather selectedWeather)
         {
@@ -127,8 +142,54 @@ namespace TJ
                     ToggleFog(false);
                     break;
             }
+            UpdateWeatherAudio(selectedWeather);
             OnWeatherChanged?.Invoke(selectedWeather);
         }
+
+        #region Weather audio
+        // ToggleWeather also runs from the Inspector; only a Play session gets sound.
+        private void UpdateWeatherAudio(Weather weather)
+        {
+            if (!Application.isPlaying) return;
+
+            bool thunder = weather == Weather.Rain;
+            if (thunder && thunderCoroutine == null && thunderCue != null)
+                thunderCoroutine = StartCoroutine(ThunderLoop());
+            if (!thunder && thunderCoroutine != null)
+            {
+                StopCoroutine(thunderCoroutine);
+                thunderCoroutine = null;
+            }
+
+            AudioClip wind = weather == Weather.Snow ? snowWindLoop : weather == Weather.Rain ? null : clearSkiesWindLoop;
+            if (wind == null)
+            {
+                if (windSource != null) windSource.Stop();
+                return;
+            }
+            if (windSource == null)
+            {
+                windSource = gameObject.AddComponent<AudioSource>();
+                windSource.playOnAwake = false;
+                windSource.loop = true;
+                windSource.spatialBlend = 0f;
+            }
+            if (windSource.clip == wind && windSource.isPlaying) return;
+            windSource.clip = wind;
+            windSource.volume = WindVolumeScale * IAudioRequester.Instance.effectsVolume.GetValue();
+            windSource.Play();
+        }
+
+        // WaitForSeconds follows timeScale, so a paused battle gets no thunder.
+        private IEnumerator ThunderLoop()
+        {
+            while (true)
+            {
+                yield return new WaitForSeconds(UnityEngine.Random.Range(ThunderIntervalMin, ThunderIntervalMax));
+                IAudioRequester.Instance.Play(thunderCue);
+            }
+        }
+        #endregion
         public void ToggleRain(bool _isRaining)
         {
             for(int i = 0; i < cachedRainObjects.Length; i++)

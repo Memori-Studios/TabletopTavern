@@ -598,9 +598,10 @@ namespace TJ
             SquadToLoad newSquad = new (
                 _squadsStats.unitName,
                 0, 
-                _unitIndex: nextEmptyUnitIndex, 
+                _unitIndex: nextEmptyUnitIndex,
                 _modifiedHealthValueByAmount: healthOfSquad
             );
+            HeroBonusManager.ApplyHeroBaseUnitCount(ref newSquad, saveData.heroID);
 
             saveData.playerArmy[nextEmptyUnitIndex] = newSquad;
 

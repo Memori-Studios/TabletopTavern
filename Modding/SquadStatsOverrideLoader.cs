@@ -11,6 +11,8 @@ namespace TJ
     public struct SquadStatsOverrideEntry
     {
         public string unitName;
+        // Optional. Set, the entry only applies while a run with that hero is active (both teams).
+        public string heroID;
         public string unitType;
         public string unitSize;
         public string race;
@@ -79,19 +81,23 @@ namespace TJ
         public const string FileName = "unit_overrides.json";
         private const int MaxEntries = 1000;
 
+        // True once any enabled mod has a heroID entry; TabletopTavernData skips the hero rebuild otherwise.
+        public static bool HasHeroConditionalEntries { get; private set; }
+        public static void ClearHeroConditionalFlag() => HasHeroConditionalEntries = false;
+
         public static void ApplyOverridesFromModFolder(string modFolderPath, Dictionary<UnitName, SquadStats> squadStatsDictionary,
-            Dictionary<UnitName, SquadAssets> squadAssetsDictionary, Dictionary<Race, List<UnitName>> unitsOfRaceDictionary)
+            Dictionary<UnitName, SquadAssets> squadAssetsDictionary, Dictionary<Race, List<UnitName>> unitsOfRaceDictionary, int activeHeroID = -1)
         {
             string path = System.IO.Path.Combine(modFolderPath, FileName);
             string modLabel = ModOverrideValidation.GetModLabel(modFolderPath);
 
             ModOverrideValidation.TryLoadFile(path,
-                () => ApplyJson(System.IO.File.ReadAllText(path), modLabel, squadStatsDictionary, squadAssetsDictionary, unitsOfRaceDictionary),
+                () => ApplyJson(System.IO.File.ReadAllText(path), modLabel, squadStatsDictionary, squadAssetsDictionary, unitsOfRaceDictionary, activeHeroID),
                 $"SquadStats ({modLabel})");
         }
 
         private static void ApplyJson(string json, string modLabel, Dictionary<UnitName, SquadStats> squadStatsDictionary,
-            Dictionary<UnitName, SquadAssets> squadAssetsDictionary, Dictionary<Race, List<UnitName>> unitsOfRaceDictionary)
+            Dictionary<UnitName, SquadAssets> squadAssetsDictionary, Dictionary<Race, List<UnitName>> unitsOfRaceDictionary, int activeHeroID)
         {
             var file = JsonUtility.FromJson<SquadStatsOverrideFile>(json);
             if (file?.overrides == null) return;
@@ -100,11 +106,27 @@ namespace TJ
                 Debug.LogWarning($"[ModOverride] SquadStats ({modLabel}): file has {file.overrides.Count} entries, only applying the first {MaxEntries}.");
 
             int applied = 0;
+            int heroGated = 0;
             int entryLimit = Math.Min(file.overrides.Count, MaxEntries);
             for (int i = 0; i < entryLimit; i++)
             {
                 var entry = file.overrides[i];
                 string context = $"SquadStats ({modLabel}) entry {i} [{entry.unitName}]";
+
+                if (!string.IsNullOrEmpty(entry.heroID))
+                {
+                    HasHeroConditionalEntries = true;
+                    if (!int.TryParse(entry.heroID, out int heroID))
+                    {
+                        Debug.LogWarning($"[ModOverride] {context}: invalid heroID '{entry.heroID}', skipping.");
+                        continue;
+                    }
+                    if (heroID != activeHeroID)
+                    {
+                        heroGated++;
+                        continue;
+                    }
+                }
 
                 if (string.IsNullOrEmpty(entry.unitName) || !Enum.TryParse(entry.unitName, out UnitName unitName))
                 {
@@ -182,7 +204,7 @@ namespace TJ
                 applied++;
             }
 
-            Debug.Log($"[ModOverride] SquadStats ({modLabel}): applied overrides for {applied} unit(s).");
+            Debug.Log($"[ModOverride] SquadStats ({modLabel}): applied overrides for {applied} unit(s), {heroGated} waiting on another hero (active hero {activeHeroID}).");
         }
 
         // Moves a unit between race rosters, keeping SquadAssets.race and UnitsOfRaceDictionary

@@ -126,7 +126,8 @@ namespace TJ.Map
             activeLayer = _node.Value.layer;
             mapSceneManager.FocusSelectedNode();
             IAudioRequester.Instance.PlaySFX(SFXData.FocusNode);
-
+            IAudioRequester.Instance.SetAmbienceDuck(AmbienceDuckSource.NodePanel, true);
+            IAudioRequester.Instance.SetAmbienceBed(_node.Value.type == NodeType.Town ? AmbienceBed.Village : AmbienceBed.Hall);
 
             switch (_node.Value.type)
             {
@@ -171,6 +172,8 @@ namespace TJ.Map
         {
             Debug.Log($"CompleteLayer called on {activeNodePanel}");
             legendCanvasGroup.FadeInAsync();
+            IAudioRequester.Instance.SetAmbienceDuck(AmbienceDuckSource.NodePanel, false);
+            IAudioRequester.Instance.SetAmbienceBed(AmbienceBed.Hall);
             mapSceneManager.CompleteLayer();
             layerNodeSelected = -1;
         }

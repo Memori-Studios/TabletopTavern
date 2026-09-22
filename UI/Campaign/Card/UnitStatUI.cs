@@ -335,10 +335,13 @@ namespace TJ
                             description += $"\n<color {ColorData.Error}>{fireAtWillLocalised}: -20% </color>";
                         }
                     }
-                    if(unitStat == UnitStat.Ammunition && entityManager.HasComponent<SquadAmmunition>(squadEntity.SelfEntity))
+                    if(unitStat == UnitStat.Ammunition)
                     {
-                        SquadAmmunition squadAmmunition = entityManager.GetComponentData<SquadAmmunition>(squadEntity.SelfEntity);
-                        int ammunitionLost = (int)(amount + totalBonus - squadAmmunition.Value);
+                        // SquadRanOutOfAmmoSystem strips SquadAmmunition from a spent squad; without this the row snapped back to the full pool.
+                        int remainingAmmunition = entityManager.HasComponent<SquadAmmunition>(squadEntity.SelfEntity)
+                            ? entityManager.GetComponentData<SquadAmmunition>(squadEntity.SelfEntity).Value
+                            : 0;
+                        int ammunitionLost = (int)(amount + totalBonus - remainingAmmunition);
                         if(ammunitionLost > 0)
                         {
                             totalBonus -= ammunitionLost;

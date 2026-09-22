@@ -176,7 +176,8 @@ namespace TJ.Town
             }
             string sackTownTitleLocalized = LocalizationManager.Instance.GetText("FightGarrison");
             string enterTownFlavorLocalized = LocalizationManager.Instance.GetText("enterTownFlavor");
-            string sackTownDescriptionLocalized = LocalizationManager.Instance.GetText("sackTownDesc");
+            string sackTownDescriptionLocalized = $"<color={ColorData.Positive}>" + LocalizationManager.Instance.GetText("sackTownDesc") + "</color>"
+                + $"\n<color={ColorData.Negative}>" + LocalizationManager.Instance.GetText("sackTownNoHeal") + "</color>";
             string sackTownFlavorLocalized = LocalizationManager.Instance.GetText("sackTownFlavor");
             string recruitmentButtonTooltipTitleLocalized = LocalizationManager.Instance.GetText("Recruit Units");
             string recruitmentButtonTooltipDescLocalized = LocalizationManager.Instance.GetText("townRecruitmentDesc");

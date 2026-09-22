@@ -10,7 +10,11 @@ public enum UnitType { Melee, Ranged, Hybrid, Artillery, Structure, Mage }
 public enum UnitCondition { None, InForest, InCombat, IsCharging, IsTerrified, InSwamp, IsExhausted, IsOutOfAmmo, GarrisonDefender, DefendersResolve, IsMarked }
 public enum UnitStat { MeleeAttack, MeleeDefense, WeaponStrength, 
     Accuracy, Range, MissileStrength, HitPoints, None, Speed, 
-    Armor, ChargeBonus, Leadership, Ammunition, ChargeImpactDamage }
+    Armor, ChargeBonus, Leadership, Ammunition, ChargeImpactDamage,
+    // Append only: ordinals are serialized. These exist for hero_bonus_rules.json and have no card row.
+    AttackCooldown, ChargeCount, RateOfFire, ExplosionDamage, ExplosionRange, ExplosionForce,
+    // Recruit-time: written into the save, so Flat only and never conditioned on the enemy.
+    BaseUnitCount }
 public enum UnitSize { Infantry, Cavalry, Monstrous, SingleUnit, Artillery }
 public enum UnitRarity { Common, Uncommon, Rare, Legendary }
 public enum Team { Player, Enemy, Neutral }

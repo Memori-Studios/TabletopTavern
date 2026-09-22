@@ -127,6 +127,20 @@ public static class TabletopTavernConstants
     // already assume. This is the only global spell-damage dial. (TT-78, 2026-09-14)
     public const float SPELL_TOTAL_DAMAGE_MODIFIER = 1.0f;
     public const float MORALE_LOSS_MODIFIER = 0.75f;
+    // Per-second morale terms. MoraleUpdateJob applies them in the live battle and
+    // AutoResolveSimulation applies the same ones, so they live here where both assemblies can see them.
+    public const float MORALE_RECENT_HEALTH_LOSS_PENALTY = 0.075f;
+    public const float MORALE_NO_RECENT_HEALTH_LOSS_REGENERATION = 2f;
+    public const float MORALE_TOTAL_HEALTH_DEPLETION_PENALTY = 0.75f;
+    public const float MORALE_FLANK_PENALTY = 1f;
+    public const float MORALE_THREAT_PENALTY = 0.2f;
+    public const float MORALE_FIRE_DAMAGE_PENALTY = 0.25f;
+    public const float MORALE_RETREATING_ALLIES_PENALTY = 0.2f;
+    public const float MORALE_ARMY_LOSSES_PENALTY = 1.75f;
+    public const float MORALE_WINNING_BONUS = 0.5f;
+    public const float MORALE_LOSING_PENALTY = -0.01f;
+    public const float MORALE_WAVERING_THRESHOLD = 0.45f;
+    public const float MORALE_BREAK_THRESHOLD = 5f;
     public const float ARTILLERY_VS_ARTILLERY_DAMAGE_MODIFIER = 0.5f;
 
     // Spells: a fixed budget granted at the start of every battle, spent permanently, refilled next battle.

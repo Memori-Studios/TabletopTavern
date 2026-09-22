@@ -357,6 +357,7 @@ public class SquadManager : MonoBehaviour
         int hitPointsPerUnit = squadStats.HitPointsPerUnit;
         float speed = squadStats.Speed;
         int chargeImpactDamage = squadStats.ChargeImactDamage;
+        int chargeCount = squadStats.ChargeCount;
         float leadership = squadStats.Leadership;
         // Mages take Leadership prestige alongside melee units: a one-model squad breaks easily,
         // and Leadership plus Range is the whole of what prestige buys a caster.
@@ -386,6 +387,10 @@ public class SquadManager : MonoBehaviour
             hitPointsPerUnit += (int)SumHeroBonus(UnitStat.HitPoints, hitPointsPerUnit);
             speed += SumHeroBonus(UnitStat.Speed, speed);
             chargeImpactDamage += (int)SumHeroBonus(UnitStat.ChargeImpactDamage, chargeImpactDamage);
+            chargeCount = Mathf.Max(0, chargeCount + (int)SumHeroBonus(UnitStat.ChargeCount, chargeCount));
+            // Must equal the count the squad was recruited with (HeroBonusManager.GetPlayerBaseUnitCount),
+            // or the health bar max disagrees with the models ArmySpawnManager spawned.
+            initialSquadSize = HeroBonusManager.GetPlayerBaseUnitCount(squadStats.unitName, campaignSaveDataHolder.ActiveHeroID);
 
             // Merge hero-granted attributes into the local stats so every tag check below sees them.
             foreach (var attributeBonus in HeroBonusManager.GetHeroAttributeBonus(squadStats.unitName, campaignSaveDataHolder.ActiveHeroID))
@@ -444,7 +449,7 @@ public class SquadManager : MonoBehaviour
         {
             MaxHealthValue = maxHealth,
             CurrentHealthValue = currentHealth,
-            ChargesRemaining = squadStats.ChargeCount,
+            ChargesRemaining = chargeCount,
             IsFlanked = false,
         });
 
@@ -554,10 +559,7 @@ public class SquadManager : MonoBehaviour
 
         GearIDsSerialized gear = campaignSaveDataHolder.Gear;
 
-        bool Contains(GearID gearID) {
-                if(gear.gearID1 == gearID || gear.gearID2 == gearID || gear.gearID3 == gearID || gear.gearID4 == gearID) return true;
-                return false;
-            }
+        bool Contains(GearID gearID) => gear.Contains(gearID);
 
         if(!campaignSaveDataHolder.IsCustomBattle && _enemyData.Team == Team.Player)
         {
@@ -585,7 +587,7 @@ public class SquadManager : MonoBehaviour
             MoraleState = 0,
             MaxMorale = leadership,
             CurrentMorale = leadership,
-            MoraleThreshold = 5f,
+            MoraleThreshold = TabletopTavernConstants.MORALE_BREAK_THRESHOLD,
         });
         ecb.AddComponent<IsTerrified>(squadEntity);
         ecb.SetComponentEnabled<IsTerrified>(squadEntity, false);
@@ -1326,6 +1328,8 @@ public class SquadManager : MonoBehaviour
         foreach (var squadEntity in allSquads)
         {
             if (!BattleManager.Instance.UnitSelectionManager.SelectedSquadIds.Contains(squadEntity.SquadId)) continue;
+            // A selected enemy squad is for viewing only; the Withdraw hotkey routed it and handed the player a win.
+            if (squadEntity.SquadId < 0) continue;
 
             ecb.AddComponent(squadEntity.SelfEntity, new BreakSquadTag { });
         }

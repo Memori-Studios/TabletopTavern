@@ -73,17 +73,17 @@ namespace TJ.Morale {
         [ReadOnly] public ComponentLookup<SanguineCourtRaceTag> SanguineCourtRaceTagLookup;
         [ReadOnly] public ComponentLookup<RallyingTag> RallyingTagLookup;
         public bool SanguineImmuneToFlank;
-        public const float RECENT_HEALTH_LOSS_PENALTY = 0.075f;
-        public const float NO_RECENT_HEALTH_LOSS_REGENERATION = 2f;
-        public const float MORALE_TOTAL_HEAL_DEPLETION_PENALTY = 0.75f;
-        public const float MORALE_FLANK_PENALTY = 1f;
-        public const float MORALE_THREAT_PENALTY = 0.2f;
-        public const float MORALE_FIRE_DAMAGE_PENALTY = 0.25f;
-        public const float MORALE_RETREATING_ALLIES_PENALTY = 0.2f;
-        public const float MORALE_ARMY_LOSSES_PENALTY = 1.75f;
-        public const float MORALE_WINNING_BONUS = 0.5f;
-        public const float MORALE_LOSING_PENALTY = -0.01f;
-        public const float WAVERING_THRESHOLD = 0.45f;
+        public const float RECENT_HEALTH_LOSS_PENALTY = TabletopTavernConstants.MORALE_RECENT_HEALTH_LOSS_PENALTY;
+        public const float NO_RECENT_HEALTH_LOSS_REGENERATION = TabletopTavernConstants.MORALE_NO_RECENT_HEALTH_LOSS_REGENERATION;
+        public const float MORALE_TOTAL_HEAL_DEPLETION_PENALTY = TabletopTavernConstants.MORALE_TOTAL_HEALTH_DEPLETION_PENALTY;
+        public const float MORALE_FLANK_PENALTY = TabletopTavernConstants.MORALE_FLANK_PENALTY;
+        public const float MORALE_THREAT_PENALTY = TabletopTavernConstants.MORALE_THREAT_PENALTY;
+        public const float MORALE_FIRE_DAMAGE_PENALTY = TabletopTavernConstants.MORALE_FIRE_DAMAGE_PENALTY;
+        public const float MORALE_RETREATING_ALLIES_PENALTY = TabletopTavernConstants.MORALE_RETREATING_ALLIES_PENALTY;
+        public const float MORALE_ARMY_LOSSES_PENALTY = TabletopTavernConstants.MORALE_ARMY_LOSSES_PENALTY;
+        public const float MORALE_WINNING_BONUS = TabletopTavernConstants.MORALE_WINNING_BONUS;
+        public const float MORALE_LOSING_PENALTY = TabletopTavernConstants.MORALE_LOSING_PENALTY;
+        public const float WAVERING_THRESHOLD = TabletopTavernConstants.MORALE_WAVERING_THRESHOLD;
 
         void Execute(Entity entity, ref MoraleComponent morale, ref SquadStateComponent squadStateComponent)
         {

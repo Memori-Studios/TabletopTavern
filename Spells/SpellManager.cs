@@ -638,7 +638,7 @@ public class SpellManager : MonoBehaviour
         {
             // A summon knows its squad already: preview its footprint on the cursor straight away.
             UnitName unit = spell.SummonedUnitName;
-            int count = TabletopTavernData.Instance.GetSquadStats(unit).baseUnitCount;
+            int count = HeroBonusManager.GetPlayerBaseUnitCount(unit, HeroBonusManager.Instance.ActiveHeroID);
             float spread = TabletopTavernConstants.GetSpread(TabletopTavernData.Instance.GetUnitSizeFromUnitName(unit));
             // Face the enemy line, as a deployment spawn does, rather than whatever facing the last
             // selection left in the drawer.

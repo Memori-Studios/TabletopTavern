@@ -246,6 +246,9 @@ namespace TJ.MainMenu
                 PanelType.Mods => modsPanel,
                 _ => currentPanel
             };
+            // The Play panel is still the tavern (a camera move); the board-style panels cover it.
+            bool coversTavern = currentPanel != null && currentPanel != mainMenuPanel && currentPanel != playPanel;
+            IAudioRequester.Instance.SetAmbienceDuck(AmbienceDuckSource.MenuPanel, coversTavern);
         }
         public async void SwitchToMainMenuPanel()
         {

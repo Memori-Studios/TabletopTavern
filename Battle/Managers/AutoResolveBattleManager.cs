@@ -25,6 +25,32 @@ namespace TJ.Engagement
         // armour tweak because a mark applies to unarmoured squads too, where armourMitigation is 0
         // and there is nothing to scale.
         public float damageTakenMultiplier;
+        public Race Race;
+
+        // Simulation state, owned by AutoResolveSimulation. Set up on the first tick.
+        [NonSerialized] public bool SimReady;
+        [NonSerialized] public float X, Z;              // field position, player side is -Z
+        [NonSerialized] public int ContactIndex;        // SquadIndex of the squad this one is locked in melee with, -1 if none
+        [NonSerialized] public float Morale;
+        [NonSerialized] public bool Broken;
+        [NonSerialized] public float Ammo;
+        [NonSerialized] public bool FireAtWill;
+        [NonSerialized] public bool ArmyLosses;
+        [NonSerialized] public bool DefensiveStance;
+        [NonSerialized] public int HordeStacks;         // Crashing Horde stacks this second, player side only
+        [NonSerialized] public float ChargeWindow;      // seconds of charge bonus left
+        [NonSerialized] public float MoveSeconds;       // seconds spent closing on the current target
+        [NonSerialized] public float EngagedSeconds;
+        [NonSerialized] public float FlankedTimer;
+        [NonSerialized] public float OnFireTimer;
+        [NonSerialized] public float RetreatingAlliesTimer;
+        [NonSerialized] public float HitCarry, ShotCarry;
+        [NonSerialized] public int ThrownModels;
+        [NonSerialized] public int FormationWidth;
+        [NonSerialized] public int[] UnitHealth;        // per model, living models first
+        [NonSerialized] public float[] RecentLoss, RecentDealt;   // last five seconds, ring
+        [NonSerialized] public int RingIndex;
+        [NonSerialized] public float TickLoss, TickDealt;
     }
     // The hero inputs the live battle reads from CampaignSaveDataHolder, as plain data so the
     // difficulty sim can supply them without a campaign. default(...) means no hero.
@@ -77,39 +103,11 @@ namespace TJ.Engagement
         public AutoResolveSquad[] PlayerAutoResolveStats => playerAutoResolveStats;
         public AutoResolveSquad[] EnemyAutoResolveStats => enemyAutoResolveStats;
         internal List<int3> unitsSlainData = new();
-        // InstanceIfExists, never Instance. The Instance getter FABRICATES a CampaignManager on a miss -
-        // new GameObject, AddComponent, cached in a static for the session - and that phantom's
-        // campaignSaveManager is null, so reading this threw an NRE and poisoned the singleton for
-        // everything after it. That is where the stray CampaignManager.Start() errors came from.
-        //
-        // Auto-resolve runs from the Map scene, where a real manager exists and the multiplier applies as
-        // before. Anywhere else - a custom battle, the editor prediction button, a test - there is no
-        // campaign and no book number, so the honest answer is no bonus rather than an exception.
-        //
-        // The difficulty sim (Tests.Editor) has no campaign either but does know the act, so it
-        // sets ActBonusOverride and the getter uses that first. Null everywhere else.
-        internal float? ActBonusOverride;
-        internal static float ActBonus(int bookNumber) => bookNumber switch
-        {
-            2 => 1.25f,
-            3 => 1.50f,
-            _ => 1.00f,
-        };
-        private float ENEMY_AUTORESOLVE_SPECIAL_BONUS
-        {
-            get
-            {
-                if (ActBonusOverride.HasValue) return ActBonusOverride.Value;
-                CampaignManager campaign = CampaignManager.InstanceIfExists;
-                if (campaign == null) return 1.00f;
-                CampaignSaveManager saveManager = campaign.CampaignSaveManager;
-                if (saveManager == null || saveManager.SaveData == null) return 1.00f;
-                return ActBonus(saveManager.SaveData.bookNumber);
-            }
-        }
+        // Enemy damage in a garrison assault. Stands in for the walls and gates the model does not
+        // simulate. The per-act x1.25 / x1.5 enemy bonus was removed 2026-09-21: it compensated for
+        // the old round-based model being too kind, and the calibrated model no longer needs it.
         private const float GARRISON_AUTORESOLVE_BONUS = 1.4f;
-        // Hard ceiling on auto-resolve rounds. A real battle resolves in orders of magnitude
-        // fewer. This exists because both target pools in AssignTargets are positive whitelists,
+        // Hard ceiling on simulated seconds. A real battle resolves in a few hundred. This exists because both target pools in AssignTargets are positive whitelists,
         // so a UnitType that falls out of both is untargetable, neither side is ever defeated,
         // and the loop below spins forever. That has already happened once, with mages.
         // FindAnySquadTarget is the real fix; this is the backstop that turns a frozen campaign
@@ -314,6 +312,11 @@ namespace TJ.Engagement
             ChargeBonus += (int)HeroBonus(UnitStat.ChargeBonus, ChargeBonus);
             squadStats.Leadership += HeroBonus(UnitStat.Leadership, squadStats.Leadership);
             squadStats.Ammunition += (int)HeroBonus(UnitStat.Ammunition, squadStats.Ammunition);
+            // The simulation reads these three off the stat copy; ChargeCount, ExplosionRange and
+            // ExplosionForce have no model here and are left alone.
+            squadStats.attackCooldown = Mathf.Max(0.1f, squadStats.attackCooldown + HeroBonus(UnitStat.AttackCooldown, squadStats.attackCooldown));
+            squadStats.rateOfFire = Mathf.Max(0.1f, squadStats.rateOfFire + HeroBonus(UnitStat.RateOfFire, squadStats.rateOfFire));
+            squadStats.ExplosionDamage = Mathf.Max(0, squadStats.ExplosionDamage + (int)HeroBonus(UnitStat.ExplosionDamage, squadStats.ExplosionDamage));
             HeroBonusRuleEvaluator.ApplyHeroAttributes(ref squadStats.SquadAttributes, _squadToLoad.UnitName, hero.HeroID, squadStats, hero.EnemyRace);
         }
 
@@ -353,18 +356,13 @@ namespace TJ.Engagement
                     accuracy += (GearData.GetGear(GearID.RavensEye).GearModifierValue/100f);
                 if(hasGear(GearID.RingoftheElvenKing) && squadStats.unitType == UnitType.Ranged)
                     missileStrength += GearData.GetGear(GearID.RingoftheElvenKing).GearModifierValue;
-                if(squadStats.SquadAttributes.StandardShields || squadStats.SquadAttributes.HeavyShields) {
-                    if(hasGear(GearID.TowerShields)) {
-                        shieldBlockChance = GearData.GetGear(GearID.TowerShields).GearModifierValue/100f;
-                    } else {
-                        shieldBlockChance = 0.5f;
-                    }
-                }
             }
         }
 
-        if (squadStats.SquadAttributes.HeavyShields && shieldBlockChance < 0.75f)
-            shieldBlockChance = 0.75f;
+        // The block chances UnitSetUpSystem gives every shielded unit, either team. Tower Shields is
+        // commented out in the live setup, so it changes nothing here either.
+        if (squadStats.SquadAttributes.HeavyShields) shieldBlockChance = AutoResolveSimulation.Model.HeavyShieldBlock;
+        else if (squadStats.SquadAttributes.StandardShields) shieldBlockChance = AutoResolveSimulation.Model.StandardShieldBlock;
 
         int totalHealth = _squadToLoad.SquadCurrentHealth;
         float armorMitigation = (float)squadStats.Armor/(float)(squadStats.Armor + 100f);
@@ -379,6 +377,14 @@ namespace TJ.Engagement
         {
             accuracy += (_squadToLoad.UnitPrestige * TabletopTavernConstants.PRESTIGE_BONUS) / 100f;
             range += _squadToLoad.UnitPrestige * TabletopTavernConstants.PRESTIGE_BONUS;
+            // The ammo EntityWatcher hands a live squad: prestige per level, Deep Quivers on shooters only.
+            squadStats.Ammunition += _squadToLoad.UnitPrestige * (squadStats.unitType == UnitType.Ranged
+                ? TabletopTavernConstants.PRESTIGE_AMMO_BONUS_RANGED
+                : TabletopTavernConstants.PRESTIGE_AMMO_BONUS_ARTILLERY);
+            if (squadStats.unitType == UnitType.Ranged && squadStats.SquadAttributes.DeepQuivers)
+                squadStats.Ammunition += TabletopTavernConstants.DEEP_QUIVERS_AMMO_BONUS;
+            if (squadStats.unitType == UnitType.Artillery && squadStats.SquadAttributes.PowderReserves)
+                squadStats.Ammunition = (int)(squadStats.Ammunition * TabletopTavernConstants.POWDER_RESERVES_AMMO_MULTIPLIER);
         }
         // Mages match the live path: Range and Leadership, no Accuracy. Without this branch a
         // mage matches neither condition above - the second is an explicit whitelist - and gets
@@ -424,6 +430,7 @@ namespace TJ.Engagement
             shieldBlockChance = shieldBlockChance,
             damageTakenMultiplier = 1f,
             ChargeBonus = ChargeBonus,
+            Race = TabletopTavernData.Instance.GetRaceFromUnitName(_squadToLoad.UnitName),
         };
     }
     public void SetUpArmies()
@@ -529,19 +536,24 @@ namespace TJ.Engagement
     internal void RunToCompletion()
     {
         int rounds = 0;
+        _idleSeconds = 0;
         while (!playerArmyIsDefeated && !enemyArmyIsDefeated)
         {
             RunSimulationLoop();
-            if (++rounds < MAX_AUTORESOLVE_ROUNDS) continue;
+            bool stalemate = _idleSeconds >= STALEMATE_SECONDS;
+            if (++rounds < MAX_AUTORESOLVE_ROUNDS && !stalemate) continue;
 
             int playerHealth = TotalHealthRemaining(playerAutoResolveStats);
             int enemyHealth = TotalHealthRemaining(enemyAutoResolveStats);
-            Debug.LogError(
-                $"[AutoResolve] Aborted after {MAX_AUTORESOLVE_ROUNDS} rounds with neither side defeated. " +
-                $"Player health {playerHealth}, enemy health {enemyHealth}. " +
-                "A squad is most likely untargetable - check the target pools in AssignTargets.");
+            if (!stalemate)
+                Debug.LogError(
+                    $"[AutoResolve] Aborted after {MAX_AUTORESOLVE_ROUNDS} rounds with neither side defeated. " +
+                    $"Player health {playerHealth}, enemy health {enemyHealth}. " +
+                    "A squad is most likely untargetable - check the target pools in AssignTargets.");
             if (enemyHealth <= playerHealth) enemyArmyIsDefeated = true;
             else playerArmyIsDefeated = true;
+            AutoResolveSimulation.Settle(playerAutoResolveStats);
+            AutoResolveSimulation.Settle(enemyAutoResolveStats);
             break;
         }
     }
@@ -555,213 +567,44 @@ namespace TJ.Engagement
     {
         RecordResults(true);
     }
+    /// <summary>One simulated second. Mage charges are spent on the first call, then the field advances.</summary>
     public void RunSimulationLoop()
     {
         unitsSlainData = new();
+        AutoResolveSimulation.Initialize(playerAutoResolveStats, enemyAutoResolveStats);
         AssignTargets();
         HandleMageCasts();
-        HandleRangedUnits();
-        HandleMeleeUnits();
-        RemoveSlainUnits();
+        bool active = AutoResolveSimulation.Tick(playerAutoResolveStats, enemyAutoResolveStats,
+            _isGarrisonBattle ? GARRISON_AUTORESOLVE_BONUS : 1f, unitsSlainData);
+        _idleSeconds = active ? 0 : _idleSeconds + 1;
         CheckArmyStatus();
     }
+    // Seconds in a row in which nobody dealt damage or closed on a target.
+    private int _idleSeconds;
+    // A field where nobody can reach anybody (two spent artillery batteries, say) is called on health.
+    private const int STALEMATE_SECONDS = 120;
     internal void AssignTargets()
     {
-        static int FindMeleeSquadTarget(AutoResolveSquad[] _targetSquadStats)
-        {
-            List<AutoResolveSquad> meleeSquads = new();
-            for (int i = 0; i < _targetSquadStats.Length; i++)
-            {
-                if (HasRouted(_targetSquadStats[i])) continue;
-                // Hybrids are front-line targets. AssignTargets only falls through to the ranged
-                // pool once no melee squad is left, so this is what exposes them from turn one.
-                if (TabletopTavernConstants.FightsInMelee(_targetSquadStats[i].squadStats.unitType))
-                    meleeSquads.Add(_targetSquadStats[i]);
-            }
-
-            if (meleeSquads.Count == 0) return -1;
-
-            return meleeSquads[UnityEngine.Random.Range(0, meleeSquads.Count)].SquadIndex;
-        }
-        static int FindRangedSquadTarget(AutoResolveSquad[] _targetSquadStats)
-        {
-            List<AutoResolveSquad> rangedSquads = new();
-            for (int i = 0; i < _targetSquadStats.Length; i++)
-            {
-                if (HasRouted(_targetSquadStats[i])) continue;
-                // Mages hold the back line beside archers and artillery, so they belong in the same
-                // pool. Without this a mage is in NEITHER pool - FightsInMelee excludes it by design -
-                // and a squad in neither pool can never be targeted, so it takes no damage all battle.
-                if (_targetSquadStats[i].squadStats.unitType == UnitType.Ranged
-                    || _targetSquadStats[i].squadStats.unitType == UnitType.Artillery
-                    || TabletopTavernConstants.Casts(_targetSquadStats[i].squadStats.unitType))
-                    rangedSquads.Add(_targetSquadStats[i]);
-            }
-
-            if (rangedSquads.Count == 0) return -1; //if there are no ranged squads, return -1
-
-            return rangedSquads[UnityEngine.Random.Range(0, rangedSquads.Count)].SquadIndex; //random chance to target one of the ranged squads
-        }
-        // Both pools above are positive whitelists, so any UnitType appended later drops out of both
-        // and silently becomes untargetable - it takes no damage for the whole battle, and if both
-        // sides are reduced to such squads CheckArmyStatus never routs either one and the caller's
-        // while loop spins forever. Falling back to anything still standing rules that out by
-        // construction rather than by remembering to update two lists.
-        static int FindAnySquadTarget(AutoResolveSquad[] _targetSquadStats)
-        {
-            List<AutoResolveSquad> standingSquads = new();
-            for (int i = 0; i < _targetSquadStats.Length; i++)
-            {
-                if (HasRouted(_targetSquadStats[i])) continue;
-                standingSquads.Add(_targetSquadStats[i]);
-            }
-
-            if (standingSquads.Count == 0) return -1;
-
-            return standingSquads[UnityEngine.Random.Range(0, standingSquads.Count)].SquadIndex;
-        }
-        
-        for (int i = 0; i < playerAutoResolveStats.Length; i++)
-        {
-            if (HasRouted(playerAutoResolveStats[i])) continue;
-
-            int newTargetIndex = FindMeleeSquadTarget(enemyAutoResolveStats);
-
-            if (newTargetIndex == -1 ) {
-                int newTarget = FindRangedSquadTarget(enemyAutoResolveStats);
-                if (newTarget != -1) newTargetIndex = newTarget;
-            }
-            if (newTargetIndex == -1) newTargetIndex = FindAnySquadTarget(enemyAutoResolveStats);
-
-            playerAutoResolveStats[i].TargetIndex = newTargetIndex;
-        }
-
-        for (int i = 0; i < enemyAutoResolveStats.Length; i++)
-        {
-            if (HasRouted(enemyAutoResolveStats[i])) continue;
-
-            int newTargetIndex = FindMeleeSquadTarget(playerAutoResolveStats);
-
-            if (newTargetIndex == -1 ) {
-                int newTarget = FindRangedSquadTarget(playerAutoResolveStats);
-                if (newTarget != -1) newTargetIndex = newTarget;
-            }
-            if (newTargetIndex == -1) newTargetIndex = FindAnySquadTarget(playerAutoResolveStats);
-            
-            enemyAutoResolveStats[i].TargetIndex = newTargetIndex;
-        }
+        AutoResolveSimulation.Initialize(playerAutoResolveStats, enemyAutoResolveStats);
+        AutoResolveSimulation.AssignTargets(playerAutoResolveStats, enemyAutoResolveStats);
+        AutoResolveSimulation.AssignTargets(enemyAutoResolveStats, playerAutoResolveStats);
     }
+    // ApplyDamageSystem's physical path for one hit, with the mark or brace multiplier last so it
+    // scales the fully resolved figure.
     internal void ModifyDamageDealt(ref int _damageDealt, AutoResolveSquad _defendingSquad, SquadStats _attackingSquad)
     {
-        if(_defendingSquad.armorMitigation > 0) {
-            float effectiveMitigation = _defendingSquad.armorMitigation;
-            if (_attackingSquad.SquadAttributes.ArmorPiercing) effectiveMitigation *= 0.5f;
-            if (_attackingSquad.SquadAttributes.ArmorSundering || _attackingSquad.SquadAttributes.Emblazing)
-                effectiveMitigation *= 0.5f;
-            _damageDealt -= (int)(_damageDealt * effectiveMitigation);
-        }
-
-        if(_defendingSquad.squadStats.unitSize == UnitSize.Infantry && _attackingSquad.SquadAttributes.AntiInfantry) _damageDealt *= 2;
-        if(_defendingSquad.squadStats.unitSize != UnitSize.Infantry && _attackingSquad.SquadAttributes.AntiLarge) _damageDealt *= 2;
-
-        if (_attackingSquad.SquadAttributes.MonsterSlayer &&
-            (_defendingSquad.squadStats.unitSize == UnitSize.Monstrous || _defendingSquad.squadStats.unitSize == UnitSize.SingleUnit))
-            _damageDealt *= 2;
-
-        if (_attackingSquad.SquadAttributes.Terrifying && !_defendingSquad.squadStats.SquadAttributes.Stalwart)
-            _damageDealt = (int)(_damageDealt * 1.2f);
-
-        if (_defendingSquad.squadStats.unitSize == UnitSize.Cavalry)
-            _damageDealt = (int)(_damageDealt * 0.5f);
-
-        if (_attackingSquad.unitSize == UnitSize.Cavalry)
-            _damageDealt = (int)(_damageDealt * 1.5f);
-
-        // Applied last so it scales the fully-resolved figure, which is what a mark means: more
-        // damage from everything, after armour and weapon multipliers have had their say.
-        if (_defendingSquad.damageTakenMultiplier != 1f && _defendingSquad.damageTakenMultiplier > 0f)
-            _damageDealt = math.max(1, (int)(_damageDealt * _defendingSquad.damageTakenMultiplier));
+        _damageDealt = AutoResolveSimulation.ModifyHit(_damageDealt, ref _attackingSquad, ref _defendingSquad, false);
     }
-    private void HandleRangedUnits()
-    {
-        static int CalculateRangedDamage(AutoResolveSquad _attackingSquad, AutoResolveSquad _targetSquad, float bonusModifier = 1f)
-        {
-            float shieldBlockChance = _targetSquad.shieldBlockChance;
-            float attacks = _attackingSquad.UnitsAlive;
-            float hits = _attackingSquad.squadStats.attackAccuracy * attacks;
-            hits *= 1 - shieldBlockChance;
-            int damage = _attackingSquad.squadStats.MissileStrength * (int)hits * 2;
-            if (_attackingSquad.squadStats.SquadAttributes.FlamingAmmo)
-                damage = (int)(damage * 1.25f);
-
-            // Shooter traits. Auto-resolve has no reload timer, blast radius or ammo count, so each
-            // one maps to the damage throughput it buys in a live battle:
-            // Shot Discipline -> shots per minute, Demolisher -> blast damage, Powder Reserves ->
-            // not running dry mid-fight (the loosest of the three, since ammo is unmodelled here).
-            if (_attackingSquad.squadStats.SquadAttributes.ShotDiscipline)
-                damage = (int)(damage / TabletopTavernConstants.SHOT_DISCIPLINE_RELOAD_MULTIPLIER);
-            if (_attackingSquad.squadStats.SquadAttributes.Demolisher)
-                damage = (int)(damage * TabletopTavernConstants.DEMOLISHER_EXPLOSION_MULTIPLIER);
-            if (_attackingSquad.squadStats.SquadAttributes.PowderReserves ||
-                _attackingSquad.squadStats.SquadAttributes.DeepQuivers)
-                damage = (int)(damage * 1.1f);
-
-            damage = (int)(damage * bonusModifier);
-            damage = math.max(1, damage);
-            return damage;
-        }
-
-        foreach (AutoResolveSquad attackingSquad in playerAutoResolveStats)
-        {
-            if (HasRouted(attackingSquad)) continue;
-            // Hybrids resolve entirely through HandleMeleeUnits. Auto-resolve has no approach phase
-            // to shoot during, and they are front-line targets here, so they simply fight.
-            // Mages skip this loop too, but for the opposite reason: they have no missile attack to
-            // resolve here at all. Their contribution is the one-off alpha strike, applied before
-            // normal resolution begins - without this guard a mage would deal ranged damage every
-            // round using an accuracy and missile strength it does not have.
-            if(TabletopTavernConstants.FightsInMelee(attackingSquad.squadStats.unitType)) continue;
-            if(TabletopTavernConstants.Casts(attackingSquad.squadStats.unitType)) continue;
-            if(attackingSquad.TargetIndex == -1) continue;
-
-            AutoResolveSquad targetSquad = TargetSquadFromIndex(attackingSquad.TargetIndex, enemyAutoResolveStats);
-            int damage = CalculateRangedDamage(attackingSquad, targetSquad);
-            ModifyDamageDealt(ref damage, targetSquad, attackingSquad.squadStats);
-            unitsSlainData.Add(new int3(attackingSquad.SquadIndex, targetSquad.SquadIndex, damage));
-        }
-        foreach (AutoResolveSquad attackingSquad in enemyAutoResolveStats)
-        {
-            if (HasRouted(attackingSquad)) continue;
-            if(TabletopTavernConstants.FightsInMelee(attackingSquad.squadStats.unitType)) continue;
-            if(TabletopTavernConstants.Casts(attackingSquad.squadStats.unitType)) continue;
-            if(attackingSquad.TargetIndex == -1) continue;
-
-            AutoResolveSquad targetSquad = TargetSquadFromIndex(attackingSquad.TargetIndex, playerAutoResolveStats);
-            float rangedEnemyBonus = ENEMY_AUTORESOLVE_SPECIAL_BONUS * (_isGarrisonBattle ? GARRISON_AUTORESOLVE_BONUS : 1f);
-            int damage = CalculateRangedDamage(attackingSquad, targetSquad, rangedEnemyBonus);
-            ModifyDamageDealt(ref damage, targetSquad, attackingSquad.squadStats);
-            unitsSlainData.Add(new int3(attackingSquad.SquadIndex, targetSquad.SquadIndex, damage));
-        }
-    }
-    // A mage's entire ranged contribution, resolved once at the start of the battle.
-    //
-    // In a live battle it spends one charge per cast on a long cooldown and converts to a melee body
-    // when the pool empties. Auto-resolve has no clock to spread that over, so the whole pool is spent
-    // up front, scaled by the spell's area of effect, and the mage then fights on with its melee
-    // stats, which is
-    // exactly what HandleMeleeUnits already does for it (its attacker guard skips only Ranged and
-    // Artillery). That makes the two paths agree on the mage's total output without modelling cooldowns.
-    //
-    // Damage is queued into unitsSlainData like every other source so RemoveSlainUnits applies it and
-    // kill credit is recorded the same way. ModifyDamageDealt is deliberately NOT applied: spell damage
-    // is DamageType.Magical, which ignores armor in the live pipeline, and the rest of that method is
-    // weapon-flavoured multipliers (AntiInfantry, MonsterSlayer, cavalry) that a spell has no business
-    // picking up.
     // A mage's entire contribution to auto-resolve, resolved once at the start of the battle.
     //
     // In a live battle a mage spends one charge per cast on a long cooldown and converts to a melee
-    // body when the pool empties. Auto-resolve has no clock to spread that over, so the whole pool is
-    // spent up front and the mage then fights on with its melee stats.
+    // body when the pool empties. The whole pool is spent up front here, scaled by the spell's area
+    // of effect, and the mage then closes to melee like every other caster in the simulation.
+    //
+    // Damage is queued into unitsSlainData and AutoResolveSimulation spreads it over the target's
+    // models on the next tick, crediting kills the same way. ModifyDamageDealt is deliberately NOT
+    // applied: spell damage is DamageType.Magical, which ignores armor in the live pipeline, and the
+    // rest of that method is weapon-flavoured multipliers a spell has no business picking up.
     //
     // This used to assume every mage spell was damage, because Smite was the only one. It is not:
     // SpellModifierValue means healing on a HoT, a percentage on a mark, and a NEGATIVE stat delta on a
@@ -773,7 +616,7 @@ namespace TJ.Engagement
         _mageAlphaStrikeApplied = true;
 
         // Damage queued but not yet applied, keyed by SquadIndex. unitsSlainData is not drained until
-        // RemoveSlainUnits, so without this every charge would be measured against full health and an
+        // the next tick, so without this every charge would be measured against full health and an
         // already-dead squad would keep absorbing casts.
         Dictionary<int, int> queuedDamage = new();
 
@@ -796,8 +639,8 @@ namespace TJ.Engagement
             {
                 case UnitStat.Accuracy:
                     // Floor at zero, not one: a melee squad already sits at zero accuracy, and a
-                    // floor of one would have a debuff RAISE it. CalculateRangedDamage floors the
-                    // resulting damage at 1 anyway, so zero here is safe.
+                    // floor of one would have a debuff RAISE it. A zero-accuracy shooter simply
+                    // lands no hits.
                     squad.squadStats.attackAccuracy = math.max(0f, squad.squadStats.attackAccuracy + value);
                     return true;
                 case UnitStat.Leadership:
@@ -870,10 +713,7 @@ namespace TJ.Engagement
                             if (missing > worstMissing) { worstMissing = missing; pick = i; }
                         }
                         if (pick == -1) break;   // nothing hurt enough to be worth a charge
-                        int maxHealth = pool[pick].maxUnits * pool[pick].healthPerKill;
-                        pool[pick].finalHealth = math.min(maxHealth, pool[pick].finalHealth + healPerCast);
-                        pool[pick].UnitsAlive = math.min(pool[pick].maxUnits,
-                            (int)math.ceil(pool[pick].finalHealth / (float)pool[pick].healthPerKill));
+                        AutoResolveSimulation.Heal(ref pool[pick], healPerCast);
                     }
                     continue;
                 }
@@ -982,89 +822,14 @@ namespace TJ.Engagement
 
         CastFrom(playerAutoResolveStats, enemyAutoResolveStats, playerAutoResolveStats, 1f);
         CastFrom(enemyAutoResolveStats, playerAutoResolveStats, enemyAutoResolveStats,
-            ENEMY_AUTORESOLVE_SPECIAL_BONUS * (_isGarrisonBattle ? GARRISON_AUTORESOLVE_BONUS : 1f));
-    }
-    private void HandleMeleeUnits()
-    {
-        static int CalculateMeleeDamage(AutoResolveSquad _attackingSquad, AutoResolveSquad _targetSquad, float bonusModifier = 1f)
-        {
-            // int formationWidth = DataTypes.GetFormationWidthFromUnitSize(TabletopTavernData.Instance.GetUnitSizeFromUnitName(_attackingSquad.squadStats.unitName));
-            // int unitsAttacking = Mathf.Min(_attackingSquad.UnitsAlive, formationWidth);
-            // Debug.Log($"unitsAttacking: {unitsAttacking}");
-            float attacks = _attackingSquad.UnitsAlive;
-            // Same roll as MeleeUnitAttackSystem, taken as an expected value instead of a dice roll.
-            float chanceToHit = (TabletopTavernConstants.MELEE_BASE_HIT_CHANCE
-                + TabletopTavernConstants.MELEE_HIT_CHANCE_PER_POINT * (_attackingSquad.squadStats.MeleeAttack - _targetSquad.squadStats.MeleeDefense)) / 100f;
-            chanceToHit = math.clamp(chanceToHit, TabletopTavernConstants.MELEE_HIT_CHANCE_MIN / 100f, TabletopTavernConstants.MELEE_HIT_CHANCE_MAX / 100f);
-            // Debug.Log($"Chance to hit: {chanceToHit}");
-            float hits = chanceToHit * attacks;
-
-            int weaponStrength = _attackingSquad.squadStats.WeaponStrength;
-            if (_attackingSquad.squadStats.SquadAttributes.Rage && _attackingSquad.UnitsAlive * 2 < _attackingSquad.maxUnits)
-                weaponStrength *= 2;
-
-            int damage = weaponStrength * (int)hits;
-            if(_attackingSquad.squadStats.unitSize == UnitSize.SingleUnit) {
-                damage = (int)(weaponStrength * chanceToHit / 10f);
-                // Debug.Log($"Monstrous Unit {TabletopTavernData.Instance.GetUnitSizeFromUnitName(_attackingSquad.squadStats.unitName)} dealt {damage} damage");
-            }
-            if(_targetSquad.squadStats.unitSize == UnitSize.SingleUnit) {
-                damage /= 5;
-                // Debug.Log($"Monstrous Unit {TabletopTavernData.Instance.GetUnitSizeFromUnitName(_targetSquad.squadStats.unitName)} took {damage} damage");
-            }
-
-            if(_attackingSquad.squadStats.unitSize != UnitSize.Infantry && _targetSquad.squadStats.unitSize == UnitSize.Infantry && !_targetSquad.squadStats.SquadAttributes.AntiLarge) {
-                damage = (int)(damage * 1.5f);
-            }
-
-            if (_attackingSquad.squadStats.SquadAttributes.BloodFrenzy && _attackingSquad.UnitsSlain > 0)
-                damage = (int)(damage * 1.25f);
-            if (_attackingSquad.squadStats.SquadAttributes.BackStabbers)
-                damage = (int)(damage * 1.1f);
-            if (_attackingSquad.squadStats.SquadAttributes.ThrowingAxes)
-                damage = (int)(damage * 1.15f);
-
-            damage = (int)(damage * bonusModifier);
-            damage = math.max(1, damage);
-
-            return damage;
-        }
-
-        foreach (AutoResolveSquad attackingSquad in playerAutoResolveStats)
-        {
-            if (HasRouted(attackingSquad)) continue;
-            if(attackingSquad.squadStats.unitType == UnitType.Ranged || attackingSquad.squadStats.unitType == UnitType.Artillery) continue;
-            if(attackingSquad.TargetIndex == -1) continue;
-
-            AutoResolveSquad targetSquad = TargetSquadFromIndex(attackingSquad.TargetIndex, enemyAutoResolveStats);
-            int damage = CalculateMeleeDamage(attackingSquad, targetSquad);
-            ModifyDamageDealt(ref damage, targetSquad, attackingSquad.squadStats);
-            unitsSlainData.Add(new int3(attackingSquad.SquadIndex, targetSquad.SquadIndex, damage));
-        }
-        foreach (AutoResolveSquad attackingSquad in enemyAutoResolveStats)
-        {
-            if (HasRouted(attackingSquad)) continue;
-            if(attackingSquad.squadStats.unitType == UnitType.Ranged || attackingSquad.squadStats.unitType == UnitType.Artillery) continue;
-            if(attackingSquad.TargetIndex == -1) continue;
-
-            AutoResolveSquad targetSquad = TargetSquadFromIndex(attackingSquad.TargetIndex, playerAutoResolveStats);
-            float meleeEnemyBonus = ENEMY_AUTORESOLVE_SPECIAL_BONUS * (_isGarrisonBattle ? GARRISON_AUTORESOLVE_BONUS : 1f);
-            int damage = CalculateMeleeDamage(attackingSquad, targetSquad, meleeEnemyBonus);
-            ModifyDamageDealt(ref damage, targetSquad, attackingSquad.squadStats);
-            unitsSlainData.Add(new int3(attackingSquad.SquadIndex, targetSquad.SquadIndex, damage));
-        }
-    }
-    private void RemoveSlainUnits()
-    {
-        foreach (int3 data in unitsSlainData) {
-            // Debug.Log($"Squad {data.x} Slain {data.z} Units from Squad {data.y}");
-            RemoveUnitsFromSquad(data.z, data.y, data.x);
-        }
+            _isGarrisonBattle ? GARRISON_AUTORESOLVE_BONUS : 1f);
     }
     // internal: the difficulty sim counts routed squads with the same rule the loop uses.
     internal static bool HasRouted(AutoResolveSquad squad)
     {
         if (squad.UnitsAlive <= 0) return true;
+        if (squad.SimReady) return squad.Broken;
+        // Not yet simulated (hand-built armies before the first tick): the old fixed threshold.
         float routeThreshold = (1f - squad.squadStats.Leadership / 100f) * squad.maxUnits;
         return squad.UnitsAlive <= routeThreshold;
     }
@@ -1087,6 +852,12 @@ namespace TJ.Engagement
         if (enemyArmyDead) {
             enemyArmyIsDefeated = true;
         }
+        // Survivors leave the field at full health, as the live post-battle save writes them.
+        if (playerArmyDead || enemyArmyDead)
+        {
+            AutoResolveSimulation.Settle(playerAutoResolveStats);
+            AutoResolveSimulation.Settle(enemyAutoResolveStats);
+        }
 
         // if (playerArmyIsDefeated || enemyArmyIsDefeated)
         // {
@@ -1102,68 +873,6 @@ namespace TJ.Engagement
                 return _targetSquadStats[i];
         }
         return new();
-    }
-    private void RemoveUnitsFromSquad(int _damageDealt, int _targetIndex, int _slayingSquadIndex)
-    {
-        int unitsKilledThisTurn = 0;
-        //handle deaths
-        for (int i = 0; i < enemyAutoResolveStats.Length; i++)
-        {
-            if (enemyAutoResolveStats[i].SquadIndex == _targetIndex) {
-                enemyAutoResolveStats[i].finalHealth -= _damageDealt;
-
-                //health 100 damage 10 healthPerKill 10
-                //get how many units were killed
-                float unitsRemaingingFloat = (float)enemyAutoResolveStats[i].finalHealth / (float)enemyAutoResolveStats[i].healthPerKill;
-                // 90/10 = 9
-                // Debug.Log($"unitsRemaingingFloat: {unitsRemaingingFloat}");
-                //if total health is 0, round down to 0
-                if (enemyAutoResolveStats[i].finalHealth < 0) unitsRemaingingFloat = 0;
-                // if less than 1 but not 0, round up to 1
-                int unitsRemainging = (int)math.ceil(unitsRemaingingFloat);
-                // Debug.Log($"units in squad {enemyAutoResolveStats[i].SquadIndex}: {unitsRemainging}");
-
-                if (unitsRemainging < enemyAutoResolveStats[i].UnitsAlive) {
-                    // unitsRemainging = Mathf.Min(enemyAutoResolveStats[i].UnitCount, unitsKilledThisTurn); //only records kills if there are enough units to kill
-                    unitsKilledThisTurn = enemyAutoResolveStats[i].UnitsAlive - unitsRemainging;
-                    enemyAutoResolveStats[i].UnitsAlive -= unitsKilledThisTurn;
-                }
-            }
-        }
-        for (int i = 0; i < playerAutoResolveStats.Length; i++)
-        {
-            if (playerAutoResolveStats[i].SquadIndex == _targetIndex) {
-                playerAutoResolveStats[i].finalHealth -= _damageDealt;
-
-                //get how many units were killed
-                float unitsRemaingingFloat = (float)playerAutoResolveStats[i].finalHealth / (float)playerAutoResolveStats[i].healthPerKill;
-                //if total health is 0, round down to 0
-                if (playerAutoResolveStats[i].finalHealth < 0) unitsRemaingingFloat = 0;
-
-                int unitsRemainging = (int)math.ceil(unitsRemaingingFloat);
-                // Debug.Log($"units in squad: {playerAutoResolveStats[i].UnitCount} unitsRemainging: {unitsRemainging}");
-
-                if (unitsRemainging < playerAutoResolveStats[i].UnitsAlive) {
-                    // unitsRemainging = Mathf.Min(playerAutoResolveStats[i].UnitCount, unitsKilledThisTurn); //only records kills if there are enough units to kill
-                    unitsKilledThisTurn = playerAutoResolveStats[i].UnitsAlive - unitsRemainging;
-                    playerAutoResolveStats[i].UnitsAlive -= unitsKilledThisTurn;
-                }
-            }
-        }
-
-        //handle kills
-        for (int i = 0; i < enemyAutoResolveStats.Length; i++)
-        {
-            if (enemyAutoResolveStats[i].SquadIndex == _slayingSquadIndex) {
-                enemyAutoResolveStats[i].UnitsSlain += unitsKilledThisTurn;
-            }
-        }
-        for (int i = 0; i < playerAutoResolveStats.Length; i++)
-        {
-            if (playerAutoResolveStats[i].SquadIndex == _slayingSquadIndex) {
-                playerAutoResolveStats[i].UnitsSlain += unitsKilledThisTurn;
-            }
-        }
     }
     private void RecordResults(bool _save)
     {

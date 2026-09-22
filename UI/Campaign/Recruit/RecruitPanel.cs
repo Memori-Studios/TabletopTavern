@@ -47,9 +47,12 @@ namespace TJ.Recruit
         List<RecruitCard> recruitCards = new List<RecruitCard>();
         RecruitCard hoveredCard;
         bool hasSelectedRecruitCard = false;
+        public bool HasSelectedRecruitCard => hasSelectedRecruitCard;
         CancellationTokenSource _cardLoadCts;
         public enum RecruitmentType { Shop, Town, Battle, Conscription }
         RecruitmentType recruitmentType = RecruitmentType.Shop;
+        // Louder than the battle bark (0.2): nothing on the map screen competes with it.
+        const float RecruitBarkVolume = 0.4f;
         
         public void SetUp(CampaignSaveManager _campaignSaveManager, MapSceneUIManager _mapSceneUIManager)
         {
@@ -206,6 +209,8 @@ namespace TJ.Recruit
         // One hovered card grows and lifts; the rest shrink. Null returns every card to its breath.
         public void SetHoveredCard(RecruitCard hovered)
         {
+            // After a pick the cards hold their pose: the bought card up, the rest shrunk and darkened.
+            if (hasSelectedRecruitCard) return;
             hoveredCard = hovered;
             for (int i = 0; i < recruitCards.Count; i++)
             {
@@ -258,31 +263,32 @@ namespace TJ.Recruit
                     && selected[1].GetSquadToLoad().UnitName == _squadStats.unitName
                     && selected[1].GetSquadToLoad().UnitPrestige == minPrestige;
 
+                string uid1 = string.Empty, uid2 = string.Empty;
                 if (selectionValid)
                 {
-                    campaignSaveManager.PrestigeAndCombineWithRecruit(
-                        selected[0].GetSquadToLoad().UniqueID,
-                        selected[1].GetSquadToLoad().UniqueID);
+                    uid1 = selected[0].GetSquadToLoad().UniqueID;
+                    uid2 = selected[1].GetSquadToLoad().UniqueID;
                 }
                 else
                 {
-                    string uid1 = string.Empty, uid2 = string.Empty;
                     for (int i = 0; i < army.Length; i++)
                     {
                         if (army[i].UnitIndex == -1 || army[i].UnitName != _squadStats.unitName || army[i].UnitPrestige != minPrestige) continue;
                         if (uid1 == string.Empty) uid1 = army[i].UniqueID;
                         else { uid2 = army[i].UniqueID; break; }
                     }
-
-                    if (uid1 == string.Empty || uid2 == string.Empty)
-                    {
-                        string errorLocalized = LocalizationManager.Instance.GetText("Max Units Recruited");
-                        NotificationManager.Instance.ErrorNotification(errorLocalized);
-                        return;
-                    }
-
-                    campaignSaveManager.PrestigeAndCombineWithRecruit(uid1, uid2);
                 }
+
+                if (uid1 == string.Empty || uid2 == string.Empty)
+                {
+                    string errorLocalized = LocalizationManager.Instance.GetText("Max Units Recruited");
+                    NotificationManager.Instance.ErrorNotification(errorLocalized);
+                    return;
+                }
+
+                // Set before the save call: its OnArmyStructureChanged would otherwise re-run every card's combine badge.
+                hasSelectedRecruitCard = true;
+                campaignSaveManager.PrestigeAndCombineWithRecruit(uid1, uid2);
                 mapSceneUIManager.TryDrainPendingPrestigeChoices();
             }
             else
@@ -299,14 +305,15 @@ namespace TJ.Recruit
                     }
                 }
 
+                hasSelectedRecruitCard = true;
                 campaignSaveManager.RecruitSquad(_squadStats, conscriptedHealth);
             }
 
             IAudioRequester.Instance.PlaySFX(SFXData.RecruitUnit);
-            
+            IAudioRequester.Instance.PlayVoice(TabletopTavernData.Instance.GetRandomBarkSFX(_squadStats.unitName), RecruitBarkVolume);
+
             _recruitCard.CompletePurchase();
             skipButton.gameObject.SetActive(false);
-            hasSelectedRecruitCard = true;
             TooltipManager.Instance.HideTooltip();
 
             for (int i = 0; i < recruitCards.Count; i++) {

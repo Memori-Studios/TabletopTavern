@@ -71,6 +71,8 @@ namespace TJ
                 activeHeroID = -1;
             }
             _activePlayerRace = activeHeroID == -1 ? Race.Special : HeroData.GetRaceFromHero(activeHeroID);
+            // unit_overrides.json heroID entries follow the run's hero; custom battles and the menu get vanilla.
+            TabletopTavernData.Instance.ApplyHeroConditionalOverrides(activeHeroID);
             // Debug.Log($"Active Hero ID: {activeHeroID}, custom battle: {isCustomBattle}");
         }
         public static List<UnitStatBonus> GetFactionBonus(UnitStat _unitStat) => GetFactionBonusForRace(_unitStat, _activePlayerRace);
@@ -164,6 +166,29 @@ namespace TJ
                 if (rule.Condition.Matches(_requestingUnit, stats, enemyRace)) return true;
             }
             return false;
+        }
+        // Model count a player squad is recruited with. The loader only admits Flat BaseUnitCount rules
+        // with no EnemyRace condition, so this reads the same at recruit time and at battle setup.
+        public static int GetPlayerBaseUnitCount(UnitName _requestingUnit, int activeHeroID)
+        {
+            int baseUnitCount = TabletopTavernData.Instance.GetBaseUnitCount(_requestingUnit);
+            if (activeHeroID == -1) return baseUnitCount;
+
+            float total = 0f;
+            foreach (var bonus in GetHeroStatBonus(UnitStat.BaseUnitCount, _requestingUnit, activeHeroID, baseUnitCount))
+                total += bonus.Value;
+            return Mathf.Max(1, baseUnitCount + (int)total);
+        }
+        // Resizes a freshly built player squad to the hero's count, keeping its health fraction.
+        public static void ApplyHeroBaseUnitCount(ref SquadToLoad squad, int activeHeroID)
+        {
+            int unitCount = GetPlayerBaseUnitCount(squad.UnitName, activeHeroID);
+            if (unitCount == squad.maxUnitCount) return;
+
+            float healthFraction = squad.SquadMaxHealth > 0 ? (float)squad.SquadCurrentHealth / squad.SquadMaxHealth : 1f;
+            squad.maxUnitCount = unitCount;
+            squad.SquadMaxHealth = unitCount * squad.HitPointsPerUnit;
+            squad.SquadCurrentHealth = (int)(squad.SquadMaxHealth * healthFraction);
         }
         public static string GetLocalizedHeroUnlockDescription(Hero _hero, UnlockCondition _unlockCondition)
         {

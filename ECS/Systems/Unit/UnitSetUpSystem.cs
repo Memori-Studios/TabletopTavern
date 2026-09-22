@@ -101,13 +101,15 @@ partial struct UnitSetUpSystem : ISystem
             int missileStrength = squadStats.MissileStrength;
             int weaponStrength = squadStats.WeaponStrength;
             float armor = squadStats.Armor;
-            
+            float attackCooldown = squadStats.attackCooldown;
+            float rateOfFire = squadStats.rateOfFire;
+            int explosionDamage = squadStats.ExplosionDamage;
+            float explosionRange = squadStats.ExplosionRange;
+            float explosionForce = squadStats.ExplosionForce;
+
             GearIDsSerialized gear = campaignSaveDataHolder.Gear;
 
-            bool Contains(GearID gearID) {
-                if(gear.gearID1 == gearID || gear.gearID2 == gearID || gear.gearID3 == gearID || gear.gearID4 == gearID) return true;
-                return false;
-            }
+            bool Contains(GearID gearID) => gear.Contains(gearID);
 
             //hero stuff - bonus magnitudes and conditions now come from HeroBonusRuleData (plus
             // any mod overrides, applied by HeroBonusManager in the main assembly and shared here
@@ -115,8 +117,8 @@ partial struct UnitSetUpSystem : ISystem
             // and the values can't drift from what the UI shows. HeroBonusManager itself can't be
             // referenced from this assembly (TabletopTavern.Core.Systems doesn't reference the
             // main TabletopTavern.Core assembly), hence the separate evaluator. This system covers
-            // exactly the stats it's responsible for: Leadership, Speed and ChargeImpactDamage are
-            // applied in SquadManager.RegisterSquad (HitPoints there too, for the squad health bar),
+            // exactly the stats it's responsible for: Leadership, Speed, ChargeCount and ChargeImpactDamage
+            // are applied in SquadManager.RegisterSquad (HitPoints there too, for the squad health bar),
             // ChargeBonus in SquadChargeBonusApplicationSystem, Ammunition in EntityWatcher. The
             // Sakura Dynasty mono-race army gate (OnlySakuraUnits) is unchanged - not yet
             // generalized to other races.
@@ -139,6 +141,12 @@ partial struct UnitSetUpSystem : ISystem
                 armor += SumHeroBonus(UnitStat.Armor, armor);
                 range += SumHeroBonus(UnitStat.Range, range);
                 missileStrength += (int)SumHeroBonus(UnitStat.MissileStrength, missileStrength);
+                // A negative bonus is how a mod speeds a unit up; the floor keeps a timer from hitting zero.
+                attackCooldown = math.max(0.1f, attackCooldown + SumHeroBonus(UnitStat.AttackCooldown, attackCooldown));
+                rateOfFire = math.max(0.1f, rateOfFire + SumHeroBonus(UnitStat.RateOfFire, rateOfFire));
+                explosionDamage = math.max(0, explosionDamage + (int)SumHeroBonus(UnitStat.ExplosionDamage, explosionDamage));
+                explosionRange = math.max(0f, explosionRange + SumHeroBonus(UnitStat.ExplosionRange, explosionRange));
+                explosionForce = math.max(0f, explosionForce + SumHeroBonus(UnitStat.ExplosionForce, explosionForce));
             }
 
             if(!campaignSaveDataHolder.IsCustomBattle && team == Team.Player)
@@ -147,8 +155,10 @@ partial struct UnitSetUpSystem : ISystem
                     unitAttributes.ArmorPiercing = true;
                 if(Contains(GearID.Turkey) && squadStats.unitType == UnitType.Ranged) 
                     unitAttributes.AntiLarge = true;
-                if(Contains(GearID.HeavyWeapons) && squadStats.RarityTier == UnitRarity.Rare) 
-                    squadStats.SquadAttributes.ArmorPiercing = true; 
+                // unitAttributes is what becomes the ArmorPiercingTag below; the squadStats copy was
+                // already read, so writing only that left Heavy Weapons doing nothing in a live battle.
+                if(Contains(GearID.HeavyWeapons) && squadStats.RarityTier == UnitRarity.Rare)
+                    unitAttributes.ArmorPiercing = true;
 
                 if(Contains(GearID.ArmingSwords) && TabletopTavernConstants.FightsInMelee(squadStats.unitType))
                     meleeAttack += GearData.GetGear(GearID.ArmingSwords).GearModifierValue;
@@ -196,8 +206,8 @@ partial struct UnitSetUpSystem : ISystem
                 // MeleeAttack is still added unconditionally below, so it defends itself in melee.
                 entityCommandBuffer.AddComponent(entity, new MageCast {
                     Range = range,
-                    Cooldown = squadStats.rateOfFire,
-                    Timer = squadStats.rateOfFire,
+                    Cooldown = rateOfFire,
+                    Timer = rateOfFire,
                 });
             }
             else if(squadStats.unitType != UnitType.Melee)
@@ -211,7 +221,7 @@ partial struct UnitSetUpSystem : ISystem
                     rangeMultiplier *= TabletopTavernConstants.OVERDRAW_RANGE_MULTIPLIER;
 
                 LocalToWorld localTransform = SystemAPI.GetComponent<LocalToWorld>(entity);
-                float timerMax = squadStats.unitType == UnitType.Artillery || squadStats.unitType == UnitType.Structure ? squadStats.rateOfFire : TabletopTavernConstants.RANGED_ATTACK_COOLDOWN;
+                float timerMax = squadStats.unitType == UnitType.Artillery || squadStats.unitType == UnitType.Structure ? rateOfFire : TabletopTavernConstants.RANGED_ATTACK_COOLDOWN;
                 if (squadStats.SquadAttributes.ShotDiscipline)
                     timerMax *= TabletopTavernConstants.SHOT_DISCIPLINE_RELOAD_MULTIPLIER;
 
@@ -251,10 +261,10 @@ partial struct UnitSetUpSystem : ISystem
             }
   
             entityCommandBuffer.AddComponent(entity, new MeleeAttack {
-                timerMax = squadStats.attackCooldown,
+                timerMax = attackCooldown,
                 MeleeAttackValue = meleeAttack,
                 WeaponStrength = weaponStrength,
-                timer = _random.NextFloat(0f, squadStats.attackCooldown)
+                timer = _random.NextFloat(0f, attackCooldown)
             });
 
             entityCommandBuffer.AddComponent(entity, new MaxHitPoints
@@ -284,7 +294,7 @@ partial struct UnitSetUpSystem : ISystem
             //Tags for damage multipliers
             if(squadStats.unitSize == UnitSize.Monstrous || squadStats.unitSize == UnitSize.Cavalry || squadStats.unitSize == UnitSize.SingleUnit) {
                 if(squadStats.unitSize != UnitSize.Cavalry && squadStats.unitType != UnitType.Structure) {
-                    entityCommandBuffer.AddComponent(entity, new MonsterTag { KnockbackRange = squadStats.ExplosionRange, KnockbackInitialDamage = squadStats.ExplosionDamage });
+                    entityCommandBuffer.AddComponent(entity, new MonsterTag { KnockbackRange = explosionRange, KnockbackInitialDamage = explosionDamage });
                 }
                 if(squadStats.unitType != UnitType.Structure) {
                     entityCommandBuffer.AddComponent<LargeTag>(entity);
@@ -410,9 +420,9 @@ partial struct UnitSetUpSystem : ISystem
                 entityCommandBuffer.AddComponent(entity, new ArtilleryUnit
                 {
                     SquadID = unit.ValueRO.squadId,
-                    ExplosionDamage = (int)(squadStats.ExplosionDamage * explosionMultiplier),
-                    ExplosionRange = squadStats.ExplosionRange * explosionMultiplier,
-                    ExplosionForce = squadStats.ExplosionForce
+                    ExplosionDamage = (int)(explosionDamage * explosionMultiplier),
+                    ExplosionRange = explosionRange * explosionMultiplier,
+                    ExplosionForce = explosionForce
                 });
                 entityCommandBuffer.AddComponent(entity, new ResistKnockbackTag { });
             }

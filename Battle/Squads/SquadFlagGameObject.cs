@@ -72,6 +72,17 @@ namespace TJ
         bool hasCooldown;
         UnitType unitType;
 
+        #region Split squad banner anchor
+        // SquadCenter is the mean of every unit, so a squad split between two spots puts the banner in the empty middle.
+        private const float SplitCheckInterval = 0.25f;
+        private const float SplitNeighbourSpreads = 4f;
+        private float splitCheckTimer;
+        private Entity splitAnchorUnit = Entity.Null;
+        private Vector3 splitAnchorOffset;
+        private float2[] _splitPositions = new float2[64];
+        private Entity[] _splitEntities = new Entity[64];
+        #endregion
+
         private static readonly int LowMoraleID = Shader.PropertyToID("_LowMorale");
         private static readonly int AlphaID = Shader.PropertyToID("_Alpha");
         private static readonly int CameraHideID = Shader.PropertyToID("_CameraHide");
@@ -85,9 +96,14 @@ namespace TJ
             squadEntity = _entity;
 
             EntityManager = World.DefaultGameObjectInjectionWorld.EntityManager;
-            VoiceSFX voiceSFX = TabletopTavernData.Instance.SquadAssetsDictionary[unitName].voiceSFX;
-            bool isInfantry = TabletopTavernData.Instance.GetUnitSizeFromUnitName(unitName) == UnitSize.Infantry;
-            squadSFXManager.Initialize(voiceSFX, isInfantry);
+            SquadAssets squadAssets = TabletopTavernData.Instance.SquadAssetsDictionary[unitName];
+            UnitSize sizeClass = TabletopTavernData.Instance.GetUnitSizeFromUnitName(unitName);
+            bool isInfantry = sizeClass == UnitSize.Infantry;
+            // Only worn armor rattles; an armored monster does not.
+            bool heavyArmor = (sizeClass == UnitSize.Infantry || sizeClass == UnitSize.Cavalry)
+                && TabletopTavernData.Instance.GetSquadStats(unitName).Armor >= SquadSFXManager.HeavyArmorThreshold;
+            Weather weather = battleManager.BattlefieldEnvManager.CurrentWeather;
+            squadSFXManager.Initialize(squadAssets.voiceSFX, isInfantry, squadAssets.mountSFX, heavyArmor, weather);
             flagMeshRenderer.material = _flagMaterial;
             squadId = _squadId;
             unitSize = _unitSize;
@@ -171,6 +187,72 @@ namespace TJ
             // capsuleCollider.isTrigger = true;
         }
 
+        // Picks the unit the banner rides when the squad is split. Cheap path is one distance per unit; the
+        // pairwise pass only runs when no unit stands near the mean, and it never runs more than 4 times a second.
+        private void RefreshSplitAnchor(SquadMovementComponent movement)
+        {
+            splitAnchorUnit = Entity.Null;
+            if (isGate || !EntityManager.HasBuffer<EntityReferenceBufferElement>(squadEntity)) return;
+
+            DynamicBuffer<EntityReferenceBufferElement> units = EntityManager.GetBuffer<EntityReferenceBufferElement>(squadEntity);
+            if (units.Length < 4) return;
+            if (_splitPositions.Length < units.Length)
+            {
+                _splitPositions = new float2[units.Length];
+                _splitEntities = new Entity[units.Length];
+            }
+
+            int count = 0;
+            for (int i = 0; i < units.Length; i++)
+            {
+                Entity unit = units[i].Entity;
+                if (!EntityManager.Exists(unit) || !EntityManager.HasComponent<LocalTransform>(unit)) continue;
+                _splitPositions[count] = EntityManager.GetComponentData<LocalTransform>(unit).Position.xz;
+                _splitEntities[count] = unit;
+                count++;
+            }
+            if (count < 4) return;
+
+            float radius = SplitNeighbourSpreads * TabletopTavernConstants.GetSpread(unitSize);
+            float radiusSq = radius * radius;
+
+            // The mean stands on the body: the plain SquadCenter is right.
+            float2 mean = movement.SquadCenter.xz;
+            float nearestSq = float.MaxValue;
+            for (int i = 0; i < count; i++) nearestSq = math.min(nearestSq, math.distancesq(_splitPositions[i], mean));
+            if (nearestSq <= radiusSq) return;
+
+            // Largest cluster wins; a tie goes to the one nearer the squad's goal.
+            float2 goal = movement.GoalPosition.xz;
+            int best = -1, bestCount = -1;
+            float bestGoalSq = float.MaxValue;
+            float2 bestSum = float2.zero;
+            for (int i = 0; i < count; i++)
+            {
+                int neighbours = 0;
+                float2 sum = float2.zero;
+                for (int j = 0; j < count; j++)
+                {
+                    if (math.distancesq(_splitPositions[i], _splitPositions[j]) > radiusSq) continue;
+                    neighbours++;
+                    sum += _splitPositions[j];
+                }
+                float goalSq = math.distancesq(_splitPositions[i], goal);
+                if (neighbours > bestCount || (neighbours == bestCount && goalSq < bestGoalSq))
+                {
+                    best = i;
+                    bestCount = neighbours;
+                    bestGoalSq = goalSq;
+                    bestSum = sum;
+                }
+            }
+
+            float2 centroid = bestSum / bestCount;
+            float2 toCentroid = centroid - _splitPositions[best];
+            splitAnchorUnit = _splitEntities[best];
+            splitAnchorOffset = new Vector3(toCentroid.x, 0f, toCentroid.y);
+        }
+
         // Billboarding lives here rather than in FixedUpdate so it keeps working while the
         // game is paused (timeScale 0 stops FixedUpdate entirely), and so it runs after the
         // camera has moved this frame.
@@ -193,7 +275,26 @@ namespace TJ
 
             void HandleFlagPosition()
             {
-                Vector3 targetPosition = (Vector3)EntityManager.GetComponentData<SquadMovementComponent>(squadEntity).SquadCenter + offset;
+                SquadMovementComponent movement = EntityManager.GetComponentData<SquadMovementComponent>(squadEntity);
+                Vector3 center = movement.SquadCenter;
+
+                splitCheckTimer -= Time.fixedDeltaTime;
+                if (splitCheckTimer <= 0f)
+                {
+                    splitCheckTimer = SplitCheckInterval;
+                    RefreshSplitAnchor(movement);
+                }
+                if (splitAnchorUnit != Entity.Null)
+                {
+                    if (EntityManager.Exists(splitAnchorUnit) && EntityManager.HasComponent<LocalTransform>(splitAnchorUnit))
+                    {
+                        Vector3 anchor = (Vector3)EntityManager.GetComponentData<LocalTransform>(splitAnchorUnit).Position + splitAnchorOffset;
+                        center = new Vector3(anchor.x, 0f, anchor.z);
+                    }
+                    else splitAnchorUnit = Entity.Null;
+                }
+
+                Vector3 targetPosition = center + offset;
                 if (transform.position != targetPosition) {
                     transform.position = targetPosition;
                     Physics.SyncTransforms();

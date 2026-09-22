@@ -9,6 +9,14 @@ namespace TJ
         [SerializeField] private AudioSource movingSource;  // plays only when moving
         [SerializeField] private AudioSource secondaryLoopingSource;  // infantry-only secondary loop
         [SerializeField] private AudioSource combatLoopingSource;     // plays only when in combat
+        [Header("Weather march loops")]
+        [SerializeField] private AudioClip snowMarchLoop;
+        [SerializeField] private AudioClip mudMarchLoop;
+        [Header("Heavy armor")]
+        [SerializeField] private AudioClip armorRattleLoop;
+        // Armor at or above this rattles while the squad moves.
+        public const int HeavyArmorThreshold = 80;
+        private const float MountCallChance = 0.5f;
         private const float ChargeShoutIntervalMin = 1.5f;
         private const float ChargeShoutIntervalMax = 3f;
         // Where a charge shout's linear rolloff reaches silence.
@@ -16,27 +24,53 @@ namespace TJ
         private const float _fadeOutDuration = 2f;
 
         private VoiceSFX _voiceSFX;
+        private MountSFX _mountSFX;
         private bool _isInfantry;
+        // Runtime copy of secondaryLoopingSource; only heavy squads get one.
+        private AudioSource _rattleSource;
         // Effects slider value for the looping sources. One-shots go through SFXManager, which applies its own channel.
         private float _baseVolume = 1f;
         private Coroutine _chargeShoutCoroutine;
         private Coroutine _movingFadeCoroutine;
         private Coroutine _secondaryFadeCoroutine;
         private Coroutine _combatFadeCoroutine;
+        private Coroutine _rattleFadeCoroutine;
         private bool _isMoving;
         private bool _isInCombat;
         private bool _gamePaused;
 
-        public void Initialize(VoiceSFX voiceSFX, bool isInfantry)
+        public void Initialize(VoiceSFX voiceSFX, bool isInfantry, MountSFX mountSFX, bool heavyArmor, Weather weather)
         {
             _voiceSFX = voiceSFX;
+            _mountSFX = mountSFX;
             _isInfantry = isInfantry;
+
+            if (_mountSFX != null && _mountSFX.moveLoop != null) movingSource.clip = _mountSFX.moveLoop;
+            if (weather == Weather.Snow && snowMarchLoop != null) secondaryLoopingSource.clip = snowMarchLoop;
+            else if (weather == Weather.Rain && mudMarchLoop != null) secondaryLoopingSource.clip = mudMarchLoop;
+            if (heavyArmor && armorRattleLoop != null) _rattleSource = CreateRattleSource();
 
             movingSource.enabled = false;
             secondaryLoopingSource.enabled = false;
             combatLoopingSource.enabled = false;
+            if (_rattleSource != null) _rattleSource.enabled = false;
 
             BattleManager.Instance.OnGamePhaseChanged += OnGamePhaseChanged;
+        }
+
+        private AudioSource CreateRattleSource()
+        {
+            AudioSource source = secondaryLoopingSource.gameObject.AddComponent<AudioSource>();
+            source.clip = armorRattleLoop;
+            source.playOnAwake = false;
+            source.loop = true;
+            source.spatialBlend = secondaryLoopingSource.spatialBlend;
+            source.rolloffMode = secondaryLoopingSource.rolloffMode;
+            source.minDistance = secondaryLoopingSource.minDistance;
+            source.maxDistance = secondaryLoopingSource.maxDistance;
+            source.dopplerLevel = secondaryLoopingSource.dopplerLevel;
+            source.spread = secondaryLoopingSource.spread;
+            return source;
         }
 
         private void OnGamePhaseChanged(GamePhase phase)
@@ -45,6 +79,7 @@ namespace TJ
             movingSource.enabled = true;
             secondaryLoopingSource.enabled = true;
             combatLoopingSource.enabled = true;
+            if (_rattleSource != null) _rattleSource.enabled = true;
         }
 
         private void Update()
@@ -58,12 +93,14 @@ namespace TJ
                 if (movingSource.isPlaying) movingSource.Pause();
                 if (secondaryLoopingSource.isPlaying) secondaryLoopingSource.Pause();
                 if (combatLoopingSource.isPlaying) combatLoopingSource.Pause();
+                if (_rattleSource != null && _rattleSource.isPlaying) _rattleSource.Pause();
             }
             else
             {
                 if (_isMoving) movingSource.UnPause();
                 if (_isInfantry && _isMoving) secondaryLoopingSource.UnPause();
                 if (_isInCombat) combatLoopingSource.UnPause();
+                if (_rattleSource != null && _isMoving) _rattleSource.UnPause();
             }
         }
 
@@ -99,6 +136,13 @@ namespace TJ
                 secondaryLoopingSource.Play();
             }
 
+            if (_rattleSource != null)
+            {
+                CancelFade(ref _rattleFadeCoroutine, _rattleSource);
+                _rattleSource.volume = _baseVolume;
+                _rattleSource.Play();
+            }
+
             if (_chargeShoutCoroutine != null) StopCoroutine(_chargeShoutCoroutine);
             _chargeShoutCoroutine = StartCoroutine(ChargeShoutLoop(squadCenter));
         }
@@ -109,6 +153,7 @@ namespace TJ
             RefreshMovingSource();
 
             if (_isInfantry) StartFadeOut(ref _secondaryFadeCoroutine, secondaryLoopingSource);
+            if (_rattleSource != null) StartFadeOut(ref _rattleFadeCoroutine, _rattleSource);
             if (_chargeShoutCoroutine != null)
             {
                 StopCoroutine(_chargeShoutCoroutine);
@@ -200,6 +245,11 @@ namespace TJ
                     lastIndex = index;
                     SFXManager.Instance.Play(_voiceSFX.chargeSFX[index], squadCenter, ChargeShoutMaxDistance, AudioChannel.Voices);
                 }
+                if (_mountSFX != null && _mountSFX.calls != null && _mountSFX.calls.Length > 0 && Random.value < MountCallChance)
+                {
+                    AudioClip call = _mountSFX.calls[Random.Range(0, _mountSFX.calls.Length)];
+                    SFXManager.Instance.Play(call, squadCenter, ChargeShoutMaxDistance, AudioChannel.Voices);
+                }
                 yield return new WaitForSeconds(Random.Range(ChargeShoutIntervalMin, ChargeShoutIntervalMax));
             }
         }
@@ -218,6 +268,7 @@ namespace TJ
             if (movingSource.isPlaying) movingSource.volume = _baseVolume;
             if (secondaryLoopingSource.isPlaying) secondaryLoopingSource.volume = _baseVolume;
             if (combatLoopingSource.isPlaying) combatLoopingSource.volume = _baseVolume;
+            if (_rattleSource != null && _rattleSource.isPlaying) _rattleSource.volume = _baseVolume;
         }
     }
 }
