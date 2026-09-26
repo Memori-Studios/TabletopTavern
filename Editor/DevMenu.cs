@@ -15,6 +15,7 @@ namespace TJ.EditorTools
         private const string Root = "Tabletop Tavern/";
         private const string SpellTest = Root + "Spell Test Mode";
         private const string GuardMode = Root + "Enemies Locked To Guard Mode";
+        private const string Warlords = Root + "Force Enemy Warlords";
         private const string CustomSave = Root + "Boot Loads Custom Battle Save";
         private const string CampaignBattle = Root + "Boot Loads Campaign Battle";
         private const string BootNone = Root + "Editor Boot/Normal (main menu)";
@@ -31,6 +32,11 @@ namespace TJ.EditorTools
         private static void ToggleGuardMode() => Announce("Enemies Locked To Guard Mode", DevOverrides.LockEnemiesToGuardMode = !DevOverrides.LockEnemiesToGuardMode);
         [MenuItem(GuardMode, true)]
         private static bool ValidateGuardMode() => Check(GuardMode, DevOverrides.LockEnemiesToGuardMode);
+
+        [MenuItem(Warlords, priority = 3)]
+        private static void ToggleWarlords() => Announce("Force Enemy Warlords", DevOverrides.ForceEnemyWarlords = !DevOverrides.ForceEnemyWarlords);
+        [MenuItem(Warlords, true)]
+        private static bool ValidateWarlords() => Check(Warlords, DevOverrides.ForceEnemyWarlords);
 
         [MenuItem(CustomSave, priority = 20)]
         private static void ToggleCustomSave() => Announce("Boot Loads Custom Battle Save", DevOverrides.LoadCustomBattleSaveData = !DevOverrides.LoadCustomBattleSaveData);

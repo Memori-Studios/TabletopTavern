@@ -30,6 +30,10 @@ public class EventChoiceDisplay : MonoBehaviour, IPointerEnterHandler, IPointerE
     static string ColorString (EventOutcomeModifier _eventOutcome) {
             return _eventOutcome.Value > 0 ? ColorData.Positive : _eventOutcome.Value < 0 ? ColorData.Negative : ColorData.Secondary;
         }
+    // A gain or loss reads from the sign, not only the colour.
+    static string Sign (EventOutcomeModifier _eventOutcome) {
+            return _eventOutcome.Value > 0 ? "+" : _eventOutcome.Value < 0 ? "-" : "";
+        }
 
     public void LoadEventChoice(EventChoice _eventChoice, EventPanel _eventPanel, string _eventTableIndex)
     {
@@ -62,7 +66,7 @@ public class EventChoiceDisplay : MonoBehaviour, IPointerEnterHandler, IPointerE
         foreach (EventOutcomeModifier eventOutcomeModifier in eventChoice.successOutcome.EventOutcomeModifiers)
         {
             string localizedEnum = LocalizationManager.Instance.GetText(eventOutcomeModifier.EventOutcomeModifierEnum.ToString());
-            successDescription += $"<color={ColorString(eventOutcomeModifier)}>{localizedEnum}</color>";
+            successDescription += $"<color={ColorString(eventOutcomeModifier)}>{Sign(eventOutcomeModifier)}{localizedEnum}</color>";
             if(i < eventChoice.successOutcome.EventOutcomeModifiers.Count - 1) {
                 successDescription += ", ";
             }
@@ -76,7 +80,7 @@ public class EventChoiceDisplay : MonoBehaviour, IPointerEnterHandler, IPointerE
         foreach (EventOutcomeModifier eventOutcomeModifier in eventChoice.failureOutcome.EventOutcomeModifiers)
         {
             string localizedEnum = LocalizationManager.Instance.GetText(eventOutcomeModifier.EventOutcomeModifierEnum.ToString());
-            failureDescription += $"<color={ColorString(eventOutcomeModifier)}>{localizedEnum}</color>";
+            failureDescription += $"<color={ColorString(eventOutcomeModifier)}>{Sign(eventOutcomeModifier)}{localizedEnum}</color>";
             if(i < eventChoice.failureOutcome.EventOutcomeModifiers.Count - 1) {
                 failureDescription += ", ";
             }

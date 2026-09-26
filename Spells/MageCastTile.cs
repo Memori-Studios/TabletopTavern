@@ -45,7 +45,7 @@ public class MageCastTile : MonoBehaviour
         charges = -1;
 
         button.LoadSpellUI(spell, onSelect, hotkeyNumber,
-            () => onHover?.Invoke(true), () => onHover?.Invoke(false), StatBlock(info.MaxCharges));
+            () => onHover?.Invoke(true), () => onHover?.Invoke(false), TooltipContext(info.MaxCharges));
         // The base prefab ships its Renown lock overlay on; a mage's spell is never locked.
         button.SetLocked(false);
         // The tile sits on the squad's card now, so the badge that used to point at it is off.
@@ -62,24 +62,27 @@ public class MageCastTile : MonoBehaviour
         charges = value;
         for(int i = 0; i < pips.Length; i++)
             if(pips[i] != null) pips[i].color = i < value ? pipOnColor : pipOffColor;
-        button.RefreshTooltip(StatBlock(value));
+        button.RefreshTooltip(TooltipContext(value));
     }
 
-    public void RenderCooldown(float remainingFraction01, bool onCooldown) => button.RenderCooldown(remainingFraction01, onCooldown);
+    public void RenderCooldown(float remainingFraction01, bool onCooldown, float secondsLeft) => button.RenderCooldown(remainingFraction01, onCooldown, secondsLeft);
     public void SetSelected(bool selected) => button.SetSelected(selected);
     public void SetPending(bool pending) => button.SetPending(pending);
     public void SetMenuOpen(bool open) => button.SetMenuOpen(open);
 
-    // The lines the hotbar's mana-cost line stands in for: who casts it, what it has left, how far.
-    private string StatBlock(int chargesLeft)
+    // The caster's charges, reach and cadence stand in for the hotbar's mana cost.
+    private SpellTooltip.Context TooltipContext(int chargesLeft)
     {
         LocalizationManager loc = LocalizationManager.Instance;
-        return string.Join("\n",
-            string.Format(loc.GetText("MageTileCaster"), loc.GetText(unitName.ToString()), cardNumber),
-            string.Format(loc.GetText("MageTileCharges"), chargesLeft, maxCharges),
-            string.Format(loc.GetText("MageTileRange"), Mathf.RoundToInt(range)),
-            string.Format(loc.GetText("MageTileCooldown"), Mathf.RoundToInt(cooldown)),
-            string.Format(loc.GetText("MageTileTargets"), SpellManager.ValidTargetsLabel(spell)));
+        return new SpellTooltip.Context
+        {
+            IsMage = true,
+            Charges = chargesLeft,
+            MaxCharges = maxCharges,
+            Range = range,
+            Cooldown = cooldown,
+            CasterLine = string.Format(loc.GetText("MageTileCaster"), loc.GetText(unitName.ToString()), cardNumber),
+        };
     }
 }
 }

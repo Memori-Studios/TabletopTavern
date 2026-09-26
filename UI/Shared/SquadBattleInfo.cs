@@ -113,8 +113,10 @@ namespace TJ
         [Header("Battlefield Attributes")]
         [SerializeField] private UnitAttributesUI inForestAttribute;
         [SerializeField] private UnitAttributesUI inSwampAttribute, isChargingAttribute, inCombatAttribute, isTerrifiedAttribute, isExhaustedAttribute, isOutOfAmmoAttribute, bloodFrenzyAttribute, rageAttribute, armorSunderedAttribute, isOnFireAttribute, garrisonDefenderAttribute, defendersResolveAttribute;
-        // Hunter's Mark badge. Optional because the run-setup copies of this panel have no live squad.
+        // Template for the spell badges (it was the Hunter's Mark badge). Optional because the run-setup
+        // copies of this panel have no live squad.
         [SerializeField] private UnitAttributesUI huntersMarkAttribute;
+        private readonly List<UnitAttributesUI> spellStatusBadges = new();
 
         int currentEntityCount, maxEntityCount, prestige, health, maxHealth, battlefieldBonusCount, lastCrashingHordeStacks = -1, lastDeathcryBonus = -1, lastHuntersPatienceBonus = -1, lastKenseiEyeStage = -1, lastOathcarvedDeaths = -1, lastApexHuntersStacks = -1, lastAmmunition = -1, lastHealth = -1, lastEntityCount = -1;
         UnitAttribute prestigeTrait;
@@ -157,7 +159,7 @@ namespace TJ
             maxEntityCount = squadToLoad.maxUnitCount;
             prestige = squadToLoad.UnitPrestige;
             prestigeTrait = squadToLoad.PrestigeTrait;
-            healthBarFillImage.color = friendlyColor;
+            healthBarFillImage.color = ColorVision.Good(friendlyColor);
             applyGearBonuses = team == Team.Player;
 
             squadStats = TabletopTavernData.Instance.GetSquadStats(squadToLoad.UnitName);
@@ -181,7 +183,7 @@ namespace TJ
             maxEntityCount = squadToLoad.maxUnitCount;
             prestige = squadToLoad.UnitPrestige;
             prestigeTrait = squadToLoad.PrestigeTrait;
-            healthBarFillImage.color = friendlyColor;
+            healthBarFillImage.color = ColorVision.Good(friendlyColor);
             applyGearBonuses = team == Team.Player;
 
             squadStats = TabletopTavernData.Instance.GetSquadStats(squadToLoad.UnitName);
@@ -212,7 +214,7 @@ namespace TJ
             prestige = _prestige;
             prestigeTrait = BattleManager.Instance.SquadManager.GetSquadPrestigeTrait(squadEntity.SquadId);
             maxEntityCount = squadEntity.initialSquadSize;
-            healthBarFillImage.color = squadEntity.SquadId > 0 ? friendlyColor : enemyColor;
+            healthBarFillImage.color = squadEntity.SquadId > 0 ? ColorVision.Good(friendlyColor) : ColorVision.Bad(enemyColor);
             UpdateSquadKillCount();
 
             squadStats = TabletopTavernData.Instance.GetSquadStats(squadEntity.UnitName);
@@ -249,7 +251,7 @@ namespace TJ
             unitCount.text = $"{maxEntityCount} ({maxEntityCount})";
             prestige = _prestige;
             prestigeTrait = UnitAttribute.None;
-            healthBarFillImage.color = friendlyColor;
+            healthBarFillImage.color = ColorVision.Good(friendlyColor);
             squadEntity = default;
             Load();
             TurnOffBattlefieldConditions();
@@ -350,7 +352,7 @@ namespace TJ
             if (ammoRefreshTimer >= AMMO_REFRESH_INTERVAL)
             {
                 ammoRefreshTimer = 0f;
-                RefreshHuntersMark(entityManager);
+                RefreshSpellStatuses(entityManager);
                 if (entityManager.HasComponent<SquadAmmunition>(squadEntity.SelfEntity))
                 {
                     int currentAmmunition = entityManager.GetComponentData<SquadAmmunition>(squadEntity.SelfEntity).Value;
@@ -488,7 +490,7 @@ namespace TJ
             string passiveDesc = RacePassiveInfo.GetDescription(race);
             passiveNameText.text = passiveName;
 
-            passiveTooltipTrigger.SetUpToolTip(_title: passiveName, _description: passiveDesc);
+            passiveTooltipTrigger.SetUpToolTip(_title: passiveName, _description: KeywordText.ForTooltip(passiveDesc));
         }
         private void LoadMageSpell()
         {
@@ -510,8 +512,8 @@ namespace TJ
             }
 
             ShowSpellUI(true);
-            // Already run through ColorData.XMLTagColorApplicator - do not apply it a second time.
-            RenderSpellCard(spell, LocalizationManager.Instance.GetText, spell.GetLocalizedSpellDescription());
+            // The card has its own spell tooltip, which lists the keywords, so the text is not hoverable.
+            RenderSpellCard(spell, LocalizationManager.Instance.GetText, KeywordText.Render(spell.GetLocalizedSpellDescription(), false));
         }
 
         /// <summary>
@@ -551,8 +553,12 @@ namespace TJ
             if (spellRaceGradientImage != null)
                 spellRaceGradientImage.color = ColorData.GetRaceDisplayTint(spell.Race);
 
+            // The Editor preview renders outside Play mode, where the builder's LocalizationManager would spawn a phantom.
             if (spellTooltipTrigger != null)
-                spellTooltipTrigger.SetUpToolTip(_title: spellName, _description: spellDescription);
+            {
+                if (Application.isPlaying) spellTooltipTrigger.SetContentProvider(() => TJ.Spells.SpellTooltip.Build(spell));
+                else spellTooltipTrigger.SetUpToolTip(_title: spellName, _description: spellDescription);
+            }
 
             if (spellAttributeText != null)
             {
@@ -843,7 +849,7 @@ namespace TJ
                 armorSunderedAttribute.Load(UnitAttribute.Emblazing);
                 armorSunderedAttribute.SetUpTooltip();
             }
-            RefreshHuntersMark(entityManager);
+            RefreshSpellStatuses(entityManager);
             isOnFireAttribute.gameObject.SetActive(entityManager.IsComponentEnabled<TakingFireDamage>(squadEntity.SelfEntity));
             if (isOnFireAttribute.gameObject.activeSelf)
             {
@@ -857,17 +863,34 @@ namespace TJ
             if (defendersResolveAttribute.gameObject.activeSelf)
                 defendersResolveAttribute.Load(UnitCondition.DefendersResolve);
         }
-        // The mark carries a countdown, so unlike the other badges it is re-read on the ammo tick
-        // while the panel is up rather than only at hover time.
-        private void RefreshHuntersMark(EntityManager entityManager)
+        // One badge per lasting spell on the squad, read from the same buffer as the health bar icons. They
+        // carry a countdown, so unlike the other badges they are re-read on the ammo tick while the panel is up.
+        private void RefreshSpellStatuses(EntityManager entityManager)
         {
             if (huntersMarkAttribute == null) return;
-            bool marked = entityManager.HasComponent<HuntersMarkTag>(squadEntity.SelfEntity);
-            huntersMarkAttribute.gameObject.SetActive(marked);
-            if (!marked) return;
-            HuntersMarkTag mark = entityManager.GetComponentData<HuntersMarkTag>(squadEntity.SelfEntity);
-            huntersMarkAttribute.LoadTimed(UnitCondition.IsMarked, mark.RemainingDuration,
-                Mathf.RoundToInt((mark.DamageMultiplier - 1f) * 100f), Mathf.CeilToInt(mark.RemainingDuration));
+            huntersMarkAttribute.gameObject.SetActive(false);
+
+            int shown = 0;
+            if (entityManager.HasBuffer<SpellStatusBufferElement>(squadEntity.SelfEntity))
+            {
+                DynamicBuffer<SpellStatusBufferElement> buffer = entityManager.GetBuffer<SpellStatusBufferElement>(squadEntity.SelfEntity, true);
+                double now = World.DefaultGameObjectInjectionWorld.Time.ElapsedTime;
+                for (int i = 0; i < buffer.Length; i++)
+                {
+                    // Expired entries stay until a writer prunes them, as in SquadFlagGameObject.HandleSpellStatus.
+                    if (buffer[i].ExpiresAtTime <= now) continue;
+                    if (!TJ.Spells.SpellStatusIcons.TryGetData(buffer[i].SpellId, out TJ.Spells.SpellData spell)) continue;
+
+                    if (shown == spellStatusBadges.Count)
+                        spellStatusBadges.Add(Instantiate(huntersMarkAttribute, huntersMarkAttribute.transform.parent));
+                    UnitAttributesUI badge = spellStatusBadges[shown++];
+                    badge.gameObject.SetActive(true);
+                    bool zone = !spell.IsOneOff && spell.TickInterval > 0f;
+                    badge.LoadSpell(spell, (float)(buffer[i].ExpiresAtTime - now), !zone);
+                }
+            }
+            for (int i = shown; i < spellStatusBadges.Count; i++)
+                spellStatusBadges[i].gameObject.SetActive(false);
         }
         private void TurnOffBattlefieldConditions()
         {
@@ -882,6 +905,7 @@ namespace TJ
             rageAttribute.gameObject.SetActive(false);
             armorSunderedAttribute.gameObject.SetActive(false);
             if (huntersMarkAttribute != null) huntersMarkAttribute.gameObject.SetActive(false);
+            foreach (UnitAttributesUI badge in spellStatusBadges) badge.gameObject.SetActive(false);
             isOnFireAttribute.gameObject.SetActive(false);
             garrisonDefenderAttribute.gameObject.SetActive(false);
             defendersResolveAttribute.gameObject.SetActive(false);
@@ -940,8 +964,8 @@ namespace TJ
             if (unitAttributesUIContainer == null) unitAttributesUIContainer = GetComponent<UnitAttributesUIContainer>();
 
             TJ.Spells.SpellData spell = squadData.assets.mageSpell;
-            // Same placeholders GetLocalizedSpellDescription fills, minus the colour tags - the tag
-            // applicator localizes through LocalizationManager too.
+            // Same placeholders GetLocalizedSpellDescription fills, keyword tags left raw: KeywordText
+            // localizes through LocalizationManager too.
             string description = string.Format(EditorLocalizedText(spell.Spell + "_Desc"), spell.SpellType, spell.SpellModifierValue, spell.SpellDuration);
 
             ShowSpellUI(true);

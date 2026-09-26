@@ -68,6 +68,8 @@ public class GoldManager : MonoBehaviour
     {
         int _maxInterest = MaxInterestOverride ?? maxInterest;
         if(CampaignManager.Instance.GearManager.CheckForGear(GearID.DwarvenTaxCollectors)) _maxInterest = 10;
+        // Endless acts raise the cap one gold per act so interest keeps pace with the bigger armies.
+        _maxInterest += Mathf.Min(TabletopTavernConstants.ENDLESS_INTEREST_BONUS_CAP, TabletopTavernConstants.EndlessActs(campaignSaveManager.SaveData.bookNumber));
 
         return _maxInterest;
     }

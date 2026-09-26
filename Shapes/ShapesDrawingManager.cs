@@ -73,11 +73,13 @@ public class ShapesDrawingManager : ImmediateModeShapeDrawer
     private bool _arrowStyleChecked, _arrowStyleValid;
     private float _arrowThickness, _arrowLineBloom, _arrowHeadBloom, _arrowHeadRoundness;
     private float _arrowDashSize, _arrowDashSpacing;
-    private Color _arrowAttackColor, _arrowMovementColor;
+    // Read at draw time so a Colorblind Mode change reaches a leash already on screen.
+    private AttackArrowDrawer _arrowPrefab;
     private Vector3 _arrowHeadA, _arrowHeadB, _arrowHeadC;
     private float _leashAlpha;
     private Vector3 _leashStart, _leashEnd;
     private bool _leashOutOfRange;
+    private bool _leashFriendly;
     private float _leashRange;
     // The cast point without the ground offset, for the particle overlays.
     private Vector3 _castPoint;
@@ -95,6 +97,8 @@ public class ShapesDrawingManager : ImmediateModeShapeDrawer
     private Vector3 _ringPosition;
     private float _ringRadius;
 
+    // Widths follow the Battlefield Markers setting; radii are gameplay ranges and do not.
+    private static float MarkerScale => BattlefieldMarkerScale.Current;
     private void OnDestroy()
     {
         if(_pentagramPath != null) { _pentagramPath.Dispose(); _pentagramPath = null; }
@@ -129,6 +133,7 @@ public class ShapesDrawingManager : ImmediateModeShapeDrawer
             _leashStart = _spellManager.ArmedMageCenter + Vector3.up * _groundOffset;
             _leashEnd = _spellManager.SpellCursorOrigin + Vector3.up * _groundOffset;
             _leashOutOfRange = _spellManager.ArmedMageOutOfRange;
+            _leashFriendly = _spellManager.ArmedSpellTargetsFriends;
             _leashRange = _spellManager.ArmedMageRange;
         }
         float leashTarget = leash ? 1f : 0f;
@@ -157,7 +162,7 @@ public class ShapesDrawingManager : ImmediateModeShapeDrawer
                 _ringPosition,
                 Quaternion.Euler(90, 0, 0),
                 _ringRadius,
-                _spellRingThickness,
+                _spellRingThickness * MarkerScale,
                 ringColor
             );
             Color starColor = _pentagramColor * _pentagramIntensity;
@@ -180,8 +185,7 @@ public class ShapesDrawingManager : ImmediateModeShapeDrawer
             Debug.LogError("ShapesDrawingManager: the Attack Arrow prefab's point triangle is not a Shapes Triangle - the mage leash will not draw.");
             return false;
         }
-        _arrowAttackColor = arrow.AttackColor;
-        _arrowMovementColor = arrow.MovementColor;
+        _arrowPrefab = arrow;
         _arrowThickness = arrow.MovementLine.Thickness;
         _arrowLineBloom = arrow.MovementLine.GetComponent<ShapesBloom>().BloomAmount;
         _arrowHeadBloom = head.GetComponent<ShapesBloom>().BloomAmount;
@@ -213,7 +217,7 @@ public class ShapesDrawingManager : ImmediateModeShapeDrawer
         Draw.LineEndCaps = LineEndCap.Round;
 
         if(!_leashOutOfRange) {
-            Draw.Line(_leashStart, _leashEnd, _arrowThickness, ArrowColor(_leashInRangeColor, _arrowLineBloom));
+            Draw.Line(_leashStart, _leashEnd, _arrowThickness * MarkerScale, ArrowColor(_leashInRangeColor, _arrowLineBloom));
             Draw.BlendMode = ShapesBlendMode.Transparent;
             return;
         }
@@ -225,14 +229,15 @@ public class ShapesDrawingManager : ImmediateModeShapeDrawer
         // Where the squad centre first sits within range of the point: the approach order's own goal.
         Vector3 split = _leashStart + direction * Mathf.Max(0f, distance - _leashRange);
 
-        Draw.Line(_leashStart, split, _arrowThickness, ArrowColor(_arrowMovementColor, _arrowLineBloom));
+        Draw.Line(_leashStart, split, _arrowThickness * MarkerScale, ArrowColor(_arrowPrefab.MovementColor, _arrowLineBloom));
         DrawArrowHead(split, direction);
 
         DashStyle dashes = DashStyle.defaultDashStyle;
         dashes.size = _arrowDashSize;
         dashes.spacing = _arrowDashSpacing;
+        // The cast leg is attack red only when the spell is thrown at the enemy.
         using(Draw.DashedScope(dashes)) {
-            Draw.Line(split, _leashEnd, _arrowThickness, ArrowColor(_arrowAttackColor, _arrowLineBloom));
+            Draw.Line(split, _leashEnd, _arrowThickness * MarkerScale, ArrowColor(_leashFriendly ? _leashInRangeColor : _arrowPrefab.AttackColor, _arrowLineBloom));
         }
         Draw.BlendMode = ShapesBlendMode.Transparent;
     }
@@ -243,7 +248,8 @@ public class ShapesDrawingManager : ImmediateModeShapeDrawer
         Vector3 pivot = end - direction;
         Vector3 right = Vector3.Cross(Vector3.up, direction);
         Vector3 ToWorld(Vector3 local) => pivot + right * local.x + Vector3.up * local.y + direction * local.z;
-        Draw.Triangle(ToWorld(_arrowHeadA), ToWorld(_arrowHeadB), ToWorld(_arrowHeadC), _arrowHeadRoundness, ArrowColor(_arrowMovementColor, _arrowHeadBloom));
+        float s = MarkerScale;
+        Draw.Triangle(ToWorld(_arrowHeadA * s), ToWorld(_arrowHeadB * s), ToWorld(_arrowHeadC * s), _arrowHeadRoundness, ArrowColor(_arrowPrefab.MovementColor, _arrowHeadBloom));
     }
     private void DrawAreaBand()
     {
@@ -287,7 +293,7 @@ public class ShapesDrawingManager : ImmediateModeShapeDrawer
         using(Draw.MatrixScope) {
             Draw.Matrix = Matrix4x4.TRS(_ringPosition, StarRotation(), Vector3.one);
             Draw.PolylineGeometry = PolylineGeometry.Flat2D;
-            Draw.Polyline(_pentagramPath, true, _pentagramThickness, PolylineJoins.Miter, color);
+            Draw.Polyline(_pentagramPath, true, _pentagramThickness * MarkerScale, PolylineJoins.Miter, color);
         }
     }
     // Local Z points down into the ground after the X tilt, so a positive spin about it is clockwise from above.
@@ -343,13 +349,13 @@ public class ShapesDrawingManager : ImmediateModeShapeDrawer
         using(Draw.MatrixScope) {
             Draw.Matrix = Matrix4x4.TRS(_ringPosition, Quaternion.Euler(90, 0, 0), Vector3.one);
             for(int k = 0; k < _wispStrands; k++)
-                Draw.Polyline(_ringWisps[k], true, _wispThickness, PolylineJoins.Simple, ringColor);
+                Draw.Polyline(_ringWisps[k], true, _wispThickness * MarkerScale, PolylineJoins.Simple, ringColor);
         }
         if(!_showStar) return;
         using(Draw.MatrixScope) {
             Draw.Matrix = Matrix4x4.TRS(_ringPosition, StarRotation(), Vector3.one);
             for(int k = 0; k < _wispStrands; k++)
-                Draw.Polyline(_starWisps[k], true, _wispThickness, PolylineJoins.Simple, starColor);
+                Draw.Polyline(_starWisps[k], true, _wispThickness * MarkerScale, PolylineJoins.Simple, starColor);
         }
     }
     // Sampling the noise on a circle keeps the strand seamless where it closes.

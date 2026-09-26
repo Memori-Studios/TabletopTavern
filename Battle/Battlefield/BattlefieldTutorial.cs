@@ -1,148 +1,128 @@
-using UnityEngine;
+using System.Collections.Generic;
 using Memori.SaveData;
 using TJ.Map;
-using UnityEngine.UI;
-using UnityEngine.EventSystems;
+using UnityEngine;
 
 namespace TJ
 {
+    /// <summary>
+    /// Pops unread Battle Guide topics before deployment, one at a time, and tracks them as read.
+    /// </summary>
     public class BattlefieldTutorial : MonoBehaviour
     {
         /// <summary>
-        /// When a section is allowed to pop as a first-time tip. A section whose condition is not met is
-        /// skipped without being marked as seen, so it still pops on a later battle where it applies.
-        /// The Settings > Info copy of the same canvas ignores this - every section is always browsable there.
+        /// When a topic may pop as a pre-battle tip. A topic whose condition is not met is skipped without being
+        /// marked as read, so it still pops on a later battle where it applies. Settings > Guide ignores this.
+        /// Append only: the ordinals are serialized in BattleGuideContent.
         /// </summary>
         public enum BattlefieldInfoCondition
         {
             None,
             PlayerArmyContainsMage,
             SpellsEnabled,
-        }
-
-        [System.Serializable] public struct BattlefieldInfoOverrideData
-        {
-            public GameObject Header;
-            public GameObject Content;
-            public string ContentDescription;
-            public BattlefieldInfoCondition Condition;
+            PlayerArmyContainsRanged,
+            PlayerArmyContainsShields,
+            PlayerArmyContainsLarge,
+            PlayerArmyContainsAntiLarge,
+            GarrisonBattle,
         }
 
         [SerializeField] private GameObject _battlefieldTutorialCanvas;
-        [SerializeField] private Button _showAnotherTipButton, _returnToBattleButton;
+        [SerializeField] private BattleGuideView _guide;
+        // How many unread topics one popup offers; the rest wait for later battles.
+        [SerializeField] private int _maxTipsPerBattle = 3;
         public bool TutorialIsOpen => _battlefieldTutorialCanvas.activeSelf;
-        [SerializeField] private BattlefieldInfoOverrideData[] battlefieldInfoOverrideDataArray;
 
-        // Resolved once per battle load in HandleTutorialStuff; the army cannot change while the popup is up.
-        private bool _playerArmyContainsMage;
+        // Resolved once per battle load; the army cannot change while the popup is up.
+        private readonly HashSet<BattlefieldInfoCondition> _armyConditions = new();
 
         public void HandleTutorialStuff()
         {
-            _showAnotherTipButton.onClick.RemoveAllListeners();
-            _showAnotherTipButton.onClick.AddListener(ShowAnotherTip);
-            _returnToBattleButton.onClick.RemoveAllListeners();
-            _returnToBattleButton.onClick.AddListener(ReturnToBattle);
-
-            _playerArmyContainsMage = PlayerArmyContainsMage();
-
-            TutorialManager.Instance.LoadStepsFromRandomSpot(new TutorialStep[5] {
+            // Attack orders come after Start Battle: in a deferred layout the enemy is not on the field while deploying.
+            TutorialManager.Instance.LoadStepsFromRandomSpot(new TutorialStep[6] {
                 TutorialData.SelectUnit,
                 TutorialData.RepositionUnit,
-                // TutorialData.GiveAttackOrders,
                 TutorialData.SelectMultipleUnits,
-                TutorialData.ChangeBattleSpeed,
-                TutorialData.StartBattle});
+                TutorialData.StartBattle,
+                TutorialData.GiveAttackOrders,
+                TutorialData.ChangeBattleSpeed});
 
-            // TutorialManager.Instance.LoadTooltip(TutorialData.GuardMode, BattleManager.Instance.UIManager.GuardModeButtonTransform);
-            if(CheckForUnseenTips())
+            if (_guide == null || _guide.Content == null)
             {
-                _battlefieldTutorialCanvas.SetActive(true);
-                OpenTip();
+                Debug.LogError("BattlefieldTutorial: the Battle Guide view or its content is not assigned.");
+                return;
             }
+
+            ReadArmy();
+            List<GuideTopic> tips = UnreadTips();
+            if (tips.Count == 0) return;
+            _battlefieldTutorialCanvas.SetActive(true);
+            _guide.OpenTips(tips, ReturnToBattle);
         }
 
-        #region Section conditions
-        private bool IsSectionAvailable(BattlefieldInfoOverrideData overrideData)
+        #region Tip selection
+        private List<GuideTopic> UnreadTips()
         {
-            switch (overrideData.Condition)
+            PlayerSaveData save = SaveDataHandler.LoadPlayerSaveData();
+            if (BattleGuideProgress.Migrate(save)) SaveDataHandler.SavePlayerSaveData(save);
+
+            var candidates = new List<(GuideTopic topic, int order)>();
+            List<GuideTopic> topics = _guide.Content.topics;
+            for (int i = 0; i < topics.Count; i++)
             {
-                case BattlefieldInfoCondition.PlayerArmyContainsMage:
-                    return _playerArmyContainsMage;
-                case BattlefieldInfoCondition.SpellsEnabled:
+                GuideTopic topic = topics[i];
+                if (!topic.showAsTip || !BattleGuideProgress.IsAvailable(topic) || !IsConditionMet(topic.condition)) continue;
+                if (save.BattlefieldInfoSectionsViewed.Contains(topic.id)) continue;
+                candidates.Add((topic, i));
+            }
+            candidates.Sort((a, b) => a.topic.tipPriority != b.topic.tipPriority ? a.topic.tipPriority.CompareTo(b.topic.tipPriority) : a.order.CompareTo(b.order));
+
+            var tips = new List<GuideTopic>();
+            foreach (var candidate in candidates)
+            {
+                if (tips.Count >= _maxTipsPerBattle) break;
+                tips.Add(candidate.topic);
+            }
+            return tips;
+        }
+
+        private bool IsConditionMet(BattlefieldInfoCondition condition)
+        {
+            if (condition == BattlefieldInfoCondition.None) return true;
+            if (condition == BattlefieldInfoCondition.SpellsEnabled)
+            {
 #if SPELLS
-                    return true;
+                return true;
 #else
-                    return false;
+                return false;
 #endif
-                default:
-                    return true;
             }
+            return _armyConditions.Contains(condition);
         }
 
-        private static bool PlayerArmyContainsMage()
+        private void ReadArmy()
         {
-            // Same source ArmySpawnManager loads from, so custom and campaign battles agree. The call
-            // re-sets BattleSaveManager.PlayerSquadsToSpawn to the value it already holds, which is harmless.
+            _armyConditions.Clear();
+            if (BattleManager.Instance.BattleSaveManager.IsGarrisonBattle) _armyConditions.Add(BattlefieldInfoCondition.GarrisonBattle);
+            // Same source ArmySpawnManager loads from, so custom and campaign battles agree.
             var (army, _) = BattleManager.Instance.BattleSaveManager.GetArmyFromSaveData(true);
             foreach (SquadToLoad squad in army)
             {
-                if (TabletopTavernConstants.Casts(TabletopTavernData.Instance.GetSquadStats(squad.UnitName).unitType))
-                    return true;
+                SquadStats stats = TabletopTavernData.Instance.GetSquadStats(squad.UnitName);
+                if (TabletopTavernConstants.Casts(stats.unitType)) _armyConditions.Add(BattlefieldInfoCondition.PlayerArmyContainsMage);
+                if (TabletopTavernConstants.Shoots(stats.unitType)) _armyConditions.Add(BattlefieldInfoCondition.PlayerArmyContainsRanged);
+                if (stats.SquadAttributes.StandardShields || stats.SquadAttributes.HeavyShields) _armyConditions.Add(BattlefieldInfoCondition.PlayerArmyContainsShields);
+                if (stats.unitSize == UnitSize.Cavalry || stats.unitSize == UnitSize.Monstrous) _armyConditions.Add(BattlefieldInfoCondition.PlayerArmyContainsLarge);
+                if (stats.SquadAttributes.AntiLarge) _armyConditions.Add(BattlefieldInfoCondition.PlayerArmyContainsAntiLarge);
             }
-            return false;
         }
         #endregion
 
-        public bool CheckForUnseenTips()
-        {
-            PlayerSaveData playerSaveData = SaveDataHandler.LoadPlayerSaveData();
-            // for each override data, check to see if it is saved in the playerSaveData, if not, set the header and content to active and save it in the playerSaveData as seen
-            foreach (BattlefieldInfoOverrideData overrideData in battlefieldInfoOverrideDataArray)
-            {
-                if (!IsSectionAvailable(overrideData)) continue;
-                if (!playerSaveData.BattlefieldInfoSectionsViewed.Contains(overrideData.ContentDescription))
-                {
-                    return true;
-                }
-            }
-           return false;
-        }
-        public void OpenTip()
-        {
-            PlayerSaveData playerSaveData = SaveDataHandler.LoadPlayerSaveData();
-            // for each override data, check to see if it is saved in the playerSaveData, if not, set the header and content to active and save it in the playerSaveData as seen
-            foreach (BattlefieldInfoOverrideData overrideData in battlefieldInfoOverrideDataArray)
-            {
-                if (!IsSectionAvailable(overrideData)) continue;
-                if (!playerSaveData.BattlefieldInfoSectionsViewed.Contains(overrideData.ContentDescription))
-                {
-                    overrideData.Content.SetActive(true);
-                    overrideData.Header.SetActive(true);
-                    playerSaveData.BattlefieldInfoSectionsViewed.Add(overrideData.ContentDescription);
-                    SaveDataHandler.SavePlayerSaveData(playerSaveData);
-                    break;
-                }
-            }
-            if(!CheckForUnseenTips())
-            {
-                _showAnotherTipButton.gameObject.SetActive(false);
-            }
-            EventSystem.current.SetSelectedGameObject(_returnToBattleButton.gameObject);
-            _returnToBattleButton.GetComponent<Animator>().SetTrigger("Selected");
-        }
-        public void ShowAnotherTip()
-        {
-            foreach (BattlefieldInfoOverrideData overrideData in battlefieldInfoOverrideDataArray)
-            {
-                overrideData.Header.SetActive(false);
-                overrideData.Content.SetActive(false);
-            }
-            OpenTip();
-        }
         public void ReturnToBattle()
         {
             _battlefieldTutorialCanvas.SetActive(false);
         }
+
         [ContextMenu("Reset Battlefield Tutorial")]
         public void ResetBattlefieldTutorial()
         {

@@ -168,13 +168,16 @@ namespace TJ.Map
                     break;
             }
         }
-        public void CompleteLayer()
+        public void CompleteLayer() => CompleteLayerInternal(claimVictory: false);
+        // Ends a run whose act 3 win is banked, from the Act Complete screen.
+        public void ClaimVictory() => CompleteLayerInternal(claimVictory: true);
+        private void CompleteLayerInternal(bool claimVictory)
         {
             Debug.Log($"CompleteLayer called on {activeNodePanel}");
             legendCanvasGroup.FadeInAsync();
             IAudioRequester.Instance.SetAmbienceDuck(AmbienceDuckSource.NodePanel, false);
             IAudioRequester.Instance.SetAmbienceBed(AmbienceBed.Hall);
-            mapSceneManager.CompleteLayer();
+            mapSceneManager.CompleteLayer(claimVictory);
             layerNodeSelected = -1;
         }
         public void CompleteHordeBattle()
@@ -198,7 +201,6 @@ namespace TJ.Map
         {
             engagementPanel.LoadEngagementPanel(_nodeType);
 
-            TutorialManager.Instance.CompleteStepCheck(TutorialStepEnum.SelectToBattle);
             IAudioRequester.Instance.PlaySFX(SFXData.SelectToBattle);
         } 
         public void LoseRunFromTown()

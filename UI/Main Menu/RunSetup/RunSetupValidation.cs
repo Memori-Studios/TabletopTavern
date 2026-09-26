@@ -70,8 +70,7 @@ namespace TJ.MainMenu
 
         private static bool IsDifficultyLocked(TT_Difficulty difficulty)
         {
-            if (difficulty == TT_Difficulty.Peasant) return false;
-            return (int)difficulty > SaveDataHandler.LoadPlayerSaveData().MaxDifficultyOverall + 1;
+            return DifficultyRules.IsLocked(difficulty, SaveDataHandler.LoadPlayerSaveData().MaxDifficultyOverall);
         }
 
         private void Render()

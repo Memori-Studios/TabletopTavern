@@ -8,6 +8,7 @@ using Memori.Audio;
 using Memori.Notifications;
 using TJ.Map;
 using Memori.Localization;
+using Memori.Utilities;
 
 namespace TJ.Event
 {
@@ -43,7 +44,7 @@ namespace TJ.Event
         if(CampaignManager.Instance.CampaignSaveManager.SaveData.goldAmount < modificationAmount){
             string localizedError = LocalizationManager.Instance.GetText("InsufficientGoldError");
             NotificationManager.Instance.ErrorNotification(localizedError);
-            sliderValueText.color = Color.red;
+            sliderValueText.color = ColorVision.Bad(Color.red);
             return;
         } else {
             sliderValueText.color = defaultColor;

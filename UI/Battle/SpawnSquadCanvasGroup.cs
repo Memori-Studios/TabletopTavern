@@ -16,12 +16,14 @@ public class SpawnSquadCanvasGroup : MonoBehaviour
     {
         prestigeDropdown.options.Clear();
         weatherDropdown.options.Clear();
-        string tierLocalized = LocalizationManager.Instance.GetText("Tier");
+        string prestigeLocalized = LocalizationManager.Instance.GetText("Prestige");
         string clearSkiesLocalized = LocalizationManager.Instance.GetText("ClearSkies");
         string rainLocalized = LocalizationManager.Instance.GetText("Rain");
-        prestigeDropdown.options.Add(new TMP_Dropdown.OptionData(tierLocalized +"I"));
-        prestigeDropdown.options.Add(new TMP_Dropdown.OptionData(tierLocalized +"II"));
-        prestigeDropdown.options.Add(new TMP_Dropdown.OptionData(tierLocalized +"III"));
+        prestigeDropdown.options.Add(new TMP_Dropdown.OptionData(prestigeLocalized + " I"));
+        prestigeDropdown.options.Add(new TMP_Dropdown.OptionData(prestigeLocalized + " II"));
+        prestigeDropdown.options.Add(new TMP_Dropdown.OptionData(prestigeLocalized + " III"));
+        // The caption keeps the scene's saved "Tier I" text unless it is redrawn after the options change.
+        prestigeDropdown.RefreshShownValue();
         weatherDropdown.options.Add(new TMP_Dropdown.OptionData(clearSkiesLocalized));
         weatherDropdown.options.Add(new TMP_Dropdown.OptionData(rainLocalized));
 

@@ -9,8 +9,8 @@ using Memori.Scenes;
 using System.Linq;
 using Memori.Steamworks;
 using Memori.Metaprogression;
-// using TabletopAnalytics;
 using Memori.Localization;
+using TabletopTavern.Analytics;
 
 #if UNITY_EDITOR
 using UnityEditor;
@@ -92,6 +92,23 @@ namespace TJ
             // min(playerArmy.Length, 10 + MaxReserveSlots) slots) never creates the third reserve slot.
             maxReserveSlots = SaveDataHandler.IsMetaprogressionNodeUnlocked(_thirdReserveSlotMetaprogressionModel) ? 3 : 2;
             EnsureArmyCapacity();
+            RemoveDuplicateSquads();
+        }
+        // Every lookup assumes a UniqueID is unique; a copy made the prestige trait prompt repeat forever.
+        private void RemoveDuplicateSquads()
+        {
+            HashSet<string> seen = new();
+            bool removedAny = false;
+            for (int i = 0; i < saveData.playerArmy.Length; i++)
+            {
+                if (saveData.playerArmy[i].UnitIndex == -1) continue;
+                if (seen.Add(saveData.playerArmy[i].UniqueID)) continue;
+
+                Debug.LogWarning($"[Unit] Removing duplicate {saveData.playerArmy[i].UnitName} ({saveData.playerArmy[i].UniqueID}) at slot {i}");
+                saveData.playerArmy[i] = new SquadToLoad { UnitIndex = -1, UniqueID = Guid.NewGuid().ToString() };
+                removedAny = true;
+            }
+            if (removedAny) saveData.playerArmy = ResetIndexes(saveData.playerArmy);
         }
         public void Load()
         {
@@ -168,6 +185,8 @@ namespace TJ
         }
         public void QuickRestartCampaign()
         {
+            // The restart replays the last setup, so it keeps the spells the player chose too.
+            var lastSpells = SaveDataHandler.Load().selectedSpells;
             DeleteCampaignSave();
             
             saveData = SaveDataHandler.Load();
@@ -181,7 +200,9 @@ namespace TJ
                 playerSaveData.lastDifficultyLevelSelected,
                 playerSaveData.lastStartingGearId,
                 runUUID,
-                playerSaveData.lastStartingGold
+                playerSaveData.lastStartingGold,
+                lastSpells,
+                new AnalyticsRunSetup { Source = "quickRestart" }
             );
 
             // AnalyticsManager.Instance.LogRunStart(
@@ -313,6 +334,11 @@ namespace TJ
             saveData.SetSelectedNodeIndex(_selectedNodeIndex);
             saveData.nodePath.Add(_selectedNodeIndex);
             SaveCampaign();
+        }
+        public void RecordSelectedNode(int _selectedNodeIndex, NodeType _nodeType)
+        {
+            saveData.selectedNodeType = _nodeType;
+            RecordSelectedNode(_selectedNodeIndex);
         }
         public void CompleteChapter()
         {
@@ -485,10 +511,15 @@ namespace TJ
         }
         public void HealTroopsOnTownEntry()
         {
+            ModifyTroopHealth(TownEntryHealAmount());
+        }
+        // The town panel shows this share, so it must stay the one HealTroopsOnTownEntry applies.
+        public float TownEntryHealAmount()
+        {
             float modifiedHealAmount = healAmount;
 
             //DifficultyMod 11
-            if(CampaignManager.Instance.CampaignSaveManager.SaveData.difficultyLevel >= TT_Difficulty.King) {
+            if(DifficultyRules.ReducedTownHeal(CampaignManager.Instance.CampaignSaveManager.SaveData.difficultyLevel)) {
                 modifiedHealAmount *= 0.5f;
             }
 
@@ -498,7 +529,7 @@ namespace TJ
                 modifiedHealAmount = 1f;
             }
 
-            ModifyTroopHealth(modifiedHealAmount);
+            return modifiedHealAmount;
         }
         // Serendael (hero 8): every heal is doubled here, so no caller may double it as well.
         public static float ApplyHealingBonus(float _modificationAmount)
@@ -1350,7 +1381,7 @@ namespace TJ
         #endregion
 
         #region Healing
-        public void HealTroopsInReserve(bool onlyHalf)
+        public void HealTroopsInReserve()
         {
             SquadToLoad[] playerSquadsSaveData = saveData.playerArmy;
             for(int i = 10; i < playerSquadsSaveData.Length; i++)
@@ -1358,7 +1389,6 @@ namespace TJ
                 if(playerSquadsSaveData[i].SquadCurrentHealth == 0) continue;
 
                 int healthRecovery = (int)(playerSquadsSaveData[i].SquadMaxHealth * TabletopTavernConstants.RESERVES_HEAL_AMOUNT);
-                if(onlyHalf) healthRecovery /= 2;
                 healthRecovery *= ReservesHealMultiplier;
                 if(CampaignManager.Instance.GearManager.CheckForGear(GearID.ChugJug)) healthRecovery*=2;
                 healthRecovery = (int)ApplyHealingBonus(healthRecovery);
@@ -1496,7 +1526,7 @@ namespace TJ
             SaveCampaign();
         }
         public void SaveSquadsPostAutoresolve(
-            SquadToLoad[] _playerSquads, SquadToLoad[] _enemySquads, bool _playerWon, List<SquadKillsStored> _squadIdKillCounter, List<SquadLossesStored> _squadIdLossCounter)
+            SquadToLoad[] _playerSquads, SquadToLoad[] _enemySquads, bool _playerWon, List<SquadKillsStored> _squadIdKillCounter, List<SquadLossesStored> _squadIdLossCounter, AnalyticsBattleReport _report = null)
         {
             // Debug.Log($"playersquads length post battle: {_playerSquads.Length}");
             for (int i = 0; i < saveData.playerArmy.Length; i++)
@@ -1547,6 +1577,8 @@ namespace TJ
             }
 
             if (!DisableSaving) SaveDataHandler.SaveCampaignSnapshot(saveData);
+
+            GameEventTracker.BattleEnded(saveData, _report);
         }
         public void PrestigeUnitsOnKills()
         {
@@ -1731,8 +1763,7 @@ namespace TJ
             int currentHeroID = saveData.heroID;
             int newDifficulty = (int)saveData.difficultyLevel;
 
-            if (newDifficulty > playerSaveData.MaxDifficultyOverall)
-                playerSaveData.MaxDifficultyOverall = newDifficulty;
+            playerSaveData.MaxDifficultyOverall = DifficultyRules.Harder(playerSaveData.MaxDifficultyOverall, newDifficulty);
 
             bool found = false;
             for (int i = 0; i < playerSaveData.HeroDifficultiesCompleted.Count; i++)

@@ -13,6 +13,8 @@ namespace TJ.Spells
         public float authoredRadius = 0f;
         // Art whose colour is the read (green heal, grey smoke) is skipped by the race tint.
         public bool keepOwnColors = false;
+        // Art under these roots keeps its own colour while the rest of the addon still takes the race tint.
+        public Transform[] keepOwnColorRoots;
         // Warm-up art that should not outlive the wind-up (a looping "incoming" marker) is switched off on cast.
         public bool hideWarmupOnCast = false;
     }

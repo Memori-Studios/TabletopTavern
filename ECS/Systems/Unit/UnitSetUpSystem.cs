@@ -57,8 +57,9 @@ partial struct UnitSetUpSystem : ISystem
                     TabletopTavernConstants.SetAttribute(ref squadStats.SquadAttributes, grantedTrait);
             }
             // Hero-granted attributes must land before the per-unit attribute checks below, same as prestige.
-            if (campaignSaveDataHolder.ActiveHeroID != -1 && unit.ValueRO.Team == Team.Player)
-                HeroBonusRuleEvaluator.ApplyHeroAttributes(ref squadStats.SquadAttributes, unit.ValueRO.unitName, campaignSaveDataHolder.ActiveHeroID, squadStats, campaignSaveDataHolder.EnemyRace);
+            BattleHeroContext hero = BattleHeroContext.For(campaignSaveDataHolder, unit.ValueRO.Team);
+            if (hero.HasHero)
+                HeroBonusRuleEvaluator.ApplyHeroAttributes(ref squadStats.SquadAttributes, unit.ValueRO.unitName, hero.HeroID, squadStats, hero.EnemyRace);
 
             UnitAttributeSerialized unitAttributes = new();
 
@@ -122,13 +123,13 @@ partial struct UnitSetUpSystem : ISystem
             // ChargeBonus in SquadChargeBonusApplicationSystem, Ammunition in EntityWatcher. The
             // Sakura Dynasty mono-race army gate (OnlySakuraUnits) is unchanged - not yet
             // generalized to other races.
-            if(campaignSaveDataHolder.ActiveHeroID != -1 && team == Team.Player)
+            if(hero.HasHero)
             {
                 float SumHeroBonus(UnitStat stat, float currentValue)
                 {
-                    float total = HeroBonusRuleEvaluator.SumHeroStatBonus(stat, unit.ValueRO.unitName, campaignSaveDataHolder.ActiveHeroID, squadStats, campaignSaveDataHolder.EnemyRace, currentValue);
-                    if (campaignSaveDataHolder.OnlySakuraUnits)
-                        total += HeroBonusRuleEvaluator.SumFactionStatBonus(stat, campaignSaveDataHolder.PlayerHeroRace, currentValue);
+                    float total = HeroBonusRuleEvaluator.SumHeroStatBonus(stat, unit.ValueRO.unitName, hero.HeroID, squadStats, hero.EnemyRace, currentValue);
+                    if (hero.OnlySakuraUnits)
+                        total += HeroBonusRuleEvaluator.SumFactionStatBonus(stat, hero.HeroRace, currentValue);
                     return total;
                 }
 
@@ -172,7 +173,7 @@ partial struct UnitSetUpSystem : ISystem
                     weaponStrength += GearData.GetGear(GearID.Glaives).GearModifierValue;
                 if(Contains(GearID.TexanBBQ) && TabletopTavernConstants.FightsInMelee(squadStats.unitType))
                     weaponStrength += GearData.GetGear(GearID.TexanBBQ).GearModifierValue;
-                if(Contains(GearID.BallisticCharts))
+                if(Contains(GearID.BallisticCharts) && squadStats.unitType == UnitType.Ranged)
                     accuracy += GearData.GetGear(GearID.BallisticCharts).GearModifierValue;
                 if(Contains(GearID.ConscriptionOrders) && squadStats.RarityTier == UnitRarity.Common) {
                     int conscriptionOrdersModifier = GearData.GetGear(GearID.ConscriptionOrders).GearModifierValue;
@@ -365,12 +366,9 @@ partial struct UnitSetUpSystem : ISystem
             });
             entityCommandBuffer.SetComponentEnabled<UnitFindTarget>(entity, false);
 
-            Color hoveredColor = team == Team.Player ? TabletopTavernConstants.PLAYER_TRIANGLE_COLOR: TabletopTavernConstants.ENEMY_TRIANGLE_COLOR;
-            Color selectedColor = team == Team.Player ? TabletopTavernConstants.PLAYER_TRIANGLE_COLOR : TabletopTavernConstants.ENEMY_TRIANGLE_COLOR;
-
-            entityCommandBuffer.AddComponent(entity, new TriangleEntity { 
-                hoverColor = new Vector4(hoveredColor.r, hoveredColor.g, hoveredColor.b, TabletopTavernConstants.TRIANGLE_HOVER_BLOOM),
-                selectedColor = new Vector4(selectedColor.r, selectedColor.g, selectedColor.b, TabletopTavernConstants.TRIANGLE_SELECTED_BLOOM),
+            entityCommandBuffer.AddComponent(entity, new TriangleEntity {
+                hoverColor = TeamMarkerColors.Hover(team),
+                selectedColor = TeamMarkerColors.Selected(team),
                 disabledColor = TabletopTavernConstants.DISABLED_TRIANGLE_COLOR,
                 activeColor = TabletopTavernConstants.DISABLED_TRIANGLE_COLOR,
             });

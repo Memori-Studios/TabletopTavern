@@ -8,11 +8,20 @@ using TJ.Spells;
 using System;
 using Memori.Steamworks;
 using Memori.Metaprogression;
+using TabletopTavern.Analytics;
 
 namespace Memori.SaveData
 {
-    [Serializable] public class CampaignSaveData
+    // A save file that records the format version it was written in. SaveToJSON stamps it on every write.
+    public interface IVersionedSave
     {
+        int SaveVersion { get; set; }
+    }
+
+    [Serializable] public class CampaignSaveData : IVersionedSave
+    {
+        public int saveVersion;
+        int IVersionedSave.SaveVersion { get => saveVersion; set => saveVersion = value; }
         public int seed;
         public int activeMapLayer;
         public int bookNumber;
@@ -66,15 +75,30 @@ namespace Memori.SaveData
         // SpellLoadout.Sanitize re-validates on read so a save that predates a spell change or a mod
         // removing a spell cannot produce an illegal loadout. See SpellLoadout.
         public Spell[] selectedSpells = Array.Empty<Spell>();
-        public Guid runUUID;
+        // Set once when the run is created. Analytics joins every event of a run on it.
+        public string runId;
+        // Recorded with the selected node so the battle scene can tell a Horde from a Skirmish or a garrison.
+        public TJ.Map.NodeType selectedNodeType;
+        public NodeVisit nodeVisit;
         /// <summary>Seconds of real play on this run (Map and campaign battles). See RunClock.</summary>
         public double playTimeSeconds;
+        // Set when the act 3 win is recorded while the run marches on into endless acts. From then on the
+        // run ends as a victory whatever happens, and the win-only bookkeeping never runs a second time.
+        public bool victoryBanked;
+        // Whether banking the victory was this hero's first completion, so the end screen can still show
+        // the hero unlock after the completion is already on the player save.
+        public bool victoryWasFirstHeroCompletion;
+        // Hero leading the saved enemy army with his bonus rules (see EnemyWarlord), or 0 for none.
+        public int enemyWarlordHeroID;
+
+        /// <summary>runId, or a stable stand-in built from fields that never change mid-run for a run saved before runId existed.</summary>
+        public string RunId => string.IsNullOrEmpty(runId) ? $"legacy-{seed}-{heroID}-{(int)difficultyLevel}" : runId;
 
         // _selectedSpells is optional: the blank/recovery saves constructed elsewhere in this file
         // pass nothing and get the hero's default loadout, which Sanitize produces from null.
         public CampaignSaveData(int _seed, int _hero, int _startingGold, SquadToLoad[] _playerArmy, TT_Difficulty _difficulty, GearID _startingGear, Guid _runUUID, Spell[] _selectedSpells = null)
         {
-            runUUID = _runUUID;
+            runId = _runUUID == Guid.Empty ? string.Empty : _runUUID.ToString();
             seed = _seed;
             heroID = _hero;
             selectedSpells = SpellLoadout.Sanitize(_selectedSpells, _hero);
@@ -114,8 +138,10 @@ namespace Memori.SaveData
             selectedNodeIndex = _index;
         }
     }
-    [Serializable] public class CustomBattleSaveData
+    [Serializable] public class CustomBattleSaveData : IVersionedSave
     {
+        public int saveVersion;
+        int IVersionedSave.SaveVersion { get => saveVersion; set => saveVersion = value; }
         public SquadToLoad[] playerCustomBattleArmy; 
         public List<SquadBattlePosition> playerCustomBattleSquadBattlePositions = new();
         public List<SavedSquadGroup> playerCustomBattleSquadGroups = new();
@@ -143,6 +169,27 @@ namespace Memori.SaveData
         public bool consumableUsed;   // true once a consumable was used this run (BareEssentials)
         public bool pauseUsed;        // true once the pause button was used this run (UhPause)
         public bool gainedUnitOutsideRaiseDead; // true once a unit was gained by any means but Raise Dead (DeadShallServe)
+        public List<SpellCastStored> spellsCast; // player casts this run per spell, hotbar and mage alike; reported on runEnded
+    }
+    [System.Serializable] public struct SpellCastStored
+    {
+        public Spell Spell;
+        public int Casts;
+    }
+    /// <summary>The node the player picked and what else was on offer, held until the node resolves.</summary>
+    [System.Serializable] public struct NodeVisit
+    {
+        public bool recorded;
+        public int nodeIndex;
+        public bool hidden;
+        public int goldOnEntry;
+        public List<OfferedNode> offered;
+    }
+    [System.Serializable] public struct OfferedNode
+    {
+        public int index;
+        public TJ.Map.NodeType type;
+        public bool hidden;
     }
     public struct RenownAward
     {
@@ -164,8 +211,10 @@ namespace Memori.SaveData
             unitNameOverride = _unitNameOverride;
         }
     }
-    [System.Serializable] public class PlayerSaveData
+    [System.Serializable] public class PlayerSaveData : IVersionedSave
     {
+        public int saveVersion;
+        int IVersionedSave.SaveVersion { get => saveVersion; set => saveVersion = value; }
         public int campaignsStarted;
         public int campaignsCompleted;
         public List<int> tutorialStepCompleted = new ();
@@ -247,6 +296,10 @@ namespace Memori.SaveData
         // Same battle-scene bridge as PauseUsedThisBattle; auto-resolved battles never set it.
         public static bool ArmyLossesSufferedThisBattle;
 
+        // Player spell casts this battle, keyed by spell. Same battle-scene bridge as
+        // PauseUsedThisBattle: SpellManager fills it, SaveSquadsPostBattle folds it into RunStats.
+        public static readonly Dictionary<Spell, int> SpellsCastThisBattle = new();
+
         // In-memory authoritative copy of playerSaveData.json. SaveDataHandler is the sole gateway
         // to that file, so every read returns this cached instance and every write refreshes it.
         // Populated lazily on first LoadPlayerSaveData(); invalidated by DeletePlayerSaveData().
@@ -272,6 +325,8 @@ namespace Memori.SaveData
         {
             _saveRootOverride = root;
             _playerCache = null;
+            // Keybinds sit beside the saves but are written by Memori.Input, which cannot see this class.
+            Memori.Input.JSONFileHandler.SetRoot(root);
         }
 
 #if UNITY_EDITOR
@@ -315,8 +370,13 @@ namespace Memori.SaveData
             }
             return gearIDsSerialized;
         }
+        // Format version stamped into every save; 0 means written before versioning. Bump it when a save's meaning
+        // changes and migrate older versions on read. An older build drops the field, so migrations must be safe to rerun.
+        public const int CURRENT_SAVE_VERSION = 1;
+
         private static void SaveToJSON<T> (T toSave, string filename)
         {
+            if (toSave is IVersionedSave versioned) versioned.SaveVersion = CURRENT_SAVE_VERSION;
             string content = JsonUtility.ToJson(toSave, true);  // 'true' for pretty-printing (optional, human-readable)
             string targetPath = GetPath(filename);
             string tempPath = targetPath + ".tmp";  // Temporary file in same directory
@@ -492,7 +552,7 @@ namespace Memori.SaveData
         /// <param name="_playerWon"></param>
         /// <param name="_squadIdKillCounter"></param>
         /// <param name="_squadIdLossCounter"></param>
-        public static void SaveSquadsPostBattle(SquadToLoad[] _playerSquads, SquadToLoad[] _enemySquads, bool _playerWon, List<SquadKillsStored> _squadIdKillCounter, List<SquadLossesStored> _squadIdLossCounter, int _spellKills = 0)
+        public static void SaveSquadsPostBattle(SquadToLoad[] _playerSquads, SquadToLoad[] _enemySquads, bool _playerWon, List<SquadKillsStored> _squadIdKillCounter, List<SquadLossesStored> _squadIdLossCounter, int _spellKills = 0, AnalyticsBattleReport _report = null)
         {
             UnityEngine.Debug.Log($"SaveDataHandler SaveSquadsPostBattle: player won: {_playerWon}");
             CampaignSaveData saveData = Load();
@@ -527,15 +587,28 @@ namespace Memori.SaveData
             saveData.townData.townInteractionStatus = TownInteractionStatus.Sacked;
             // saveData.withdrawnSquads = _withdrawnSquads;
 
+            // The kill and loss lists carry enemy squads too; run stats and achievements count the player's only.
+            HashSet<string> playerSquadGuids = new();
+            foreach (SquadToLoad squad in _playerSquads) playerSquadGuids.Add(squad.UniqueID);
+
             // Hotbar spell kills belong to no squad (ArmySpawnManager.SPELL_KILL_SQUAD_ID) and would
             // otherwise vanish here; they count toward the run total even though no card shows them.
             int totalKills = _spellKills;
             foreach (var squadKill in _squadIdKillCounter)
             {
-                totalKills += squadKill.Kills;
+                if (playerSquadGuids.Contains(squadKill.SquadGUID)) totalKills += squadKill.Kills;
             }
             UnityEngine.Debug.Log($"Total enemies slain in battle: {totalKills}");
             saveData.RunStats.enemiesSlain += totalKills;
+
+            // Read before the battle-scene flags and the spell tally are cleared below.
+            if (_report != null)
+            {
+                _report.PauseUsed = PauseUsedThisBattle;
+                _report.ArmyLossTriggered = ArmyLossesSufferedThisBattle;
+                _report.SpellKills = _spellKills;
+                foreach (KeyValuePair<Spell, int> cast in SpellsCastThisBattle) _report.SpellCasts[cast.Key.ToString()] = cast.Value;
+            }
 
             //achievement tracking - archer used in battle
             for (int i = 0; i < 10; i++)
@@ -557,12 +630,23 @@ namespace Memori.SaveData
                 PauseUsedThisBattle = false;
             }
 
+            saveData.RunStats.spellsCast ??= new List<SpellCastStored>();
+            foreach (KeyValuePair<Spell, int> cast in SpellsCastThisBattle)
+            {
+                int index = saveData.RunStats.spellsCast.FindIndex(entry => entry.Spell == cast.Key);
+                if (index < 0) saveData.RunStats.spellsCast.Add(new SpellCastStored { Spell = cast.Key, Casts = cast.Value });
+                else saveData.RunStats.spellsCast[index] = new SpellCastStored { Spell = cast.Key, Casts = saveData.RunStats.spellsCast[index].Casts + cast.Value };
+            }
+            SpellsCastThisBattle.Clear();
+
             // The battle result goes to disk before any stats or achievement work so a failure below
             // cannot leave the map treating this battle as unfought.
             SaveCampaign(saveData);
 
             //update the last snapshot to overwrite the snapshot of the pre battle state since the battle is now completed
             SaveCampaignSnapshot(saveData);
+
+            GameEventTracker.BattleEnded(saveData, _report);
 
             RecordUnitNameKills(_playerSquads, _squadIdKillCounter);
 
@@ -592,7 +676,8 @@ namespace Memori.SaveData
                 int totalUnitsLost = 0;
                 if (_squadIdLossCounter != null)
                 {
-                    foreach (SquadLossesStored loss in _squadIdLossCounter) totalUnitsLost += loss.Losses;
+                    foreach (SquadLossesStored loss in _squadIdLossCounter)
+                        if (playerSquadGuids.Contains(loss.SquadGUID)) totalUnitsLost += loss.Losses;
                 }
                 if (totalUnitsLost == 0) SteamAchievements.Unlock(AchievementId.FlawlessVictory);
 
@@ -705,21 +790,20 @@ namespace Memori.SaveData
         public static TT_Difficulty GetHeroLastDifficulty(int heroID)
         {
             PlayerSaveData saveData = LoadPlayerSaveData();
-            int maxAvailable = Math.Min(saveData.MaxDifficultyOverall + 1, (int)TT_Difficulty.Godking);
-            if (maxAvailable < 1) maxAvailable = 1;
+            TT_Difficulty maxAvailable = DifficultyRules.HighestUnlocked(saveData.MaxDifficultyOverall);
 
             for (int i = 0; i < saveData.HeroLastDifficulties.Count; i++)
             {
                 if (saveData.HeroLastDifficulties[i].HeroID == heroID)
                 {
-                    int lastWin = (int)saveData.HeroLastDifficulties[i].LastDifficulty;
-                    if (lastWin < saveData.MaxDifficultyOverall)
-                        return (TT_Difficulty)lastWin;
+                    TT_Difficulty lastWin = saveData.HeroLastDifficulties[i].LastDifficulty;
+                    if (DifficultyRules.Rank(lastWin) < DifficultyRules.Rank(saveData.MaxDifficultyOverall))
+                        return DifficultyRules.Normalize(lastWin);
                     break;
                 }
             }
 
-            return (TT_Difficulty)maxAvailable;
+            return maxAvailable;
         }
         public static void SaveHeroLastDifficulty(int heroID, TT_Difficulty difficulty)
         {
@@ -850,8 +934,9 @@ namespace Memori.SaveData
         /// The spell mana budget for one battle. Static because the battle scene has no
         /// CampaignSaveManager - the same reason GetCampaignSpells lives here.
         ///
-        /// Base pool, plus SPELL_MANA_POOL_PER_ACT for every act after the first, plus the Renown
-        /// bonus, plus SPELL_MANA_POOL_DRAUGHT per Mana Draught armed on the save. The act and the
+        /// Base pool, plus SPELL_MANA_POOL_PER_ACT for every act after the first (capped at
+        /// SPELL_MANA_POOL_CAP for endless acts), plus the Renown bonus, plus SPELL_MANA_POOL_DRAUGHT
+        /// per Mana Draught armed on the save. The act and the
         /// draughts are read off the campaign save on disk because this runs in the battle scene.
         /// A custom battle has no act and ignores Renown and draughts: it always gets the fixed
         /// sandbox maximum. The pool is granted whole at the start of every battle and does not
@@ -865,8 +950,9 @@ namespace Memori.SaveData
 
             CampaignSaveData save = Load();
             int act = Math.Max(1, save.bookNumber);
-            return TabletopTavernConstants.SPELL_MANA_POOL_BASE
-                 + (act - 1) * TabletopTavernConstants.SPELL_MANA_POOL_PER_ACT
+            int actPool = Math.Min(TabletopTavernConstants.SPELL_MANA_POOL_CAP,
+                TabletopTavernConstants.SPELL_MANA_POOL_BASE + (act - 1) * TabletopTavernConstants.SPELL_MANA_POOL_PER_ACT);
+            return actPool
                  + SpellLoadout.GetManaBonus()
                  + save.manaDraughtsArmed * TabletopTavernConstants.SPELL_MANA_POOL_DRAUGHT;
         }
@@ -889,17 +975,19 @@ namespace Memori.SaveData
                 UnityEngine.Debug.LogWarning($"Directory not found: {path}");
             }
         }
-        public static void CreateCampaign(Hero hero, ArmySaveData armySaveData, TT_Difficulty _difficultyLevelSelected, GearID _startingGear, Guid _runUUID, int startingGold, Spell[] _selectedSpells = null)
+        public static void CreateCampaign(Hero hero, ArmySaveData armySaveData, TT_Difficulty _difficultyLevelSelected, GearID _startingGear, Guid _runUUID, int startingGold, Spell[] _selectedSpells = null, AnalyticsRunSetup _setup = null)
         {
             SquadToLoad[] squadsToLoad = new SquadToLoad[armySaveData.SquadsInArmy.Length];
             for(int i = 0; i < armySaveData.SquadsInArmy.Length; i++) {
                 squadsToLoad[i] = new SquadToLoad(armySaveData.SquadsInArmy[i], 0, i);
             }
-            CreateCampaign(hero, squadsToLoad, _difficultyLevelSelected, _startingGear, _runUUID, startingGold, _selectedSpells);
+            CreateCampaign(hero, squadsToLoad, _difficultyLevelSelected, _startingGear, _runUUID, startingGold, _selectedSpells, _setup);
         }
-        public static void CreateCampaign(Hero hero, SquadToLoad[] squadsToLoad, TT_Difficulty _difficultyLevelSelected, GearID _startingGear, Guid _runUUID, int startingGold, Spell[] _selectedSpells = null)
+        public static void CreateCampaign(Hero hero, SquadToLoad[] squadsToLoad, TT_Difficulty _difficultyLevelSelected, GearID _startingGear, Guid _runUUID, int startingGold, Spell[] _selectedSpells = null, AnalyticsRunSetup _setup = null)
         {
             // UnityEngine.Debug.Log($"Creating campaign with hero: {hero.HeroID} and difficulty: {_difficultyLevelSelected}");
+            // Quick restart replays a saved value that may come from the other ladder; a new run starts on today's.
+            _difficultyLevelSelected = DifficultyRules.Normalize(_difficultyLevelSelected);
             SquadToLoad[] playerArmy = new SquadToLoad[13];
             for(int i = 0; i < playerArmy.Length; i++) {
                 playerArmy[i].UnitIndex = -1;
@@ -934,6 +1022,7 @@ namespace Memori.SaveData
             SaveCampaign(campaignSaveData);
             SaveCampaignSnapshot(campaignSaveData);
             SaveLastCampaignStats(hero.HeroID, _difficultyLevelSelected, _startingGear, squadsToLoad, startingGold);
+            GameEventTracker.RunStarted(campaignSaveData, _setup);
         }
         public static List<int> GetGearIDsCollected()
         {
@@ -1057,7 +1146,21 @@ namespace Memori.SaveData
         {
             PlayerSaveData saveData = LoadPlayerSaveData();
             abandonedRun.playTimeSeconds += RunClock.TakeUnflushed();
-            AppendRunRecord(saveData, abandonedRun, RunOutcome.Abandon, renownEarned: 0);
+
+            // A run that already banked its act 3 win ends as a victory at the act reached and still pays
+            // renown for the acts it finished.
+            RunOutcome outcome = RunOutcome.Abandon;
+            int renownEarned = 0;
+            if (abandonedRun.victoryBanked)
+            {
+                RenownAward award = ComputeRenownReward(abandonedRun.RunStats, Mathf.Max(abandonedRun.bookNumber - 1, 0), abandonedRun.difficultyLevel);
+                saveData.renown += award.total;
+                renownEarned = award.total;
+                outcome = RunOutcome.Win;
+                SubmitDeepestMarch(abandonedRun);
+            }
+
+            AppendRunRecord(saveData, abandonedRun, outcome, renownEarned);
             SavePlayerSaveData(saveData);
         }
 
@@ -1071,7 +1174,7 @@ namespace Memori.SaveData
 
             var record = new RunRecord
             {
-                runUUID = run.runUUID.ToString(),
+                runUUID = run.RunId,
                 heroID = run.heroID,
                 difficulty = run.difficultyLevel,
                 outcome = outcome,
@@ -1167,14 +1270,15 @@ namespace Memori.SaveData
         // Placeholder tuning values - adjust to taste.
         private const int RENOWN_PER_CHAPTER = 1;
         private const int RENOWN_PER_ACT_COMPLETED = 50;
-        private const float RENOWN_DIFFICULTY_MULTIPLIER_PER_LEVEL = 0.25f; // e.g. difficulty 3 (Knight) => x1.5
+        // Endless acts pay less so lifetime Renown does not run away on a long march.
+        private const int RENOWN_PER_ENDLESS_ACT = 25;
 
         private static RenownAward ComputeRenownReward(RunStats runStats, int bookNumber, TT_Difficulty difficulty)
         {
             int chapterRenown = runStats.chaptersCompleted * RENOWN_PER_CHAPTER;
-            int actRenown = bookNumber * RENOWN_PER_ACT_COMPLETED;
-            // TT_Difficulty starts at 1 (Peasant), so offset by 1 to give the lowest difficulty x1.
-            float difficultyMultiplier = 1f + ((int)difficulty - 1) * RENOWN_DIFFICULTY_MULTIPLIER_PER_LEVEL;
+            int storyActs = Mathf.Min(bookNumber, TabletopTavernConstants.FINAL_STORY_ACT);
+            int actRenown = storyActs * RENOWN_PER_ACT_COMPLETED + (bookNumber - storyActs) * RENOWN_PER_ENDLESS_ACT;
+            float difficultyMultiplier = DifficultyRules.RenownMultiplier(difficulty);
             int total = Mathf.RoundToInt((chapterRenown + actRenown) * difficultyMultiplier);
 
             return new RenownAward
@@ -1187,6 +1291,38 @@ namespace Memori.SaveData
                 difficultyMultiplier = difficultyMultiplier,
                 total = total
             };
+        }
+
+        /// <summary>
+        /// Locks the win in the moment the last story act falls: completions, difficulty unlock, hero
+        /// records, roster achievement and the Godking time. A player who marches on into endless acts
+        /// keeps all of it whatever happens next. Runs once per run; RecordGameOver skips the same block
+        /// once the campaign save says it ran.
+        /// </summary>
+        public static void RecordVictoryUnlocks()
+        {
+            CampaignSaveData campaignSaveData = CampaignManager.Instance.CampaignSaveManager.SaveData;
+            if (campaignSaveData.victoryBanked) return;
+
+            PlayerSaveData saveData = LoadPlayerSaveData();
+            campaignSaveData.playTimeSeconds += RunClock.TakeUnflushed();
+            campaignSaveData.victoryWasFirstHeroCompletion = GetHeroDifficultiesCompleted(campaignSaveData.heroID).Count == 0;
+
+            ApplyVictoryUnlocks(saveData, campaignSaveData);
+            SubmitGodkingTimeIfEligible(campaignSaveData);
+            campaignSaveData.victoryBanked = true;
+
+            SavePlayerSaveData(saveData);
+        }
+
+        private static void SubmitGodkingTimeIfEligible(CampaignSaveData campaignSaveData)
+        {
+            // Only Godking goes on the board: it is the one difficulty with no auto-resolve, so the
+            // time is a real one. Fire and forget - the run record is the source of truth.
+            // Deliberately NOT behind SPELLS, unlike the Leaderboard button: times are collected
+            // from the moment this ships so the board is populated when players first see it.
+            if (campaignSaveData.difficultyLevel == TT_Difficulty.Godking)
+                _ = SteamLeaderboards.SubmitGodkingTime((int)Math.Round(campaignSaveData.playTimeSeconds));
         }
 
         public static RenownAward RecordGameOver(bool _playerWon)
@@ -1206,70 +1342,12 @@ namespace Memori.SaveData
             if (saveData.renown >= 100)
                 SteamAchievements.Unlock(AchievementId.ASnackForLater);
 
-            if (_playerWon)
+            // A banked victory already ran the win block and submitted the time; the run is a win however it ended.
+            bool countsAsWin = _playerWon || campaignSaveData.victoryBanked;
+            if (_playerWon && !campaignSaveData.victoryBanked)
             {
-                saveData.gameCompletions++;
-
-                int currentHeroID = campaignSaveData.heroID;
-                int newDifficulty = (int)campaignSaveData.difficultyLevel;
-
-                //update max difficulty unlocked if needed
-                if(newDifficulty > saveData.MaxDifficultyOverall) {
-                    saveData.MaxDifficultyOverall = newDifficulty;
-                }
-
-                bool found = false;
-                for (int i = 0; i < saveData.HeroDifficultiesCompleted.Count; i++)
-                {
-                    //hero has an entry
-                    if (saveData.HeroDifficultiesCompleted[i].HeroID == currentHeroID)
-                    {
-                        // Only update if the new difficulty was not already recorded
-                        if (!saveData.HeroDifficultiesCompleted[i].DifficultiesCompleted.Contains(newDifficulty))
-                        {
-                            saveData.HeroDifficultiesCompleted[i].DifficultiesCompleted.Add(newDifficulty);
-                        }
-                        found = true;
-                        break;
-                    }
-                }
-
-                // Only add if no existing entry was found
-                if (!found)
-                {
-                    saveData.HeroDifficultiesCompleted.Add(new HeroDifficultiesCompleted()
-                    {
-                        HeroID = currentHeroID,
-                        DifficultiesCompleted = new List<int>() { newDifficulty }
-                    });
-                }
-
-                bool heroLastDiffFound = false;
-                for (int i = 0; i < saveData.HeroLastDifficulties.Count; i++)
-                {
-                    if (saveData.HeroLastDifficulties[i].HeroID == currentHeroID)
-                    {
-                        saveData.HeroLastDifficulties[i] = new HeroLastDifficulty { HeroID = currentHeroID, LastDifficulty = (TT_Difficulty)newDifficulty };
-                        heroLastDiffFound = true;
-                        break;
-                    }
-                }
-                if (!heroLastDiffFound)
-                    saveData.HeroLastDifficulties.Add(new HeroLastDifficulty { HeroID = currentHeroID, LastDifficulty = (TT_Difficulty)newDifficulty });
-
-                //achievement check - roster complete (beat the game with every hero, any difficulty).
-                //Hero counts mirror the hardcoded totals used by the max-difficulty-all-heroes check; bump if the roster grows.
-#if DEMO
-                int totalHeroes = 4;
-#else
-                int totalHeroes = 16;
-#endif
-                int heroesBeaten = 0;
-                for (int i = 0; i < saveData.HeroDifficultiesCompleted.Count; i++)
-                {
-                    if (saveData.HeroDifficultiesCompleted[i].DifficultiesCompleted.Count > 0) heroesBeaten++;
-                }
-                if (heroesBeaten >= totalHeroes) SteamAchievements.Unlock(AchievementId.RosterComplete);
+                ApplyVictoryUnlocks(saveData, campaignSaveData);
+                SubmitGodkingTimeIfEligible(campaignSaveData);
             }
 
             // --- Legacy deposited-gold sweep, disabled - kept in case this system is restored ---
@@ -1277,17 +1355,85 @@ namespace Memori.SaveData
             // SavePlayerSaveData(saveData);
             // DepositGold();
 
-            AppendRunRecord(saveData, campaignSaveData, _playerWon ? RunOutcome.Win : RunOutcome.Loss, renownAward.total);
-
-            // Only Godking goes on the board: it is the one difficulty with no auto-resolve, so the
-            // time is a real one. Fire and forget - the record above is the source of truth.
-            // Deliberately NOT behind SPELLS, unlike the Leaderboard button: times are collected
-            // from the moment this ships so the board is populated when players first see it.
-            if (_playerWon && campaignSaveData.difficultyLevel == TT_Difficulty.Godking)
-                _ = SteamLeaderboards.SubmitGodkingTime((int)Math.Round(campaignSaveData.playTimeSeconds));
+            AppendRunRecord(saveData, campaignSaveData, countsAsWin ? RunOutcome.Win : RunOutcome.Loss, renownAward.total);
+            if (campaignSaveData.victoryBanked) SubmitDeepestMarch(campaignSaveData);
 
             SavePlayerSaveData(saveData);
             return renownAward;
+        }
+
+        // Every run on the two hardest levels that banked its act 3 win goes on the Deepest March board, a plain
+        // act 3 claim included, so the board fills from the first win and marching on is what climbs it.
+        // Lower difficulties cannot march on and stay off the board. Steam keeps the player's best.
+        // Fire and forget - the run record is the source of truth.
+        private static void SubmitDeepestMarch(CampaignSaveData run)
+        {
+            if (!DifficultyRules.EndlessAllowed(run.difficultyLevel)) return;
+            _ = SteamLeaderboards.SubmitDeepestMarch(DeepestMarchScore.FromRun(run));
+        }
+
+        private static void ApplyVictoryUnlocks(PlayerSaveData saveData, CampaignSaveData campaignSaveData)
+        {
+            saveData.gameCompletions++;
+
+            int currentHeroID = campaignSaveData.heroID;
+            int newDifficulty = (int)campaignSaveData.difficultyLevel;
+
+            //update max difficulty unlocked if needed
+            saveData.MaxDifficultyOverall = DifficultyRules.Harder(saveData.MaxDifficultyOverall, newDifficulty);
+
+            bool found = false;
+            for (int i = 0; i < saveData.HeroDifficultiesCompleted.Count; i++)
+            {
+                //hero has an entry
+                if (saveData.HeroDifficultiesCompleted[i].HeroID == currentHeroID)
+                {
+                    // Only update if the new difficulty was not already recorded
+                    if (!saveData.HeroDifficultiesCompleted[i].DifficultiesCompleted.Contains(newDifficulty))
+                    {
+                        saveData.HeroDifficultiesCompleted[i].DifficultiesCompleted.Add(newDifficulty);
+                    }
+                    found = true;
+                    break;
+                }
+            }
+
+            // Only add if no existing entry was found
+            if (!found)
+            {
+                saveData.HeroDifficultiesCompleted.Add(new HeroDifficultiesCompleted()
+                {
+                    HeroID = currentHeroID,
+                    DifficultiesCompleted = new List<int>() { newDifficulty }
+                });
+            }
+
+            bool heroLastDiffFound = false;
+            for (int i = 0; i < saveData.HeroLastDifficulties.Count; i++)
+            {
+                if (saveData.HeroLastDifficulties[i].HeroID == currentHeroID)
+                {
+                    saveData.HeroLastDifficulties[i] = new HeroLastDifficulty { HeroID = currentHeroID, LastDifficulty = (TT_Difficulty)newDifficulty };
+                    heroLastDiffFound = true;
+                    break;
+                }
+            }
+            if (!heroLastDiffFound)
+                saveData.HeroLastDifficulties.Add(new HeroLastDifficulty { HeroID = currentHeroID, LastDifficulty = (TT_Difficulty)newDifficulty });
+
+            //achievement check - roster complete (beat the game with every hero, any difficulty).
+            //Hero counts mirror the hardcoded totals used by the max-difficulty-all-heroes check; bump if the roster grows.
+#if DEMO
+            int totalHeroes = 4;
+#else
+            int totalHeroes = 16;
+#endif
+            int heroesBeaten = 0;
+            for (int i = 0; i < saveData.HeroDifficultiesCompleted.Count; i++)
+            {
+                if (saveData.HeroDifficultiesCompleted[i].DifficultiesCompleted.Count > 0) heroesBeaten++;
+            }
+            if (heroesBeaten >= totalHeroes) SteamAchievements.Unlock(AchievementId.RosterComplete);
         }
         public static bool IsUnlockConditionUnlocked(UnlockCondition _unlockCondition, int heroID)
         {
@@ -1376,9 +1522,7 @@ namespace Memori.SaveData
             int newDifficulty = (int)_difficulty;
 
             //update max difficulty unlocked if needed
-            if(newDifficulty > saveData.MaxDifficultyOverall) {
-                saveData.MaxDifficultyOverall = newDifficulty;
-            }
+            saveData.MaxDifficultyOverall = DifficultyRules.Harder(saveData.MaxDifficultyOverall, newDifficulty);
 
             bool found = false;
             for (int i = 0; i < saveData.HeroDifficultiesCompleted.Count; i++)

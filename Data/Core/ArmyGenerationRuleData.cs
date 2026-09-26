@@ -94,6 +94,12 @@ namespace TJ
             foreach (EnemyArmyRule rule in DefaultEnemyArmyRules)
                 if (rule.Matches(board, finalBattle, knightDifficulty, battlesFought)) return rule.TierCounts;
 
+            if (board > TabletopTavernConstants.FINAL_STORY_ACT)
+            {
+                TierCount[] lastStoryAct = ResolveEnemyArmyTierCounts(TabletopTavernConstants.FINAL_STORY_ACT, finalBattle, knightDifficulty, battlesFought);
+                return ExtendForEndless(lastStoryAct, TabletopTavernConstants.EndlessActs(board), alternateTierFour: finalBattle);
+            }
+
             Debug.LogWarning($"[ArmyGeneration] No enemy army rule matched board={board}, finalBattle={finalBattle}, knightDifficulty={knightDifficulty}, battlesFought={battlesFought} - returning an empty army.");
             return Array.Empty<TierCount>();
         }
@@ -104,6 +110,12 @@ namespace TJ
                 if (rule.Matches(townSize, bookNumber, difficultyImperator)) return rule.TierCounts;
             foreach (TownGarrisonRule rule in DefaultTownGarrisonRules)
                 if (rule.Matches(townSize, bookNumber, difficultyImperator)) return rule.TierCounts;
+
+            if (bookNumber > TabletopTavernConstants.FINAL_STORY_ACT)
+            {
+                TierCount[] lastStoryAct = ResolveTownGarrisonTierCounts(townSize, TabletopTavernConstants.FINAL_STORY_ACT, difficultyImperator);
+                return ExtendForEndless(lastStoryAct, TabletopTavernConstants.EndlessActs(bookNumber), alternateTierFour: false);
+            }
 
             Debug.LogWarning($"[ArmyGeneration] No town garrison rule matched townSize={townSize}, bookNumber={bookNumber}, difficultyImperator={difficultyImperator} - returning an empty garrison.");
             return Array.Empty<TierCount>();
@@ -120,11 +132,38 @@ namespace TJ
             // range, same fallback ArmyCreator used before this became data-driven, so a mod that
             // adds a new act via enemyArmyRules without also adding enemyPrestigeRules still gets
             // sensible (if static) prestige odds instead of a silent zero.
-            int clampedAct = Math.Clamp(actNumber, 1, 3);
+            int clampedAct = Math.Clamp(actNumber, 1, TabletopTavernConstants.FINAL_STORY_ACT);
             foreach (EnemyPrestigeRule rule in DefaultEnemyPrestigeRules)
-                if (rule.Matches(clampedAct, enhanced)) return rule;
+                if (rule.Matches(clampedAct, enhanced)) return ExtendPrestigeForEndless(rule, TabletopTavernConstants.EndlessActs(actNumber));
 
             return default;
+        }
+
+        // Endless acts build on the last story act's row: one more squad per extra act, tier 3 for
+        // regular fights and alternating tier 3 / tier 4 for finals, never past the deployment cap.
+        private static TierCount[] ExtendForEndless(TierCount[] baseCounts, int endlessActs, bool alternateTierFour)
+        {
+            List<TierCount> counts = new(baseCounts);
+            int total = 0;
+            foreach (TierCount entry in counts) total += entry.Count;
+
+            for (int i = 0; i < endlessActs && total < TabletopTavernConstants.ENDLESS_ENEMY_SQUAD_CAP; i++, total++)
+            {
+                int tier = alternateTierFour && i % 2 == 1 ? 4 : 3;
+                int index = counts.FindIndex(c => c.Tier == tier);
+                if (index >= 0) counts[index] = new TierCount { Tier = tier, Count = counts[index].Count + 1 };
+                else counts.Add(new TierCount { Tier = tier, Count = 1 });
+            }
+            return counts.ToArray();
+        }
+
+        private static EnemyPrestigeRule ExtendPrestigeForEndless(EnemyPrestigeRule rule, int endlessActs)
+        {
+            if (endlessActs <= 0) return rule;
+            rule.ChancePerSquad = Math.Min(TabletopTavernConstants.ENDLESS_PRESTIGE_CHANCE_CAP, rule.ChancePerSquad + endlessActs * TabletopTavernConstants.ENDLESS_PRESTIGE_CHANCE_PER_ACT);
+            rule.MaxPrestigedSquads = Math.Min(TabletopTavernConstants.ENDLESS_ENEMY_SQUAD_CAP, rule.MaxPrestigedSquads + endlessActs);
+            rule.PrestigeTwoChance = Math.Min(TabletopTavernConstants.ENDLESS_PRESTIGE_TWO_CHANCE_CAP, rule.PrestigeTwoChance + endlessActs * TabletopTavernConstants.ENDLESS_PRESTIGE_CHANCE_PER_ACT);
+            return rule;
         }
 
         private static TierCount[] T(params (int tier, int count)[] pairs)

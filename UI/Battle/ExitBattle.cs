@@ -27,7 +27,7 @@ public class ExitBattle : MonoBehaviour
     // private void Update()
     // {
     //     if (Input.GetKeyDown(KeyCode.Escape)) {
-    //         if(panelCanvasGroup.canvasGroup.alpha == 1) {
+    //         if(panelCanvasGroup.alpha == 1) {
     //             CancelExit();
     //         } else {
     //             cachedTimeScale = Time.timeScale;

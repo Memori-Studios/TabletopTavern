@@ -24,6 +24,7 @@ partial struct SpellSystem : ISystem
         PhysicsWorldSingleton physicsWorldSingleton = SystemAPI.GetSingleton<PhysicsWorldSingleton>();
         CollisionWorld collisionWorld = physicsWorldSingleton.CollisionWorld;
         NativeList<DistanceHit> distanceHitList = new NativeList<DistanceHit>(Allocator.Temp);
+        NativeList<Entity> candidateList = new NativeList<Entity>(Allocator.Temp);
         float deltaTime = SystemAPI.Time.DeltaTime;
         double elapsedTime = SystemAPI.Time.ElapsedTime;
         // GetSingleton<PhysicsWorldSingleton>() does not guarantee the broadphase build jobs have
@@ -76,8 +77,28 @@ partial struct SpellSystem : ISystem
                 collisionWorld = SystemAPI.GetSingleton<PhysicsWorldSingleton>().CollisionWorld;
                 jobsCompleted = true;
             }
-            distanceHitList.Clear();
-            if (collisionWorld.OverlapSphere(spellPosition, spellRadius, ref distanceHitList, collisionFilter))
+            candidateList.Clear();
+            // A tick spell or a single-unit strike locked to a squad draws from that squad's own units. A
+            // sphere at SquadCenter misses a wide line outright: the centre is the mean of the unit positions,
+            // and a spread formation can have no unit within SpellRadius of it.
+            bool hitsTargetSquad = (spellEntity.ValueRO.HitsSingleUnit
+                    || (!spellEntity.ValueRO.IsOneOff && spellEntity.ValueRO.TickInterval > 0f))
+                && targetSquadEntity != Entity.Null
+                && SystemAPI.Exists(targetSquadEntity)
+                && SystemAPI.HasBuffer<EntityReferenceBufferElement>(targetSquadEntity);
+            if (hitsTargetSquad)
+            {
+                foreach (EntityReferenceBufferElement member in SystemAPI.GetBuffer<EntityReferenceBufferElement>(targetSquadEntity))
+                    candidateList.Add(member.Entity);
+            }
+            else
+            {
+                distanceHitList.Clear();
+                if (collisionWorld.OverlapSphere(spellPosition, spellRadius, ref distanceHitList, collisionFilter))
+                    foreach (DistanceHit distanceHit in distanceHitList) candidateList.Add(distanceHit.Entity);
+            }
+
+            if (candidateList.Length > 0)
             {
                 // Execute strike: keep only the living unit nearest the strike point. Resolved up front
                 // so the loop below can stay one code path for both shapes.
@@ -85,21 +106,20 @@ partial struct SpellSystem : ISystem
                 if (spellEntity.ValueRO.HitsSingleUnit)
                 {
                     float bestDistance = float.MaxValue;
-                    foreach (DistanceHit candidate in distanceHitList)
+                    foreach (Entity e in candidateList)
                     {
-                        Entity e = candidate.Entity;
                         if (!SystemAPI.Exists(e) || !SystemAPI.HasComponent<Unit>(e)) continue;
                         if (SystemAPI.HasComponent<Health>(e) && SystemAPI.GetComponent<Health>(e).Value <= 0) continue;
                         if (SystemAPI.GetComponent<Unit>(e).Team == damageBufferElement.TeamOfSource) continue;
-                        if (candidate.Distance >= bestDistance) continue;
-                        bestDistance = candidate.Distance;
+                        float distance = math.distance(SystemAPI.GetComponent<LocalTransform>(e).Position, spellPosition);
+                        if (distance >= bestDistance) continue;
+                        bestDistance = distance;
                         singleTarget = e;
                     }
                 }
 
-                foreach (DistanceHit distanceHit in distanceHitList)
+                foreach (Entity hitEntity in candidateList)
                 {
-                    Entity hitEntity = distanceHit.Entity;
                     if (spellEntity.ValueRO.HitsSingleUnit && hitEntity != singleTarget) continue;
                     if (!SystemAPI.Exists(hitEntity) || !SystemAPI.HasComponent<Unit>(hitEntity)) continue;
 
@@ -169,5 +189,6 @@ partial struct SpellSystem : ISystem
         }
 
         distanceHitList.Dispose();
+        candidateList.Dispose();
     }
 }

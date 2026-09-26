@@ -42,7 +42,7 @@ public class GameSpeedButton : MonoBehaviour, IPointerEnterHandler, IPointerExit
     public void GameSpeedButtonButtonClicked()
     {
         // Debug.Log($"GameSpeedButton clicked: {gameSpeed}");
-        gameSpeedManager.SetTimeScale(this);
+        gameSpeedManager.PlayerSetTimeScale(this);
     }
     public void Select()
     {

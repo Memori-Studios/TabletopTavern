@@ -29,7 +29,6 @@ public class GraphicsPanel : MonoBehaviour
     [SerializeField] private Toggle bloomToggle;
 
     [Header("URP References")]
-    [SerializeField] private ScriptableRendererData rendererData;
     [SerializeField] private VolumeProfile[] bloomProfiles;
 
     [Header("Hardware Detection")]
@@ -51,6 +50,9 @@ public class GraphicsPanel : MonoBehaviour
     static readonly int[] FpsLimitValues = { -1, 30, 60, 90, 120, 144, 165, 240 };
 
     enum HardwareTier { Low, Medium, High, Ultra }
+
+    // Every control's value as one string; Apply lights up only while this differs from the last applied state.
+    string appliedState;
 
     private void Start()
     {
@@ -86,10 +88,14 @@ public class GraphicsPanel : MonoBehaviour
         fpsLimitDropdown.RefreshShownValue();
 
         ToggleFPSCounter(fpsToggle.isOn);
-        fpsToggle.onValueChanged.AddListener(delegate {
-            ToggleFPSCounter(fpsToggle.isOn);
-            PlayerPrefs.SetInt("DisplayFPS", fpsToggle.isOn ? 1 : 0);
-        });
+        fpsToggle.onValueChanged.AddListener(delegate { ToggleFPSCounter(fpsToggle.isOn); });
+
+        foreach (var dropdown in new[] { resolutionDropdown, refreshRateDropdown, graphicsQualityDropdown, antiAliasingDropdown, shadowQualityDropdown, renderScaleDropdown, textureQualityDropdown, fpsLimitDropdown })
+            dropdown.onValueChanged.AddListener(delegate { RefreshApplyState(); });
+        foreach (var toggle in new[] { fullscreenToggle, vsyncToggle, fpsToggle, ambientOcclusionToggle, bloomToggle })
+            toggle.onValueChanged.AddListener(delegate { RefreshApplyState(); });
+        appliedState = CurrentState();
+        RefreshApplyState();
 
         #if !UNITY_EDITOR
             uint refreshRateNumerator = uint.Parse(refreshRateDropdown.options[refreshRateDropdown.value].text.Split(' ')[0]);
@@ -341,6 +347,28 @@ public class GraphicsPanel : MonoBehaviour
         SaveSettings();
     }
 
+    private string CurrentState()
+    {
+        return string.Join(",", vsyncToggle.isOn, fullscreenToggle.isOn, fpsToggle.isOn, ambientOcclusionToggle.isOn, bloomToggle.isOn,
+            resolutionDropdown.value, refreshRateDropdown.value, graphicsQualityDropdown.value, antiAliasingDropdown.value,
+            shadowQualityDropdown.value, renderScaleDropdown.value, textureQualityDropdown.value, fpsLimitDropdown.value);
+    }
+
+    // VSync on overrides the frame cap, so the cap reads as disabled while it is ticked.
+    private void RefreshApplyState()
+    {
+        SetControlEnabled(applyVideoSettingsButton, CurrentState() != appliedState);
+        SetControlEnabled(fpsLimitDropdown, !vsyncToggle.isOn);
+    }
+
+    private static void SetControlEnabled(Selectable control, bool enabled)
+    {
+        control.interactable = enabled;
+        CanvasGroup group = control.GetComponent<CanvasGroup>();
+        if (group == null) group = control.gameObject.AddComponent<CanvasGroup>();
+        group.alpha = enabled ? 1f : 0.45f;
+    }
+
     private IEnumerator ForceCanvasRebuildNextFrame()
     {
         yield return null;
@@ -363,6 +391,8 @@ public class GraphicsPanel : MonoBehaviour
         PlayerPrefs.SetInt("Bloom", bloomToggle.isOn ? 1 : 0);
         PlayerPrefs.SetInt("FPSLimit", fpsLimitDropdown.value);
         PlayerPrefs.Save();
+        appliedState = CurrentState();
+        RefreshApplyState();
     }
 
     // Set after SetQualityLevel: a quality level carries its own vSyncCount. VSync on overrides the cap.
@@ -370,13 +400,6 @@ public class GraphicsPanel : MonoBehaviour
     {
         QualitySettings.vSyncCount = vsyncOn ? 1 : 0;
         Application.targetFrameRate = FpsLimitValues[fpsLimitIndex];
-    }
-
-    public void SetGraphicsPreset()
-    {
-        int preset = PlayerPrefs.GetInt("GraphicsPreset", 0);
-        if (preset != 0)
-            QualitySettings.SetQualityLevel(preset);
     }
 
     public void ToggleFPSCounter(bool _enable)
@@ -393,15 +416,18 @@ public class GraphicsPanel : MonoBehaviour
         urpAsset.mainLightShadowmapResolution = ShadowResolutions[index];
     }
 
+    // The map camera has its own renderer, so the toggle has to reach the AO on every renderer.
     private void ApplyAmbientOcclusion(bool isOn)
     {
-        if (rendererData == null) return;
-        foreach (var feature in rendererData.rendererFeatures)
+        var urpAsset = GraphicsSettings.defaultRenderPipeline as UniversalRenderPipelineAsset;
+        if (urpAsset == null) return;
+        foreach (ScriptableRendererData data in urpAsset.rendererDataList)
         {
-            if (feature is ScreenSpaceAmbientOcclusion)
+            if (data == null) continue;
+            foreach (var feature in data.rendererFeatures)
             {
-                feature.SetActive(isOn);
-                break;
+                if (feature is ScreenSpaceAmbientOcclusion)
+                    feature.SetActive(isOn);
             }
         }
     }

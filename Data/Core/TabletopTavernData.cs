@@ -731,8 +731,7 @@ namespace TJ
                     allRaces.Add(Race.TaelindorForest);
                     break;
                 default:
-                    Debug.LogError($"GenerateRaceForMap: Invalid bookNumber {bookNumber}");
-                    break;
+                    return GenerateEndlessRace(bookNumber, seed, activeRace);
             }
 
             if(allRaces.Contains(activeRace)) allRaces.Remove(activeRace);
@@ -743,13 +742,39 @@ namespace TJ
                 return activeRace;
             }
 
+            return PickSeededRace(allRaces, seed);
+        }
+        // Endless acts fight every faction the run has not met yet, in a seeded order; once the pool is
+        // empty, everyone but the player's own faction is fair game again. Walks the acts once, so the
+        // cost is linear in the act number.
+        private Race GenerateEndlessRace(int bookNumber, int seed, Race activeRace)
+        {
+            List<Race> everyone = new();
+            foreach (Race race in Enum.GetValues(typeof(Race)))
+                if (race != Race.Special && race != activeRace) everyone.Add(race);
+
+            List<Race> unmet = new(everyone);
+            for (int act = 1; act <= TabletopTavernConstants.FINAL_STORY_ACT; act++)
+                unmet.Remove(GenerateRaceForMap(act, seed, activeRace));
+
+            Race pick = activeRace;
+            for (int act = TabletopTavernConstants.FINAL_STORY_ACT + 1; act <= bookNumber; act++)
+            {
+                if (unmet.Count == 0) unmet = new List<Race>(everyone);
+                pick = PickSeededRace(unmet, seed + act * 13);
+                unmet.Remove(pick);
+            }
+            return pick;
+        }
+        private static Race PickSeededRace(List<Race> pool, int seed)
+        {
             // Seeding is scoped: this is a pure query, so it restores the global
             // UnityEngine.Random state instead of leaving it seeded for whatever draws next.
             UnityEngine.Random.State priorState = UnityEngine.Random.state;
             UnityEngine.Random.InitState(seed);
-            int randomIndex = UnityEngine.Random.Range(0, allRaces.Count);
+            int randomIndex = UnityEngine.Random.Range(0, pool.Count);
             UnityEngine.Random.state = priorState;
-            return allRaces[randomIndex];
+            return pool[randomIndex];
         }
         private Hero GetHeroForRace(Race race, int seed)
         {

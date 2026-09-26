@@ -1,6 +1,7 @@
 using UnityEngine;
 using UnityEngine.UI;
 using Memori.SaveData;
+using Memori.Scenes;
 using TabletopTavern.Analytics;
 
 namespace TJ
@@ -22,7 +23,8 @@ namespace TJ
             if (SaveDataHandler.CampaignSaveExists())
             {
                 var abandonedSave = SaveDataHandler.Load();
-                GameEventTracker.RunEnded(abandonedSave.heroID, (int)abandonedSave.difficultyLevel, RunResult.Abandon, abandonedSave.RunStats.chaptersCompleted);
+                ReportAbandonedBattle(abandonedSave);
+                GameEventTracker.RunClosed(abandonedSave, RunResult.Abandon, "abandonInRun");
                 SaveDataHandler.RecordAbandonedRun(abandonedSave);
             }
             
@@ -37,6 +39,13 @@ namespace TJ
                 // #endif
             }
             settingsManager.AbandonRun();
+        }
+        // Walking away mid-battle is the one way a fought battle ends with no result, so it is reported here.
+        private static void ReportAbandonedBattle(CampaignSaveData run)
+        {
+            if (SceneHandler.Instance.CurrentGameState != GameStateEnum.Battle || !BattleManager.HasInstance) return;
+            if (BattleManager.Instance.BattleSaveManager.IsCustomBattle) return;
+            GameEventTracker.BattleEnded(run, GameEventTracker.TryBuild("battleEnded", () => BattleManager.Instance.ArmySpawnManager.BuildAbandonReport()));
         }
         
     }

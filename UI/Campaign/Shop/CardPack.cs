@@ -113,11 +113,6 @@ namespace TJ.Shop
             {
                 case 0:
                 {
-                    //DifficultyMod 5
-                    if (CampaignManager.Instance.CampaignSaveManager.SaveData.difficultyLevel < TT_Difficulty.Knight) 
-                    {
-                        cost += 2;
-                    }
                     if (CampaignManager.Instance.GearManager.CheckForGear(GearID.PrivateeringPapers))
                     {
                         if (shopPanel != null) {
@@ -150,11 +145,6 @@ namespace TJ.Shop
             if(activeHeroID == 3 && cardPackData.packID == 1)
             {
                 cost = 5;
-            }
-            else
-            {
-                //DifficultyMod 4
-                cost += CampaignManager.Instance.CampaignSaveManager.SaveData.difficultyLevel >= TT_Difficulty.Squire ? 2 : 0;
             }
 
             cost -= _discount;

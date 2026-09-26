@@ -11,20 +11,15 @@ using UnityEngine.UI;
 namespace TJ.MainMenu
 {
     /// <summary>
-    /// One of the four spell slots in the warband loadout. Slot 0 holds the hero's signature spell
+    /// One of the three spell slots in the warband loadout. Slot 0 holds the hero's signature spell
     /// and is pinned: it shows a pin and cannot be armed or swapped.
     ///
-    /// Built from the same layers as <see cref="SpellBrowseSlot"/> and follows the same rule -
-    /// INTERIOR is chromatic and carries the faction (wash, rail, icon), FRAME is achromatic and
-    /// carries state. The two differ only in behaviour: a browse tile represents a SPELL you may take,
-    /// this represents a SLOT you may arm.
+    /// Drawn like the battle hotbar tile (<see cref="SpellCastButton"/>), so a spell looks the same in
+    /// run setup and in battle: the border rests in the faction colour, hover lightens it, and the armed
+    /// slot gets a white border with a faction-coloured glow. The cost gem shows what it spends.
     ///
-    /// The frame used to be painted gold when focused. That is exactly the collision the system exists
-    /// to remove - gold is Taelindor's hue - so focus now reads on <see cref="ColorData.SpellFrameActive"/>
-    /// plus the highlight marks.
-    ///
-    /// A loadout is always exactly four spells. Slots 1-3 are replaced in place and never emptied,
-    /// so emptyState only ever shows if a slot somehow resolves to no asset at all.
+    /// Slots 1-2 are replaced in place and never emptied, so emptyState only ever shows if a slot
+    /// somehow resolves to no asset at all.
     /// </summary>
     [RequireComponent(typeof(MemoriTooltipTrigger))]
     public class SpellLoadoutSlot : MonoBehaviour, IPointerEnterHandler, IPointerExitHandler
@@ -33,11 +28,10 @@ namespace TJ.MainMenu
 
         [Header("Interior (faction)")]
         [SerializeField] private Image spellIcon;
-        [SerializeField] private Image raceGradientImage;
-        [SerializeField] private Image raceRailImage;
 
         [Header("Frame (state)")]
         [SerializeField] private Image frameImage;
+        // Lit behind the tile while this slot is armed; tinted in the spell's faction colour.
         [SerializeField] private GameObject selectedHighlight;
 
         [Header("Marks")]
@@ -50,14 +44,18 @@ namespace TJ.MainMenu
         // exactly can have these deleted from the prefab.
         [SerializeField] private TMP_Text spellNameText;
         [SerializeField] private TMP_Text slotNumberText;
+        // Optional. Hidden for an empty or locked slot and for a spell that costs no mana.
+        [SerializeField] private GameObject manaCostGem;
+        [SerializeField] private TMP_Text manaCostText;
 
-        private const float RAIL_ALPHA = 0.9f;
+        private const float LOCKED_NAME_ALPHA = 0.5f;
 
         private MemoriTooltipTrigger tooltipTrigger;
         private SpellData spellData;
         private int slotIndex;
         private Action<int> onSlotClicked;
         private Action<SpellData> onHovered;
+        private Color factionColour;
         private bool cachedFocused;
         private bool cachedHovered;
 
@@ -89,6 +87,7 @@ namespace TJ.MainMenu
             emptyState.SetActive(isEmpty && !cachedLocked);
             spellIcon.enabled = !isEmpty;
             ApplyFactionColour(isEmpty);
+            ApplyManaCost(isEmpty);
 
             slotButton.onClick.RemoveAllListeners();
             slotButton.onClick.AddListener(() => onSlotClicked?.Invoke(slotIndex));
@@ -96,6 +95,8 @@ namespace TJ.MainMenu
             slotButton.interactable = !IsPinned && !cachedLocked;
 
             SetFocused(false);
+
+            if (spellNameText != null) spellNameText.alpha = cachedLocked ? LOCKED_NAME_ALPHA : 1f;
 
             if (cachedLocked)
             {
@@ -116,39 +117,31 @@ namespace TJ.MainMenu
             spellIcon.sprite = spellData.SpellSprite;
             string localizedName = LocalizationManager.Instance.GetText(spellData.Spell.ToString());
             if (spellNameText != null) spellNameText.text = localizedName;
-            tooltipTrigger.SetUpToolTip(localizedName, BuildTooltipDescription());
+            tooltipTrigger.SetContentProvider(() => SpellTooltip.Build(spellData, new SpellTooltip.Context { Pinned = IsPinned }));
         }
 
         /// <summary>
-        /// Paints the three interior layers from the display ramp, the same values the grimoire tile
-        /// and the battle hotbar use, so a spell keeps one colour from the grimoire through its slot
-        /// and into battle. Deliberately NOT GetRacePassiveTint: that is the large-fill pair, authored
-        /// for banner backgrounds, and four of its nine colours are too dark to sit behind a glyph.
-        ///
-        /// Disabled rather than recoloured on an empty slot, or an emptied slot would keep the removed
-        /// spell's colour.
+        /// Uses the display ramp, the same colour the grimoire tile and the battle hotbar use, so a spell
+        /// keeps one colour from the grimoire through its slot and into battle.
         /// </summary>
         private void ApplyFactionColour(bool isEmpty)
         {
-            if (raceGradientImage != null) raceGradientImage.enabled = !isEmpty;
-            if (raceRailImage != null) raceRailImage.enabled = !isEmpty;
             if (isEmpty) return;
 
-            Color factionColour = ColorData.GetRaceDisplayColor(spellData.Race);
-
+            factionColour = ColorData.GetRaceDisplayColor(spellData.Race);
             spellIcon.color = factionColour;
-            if (raceGradientImage != null) raceGradientImage.color = ColorData.GetRaceDisplayTint(spellData.Race);
-            if (raceRailImage != null) raceRailImage.color = ColorData.WithAlpha255(factionColour, RAIL_ALPHA * 255f);
+
+            Image glow = selectedHighlight.GetComponent<Image>();
+            if (glow != null) glow.color = factionColour;
         }
 
-        private string BuildTooltipDescription()
+        private void ApplyManaCost(bool isEmpty)
         {
-            string description = spellData.GetLocalizedSpellDescription();
-            if (IsPinned)
-            {
-                description += $"\n\n<color={ColorData.Tier4}>{LocalizationManager.Instance.GetText("SignatureSpellPinned")}</color>";
-            }
-            return description;
+            if (manaCostGem == null) return;
+
+            bool showCost = !isEmpty && !cachedLocked && spellData.SpellManaCost > 0;
+            manaCostGem.SetActive(showCost);
+            if (showCost && manaCostText != null) manaCostText.text = spellData.SpellManaCost.ToString();
         }
 
         public void SetFocused(bool isFocused)
@@ -159,14 +152,16 @@ namespace TJ.MainMenu
         }
 
         /// <summary>
-        /// The whole state channel, achromatic by design. A pinned or locked slot never shows the
-        /// hover frame - neither can be armed, so offering the affordance would be a lie.
+        /// A pinned or locked slot never shows the hover frame - neither can be armed, so offering the
+        /// affordance would be a lie.
         /// </summary>
         private void RefreshFrame()
         {
             bool canArm = !IsPinned && !cachedLocked;
+            bool holdsSpell = spellData != null && !cachedLocked;
             frameImage.color = cachedFocused          ? ColorData.SpellFrameActive
                              : cachedHovered && canArm ? ColorData.SpellFrameHover
+                             : holdsSpell              ? factionColour
                                                        : ColorData.SpellFrameRest;
         }
 

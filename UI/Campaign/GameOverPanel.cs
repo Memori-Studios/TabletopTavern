@@ -35,6 +35,8 @@ public class GameOverPanel : MonoBehaviour
     [Header("Act Complete")]
     [SerializeField] private GameObject actCompleteObject;
     [SerializeField] private MemoriButtonV2 continueButton;
+    // Replace Continue from the last story act on: keep marching, or end the run as a win.
+    [SerializeField] private MemoriButtonV2 marchOnButton, claimVictoryButton;
     [SerializeField] private TMP_Text actCompleteTextPart1, actCompleteTextPart2,  actCompleteTextPart3;
 
     [Header("Hero Unlock")]
@@ -56,6 +58,8 @@ public class GameOverPanel : MonoBehaviour
         defeatObject.SetActive(false);
         actCompleteObject.SetActive(false);
         continueButton.gameObject.SetActive(false);
+        marchOnButton.gameObject.SetActive(false);
+        claimVictoryButton.gameObject.SetActive(false);
         if (heroUnlockRow != null) heroUnlockRow.CGDisable();
         if (heroUnlockContinueButton != null) heroUnlockContinueButton.gameObject.SetActive(false);
     }
@@ -69,7 +73,10 @@ public class GameOverPanel : MonoBehaviour
         if (_beatDemo)
         {
             int currentHeroID = saveData.heroID;
-            bool isFirstCompletion = SaveDataHandler.GetHeroDifficultiesCompleted(currentHeroID).Count == 0;
+            // A banked win already wrote the completion, so the save remembers whether it was the first.
+            bool isFirstCompletion = saveData.victoryBanked
+                ? saveData.victoryWasFirstHeroCompletion
+                : SaveDataHandler.GetHeroDifficultiesCompleted(currentHeroID).Count == 0;
             if (isFirstCompletion)
             {
                 Hero nextHero = HeroData.GetHeroByID(currentHeroID + 1);
@@ -92,12 +99,11 @@ public class GameOverPanel : MonoBehaviour
 
         //get selected difficulty data
         DifficultyLevel difficultyData = DifficultyData.GetDifficultyLevelData(_difficulty);
-        string levelLocalized = LocalizationManager.Instance.GetText("Level");
         string difficultyNamestring = LocalizationManager.Instance.GetText(difficultyData.difficultyName);
         string chaptersLocalized = LocalizationManager.Instance.GetText("Chapters");
         string actsLocalized = LocalizationManager.Instance.GetText("Acts");
 
-        difficultyNameText.text = $"{levelLocalized} {(int)_difficulty}: {difficultyNamestring}";
+        difficultyNameText.text = difficultyNamestring;
 
         chaptersCompletedText.text = runStats.chaptersCompleted.ToString();
         goldEarnedText.text = runStats.goldEarned.ToString();
@@ -106,7 +112,11 @@ public class GameOverPanel : MonoBehaviour
         renownEarnedText.text = $"<color={ColorData.Tier4}>{renownAward.total}</color>";
         renownBreakdownText.text = $"{renownAward.chaptersCompleted} {chaptersLocalized}  |  {renownAward.actsCompleted} {actsLocalized} (+{renownAward.actRenown})  |  {difficultyNamestring} (x{renownAward.difficultyMultiplier:0.00})";
 
-        GameEventTracker.RunEnded(saveData.heroID, (int)saveData.difficultyLevel, _beatDemo ? RunResult.Win : RunResult.Loss, runStats.chaptersCompleted);
+        // A banked victory already reported its win when act 3 fell; closing it reports the endless march, if any.
+        string endReason = _beatDemo
+            ? (saveData.victoryBanked ? "claim" : "win")
+            : saveData.selectedNodeType == NodeType.Town ? "garrisonLoss" : "fieldLoss";
+        GameEventTracker.RunClosed(saveData, _beatDemo ? RunResult.Win : RunResult.Loss, endReason, renownAward.total);
 
         CampaignManager.Instance.CampaignSaveManager.DeleteCampaignSave();
 
@@ -121,6 +131,10 @@ public class GameOverPanel : MonoBehaviour
         string defeatedLocalized = LocalizationManager.Instance.GetText("Defeated");
         demoCompletionText.text = beatDemo ? demoCompletedLocalized : defeatedLocalized;
         IAudioRequester.Instance.SwitchToGameOverMusic(beatDemo);
+        // The Act Complete buttons sit beside the results card; a claimed victory arrives from that screen.
+        continueButton.gameObject.SetActive(false);
+        marchOnButton.gameObject.SetActive(false);
+        claimVictoryButton.gameObject.SetActive(false);
         mainGameOverGroup.CGEnable();
         defeatObject.SetActive(!beatDemo);
         victoryObject.SetActive(beatDemo);
@@ -130,13 +144,14 @@ public class GameOverPanel : MonoBehaviour
         
         for (int i = 0; i < difficultyCrests.Length; i++)
         {
-            difficultyCrests[i].SetActive(i == (int)_difficulty - 1);
+            difficultyCrests[i].SetActive(i == DifficultyData.GetDifficultyLevelData(_difficulty).crestIndex);
         }
         
         await Task.Delay(500);
         if (_unlocksNewHero && heroUnlockRow != null)
             await ShowHeroUnlockScreen();
         await FadeInStatsSequentially();
+        TutorialManager.Instance.LoadStepsFromRandomSpot(new TutorialStep[1] { TutorialData.RenownCarriesOver });
     }
 
     private async Task FadeInStatsSequentially()
@@ -201,11 +216,24 @@ public class GameOverPanel : MonoBehaviour
         actCompleteTextPart2.text = totalText;
         actCompleteTextPart3.text = totalText;
 
+        bool offerMarchOn = actsCompleted >= TabletopTavernConstants.FINAL_STORY_ACT
+            && DifficultyRules.EndlessOffered(CampaignManager.Instance.CampaignSaveManager.SaveData.difficultyLevel);
+#if DEMO
+        offerMarchOn = false;
+#endif
         continueButton.Button.onClick.RemoveAllListeners();
         continueButton.Button.onClick.AddListener(CampaignManager.Instance.MapSceneUIManager.CompleteLayer);
+        marchOnButton.Button.onClick.RemoveAllListeners();
+        marchOnButton.Button.onClick.AddListener(CampaignManager.Instance.MapSceneUIManager.CompleteLayer);
+        // The Spell Update blocker is a child of the button, so a click on it would bubble up to March On.
+        marchOnButton.Button.interactable = DifficultyRules.EndlessUnlocked;
+        claimVictoryButton.Button.onClick.RemoveAllListeners();
+        claimVictoryButton.Button.onClick.AddListener(CampaignManager.Instance.MapSceneUIManager.ClaimVictory);
 
         await Task.Delay(1000);
-        continueButton.gameObject.SetActive(true);
+        continueButton.gameObject.SetActive(!offerMarchOn);
+        marchOnButton.gameObject.SetActive(offerMarchOn);
+        claimVictoryButton.gameObject.SetActive(offerMarchOn);
     }
     public async void ExitAfterFadeOut()
     {

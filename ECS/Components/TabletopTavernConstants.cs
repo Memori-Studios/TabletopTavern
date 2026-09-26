@@ -154,9 +154,12 @@ public static class TabletopTavernConstants
     // mid-cost hero spell per act. Decided on TT-3, 2026-09-14.
     public const int SPELL_MANA_POOL_PER_ACT = 3;
     // Custom battles are the sandbox: they ignore the loadout slot locks and let the player pick all
-    // four spells, so they always get the largest pool a campaign can reach (act 3 with both Arcane
-    // Reserves nodes) regardless of the account's Renown. Keep this equal to that maximum.
+    // four spells, so they always get the largest pool the story campaign can reach (act 3 with both
+    // Arcane Reserves nodes) regardless of the account's Renown. Endless acts may climb past this, up to
+    // SPELL_MANA_POOL_CAP.
     public const int SPELL_MANA_POOL_CUSTOM_BATTLE = 20;
+    // The act-driven part of the pool stops growing here so endless acts stay countable at a glance.
+    public const int SPELL_MANA_POOL_CAP = 25;
     // Extra mana one Mana Draught adds to the next fought campaign battle. Draughts stack, so keep this
     // at half a base pool: one or two extra casts per draught.
     public const int SPELL_MANA_POOL_DRAUGHT = 5;
@@ -165,6 +168,19 @@ public static class TabletopTavernConstants
     public const float RESERVES_HEAL_AMOUNT = 0.5f;
     public const float ENDLESS_HORDES_HEAL_AMOUNT = 0.30f;
     public const float CONSUME_CAPTIVES_HEAL_AMOUNT = 0.33f;
+
+    // Endless campaign: acts past the last story act. The win is banked when act 3 falls and the player
+    // may march on; every extra act adds squads and veteran odds on top of the act 3 tables.
+    public const int FINAL_STORY_ACT = 3;
+    // The enemy deployment formation has 15 slots (three rows of five); a 16th squad is stranded at staging.
+    public const int ENDLESS_ENEMY_SQUAD_CAP = 15;
+    public const float ENDLESS_PRESTIGE_CHANCE_PER_ACT = 0.10f;
+    public const float ENDLESS_PRESTIGE_CHANCE_CAP = 0.90f;
+    public const float ENDLESS_PRESTIGE_TWO_CHANCE_CAP = 0.80f;
+    public const int ENDLESS_GOLD_PER_ACT = 2;
+    public const int ENDLESS_GOLD_CAP = 10;
+    public const int ENDLESS_INTEREST_BONUS_CAP = 5;
+    public static int EndlessActs(int bookNumber) => System.Math.Max(0, bookNumber - FINAL_STORY_ACT);
 
     //Prestige: melee gains MeleeAttack/MeleeDefense/Leadership, ranged gains Range/Accuracy/Ammunition, all scaled by prestige level
     public const int PRESTIGE_BONUS = 5;
@@ -341,8 +357,8 @@ public static class TabletopTavernConstants
 
     #region Player battle defaults
     // Settings-screen defaults, applied at spawn so a player squad is born in the stance that was
-    // asked for rather than switched into it a frame later. The keys match the Settings Toggle v2
-    // rows under Game Settings in Core.unity. Enemy squads never read these.
+    // asked for rather than switched into it a frame later. The keys match the SettingsToggleV2
+    // rows on the Settings Game page in Core.unity. Enemy squads never read these.
     public const string PREF_DEFAULT_CEASE_FIRE = "defaultSquadCeaseFire";
     public const string PREF_DEFAULT_FIRE_MODE = "defaultSquadFireMode";
 

@@ -9,7 +9,7 @@ namespace TJ
     {
         Blank,
         SelectNode,
-        SelectToBattle,
+        SelectToBattle, // No step uses it; kept because the ordinals after it are serialized.
         PrestigeUnit,
         DisbandUnit,
         SellGear,
@@ -33,7 +33,15 @@ namespace TJ
         EventExplanation,
         ConsumableUsage,
         Mage,
-        EnemyArtillery
+        EnemyArtillery,
+        PostBattleChoices,
+        EnemyOutriders,
+        FogWeather,
+        SnowWeather,
+        FreeCamera,
+        CeaseFire,
+        RenownCarriesOver,
+        RenameSquad
     }
     public static class TutorialData
     {
@@ -164,6 +172,52 @@ namespace TJ
         {
             tutorialStepEnum = TutorialStepEnum.EnemyArtillery,
             stepID = 30,
+        };
+        // Engagement panel, first time the player claims rewards after a win.
+        public static TutorialStep PostBattleChoices = new()
+        {
+            tutorialStepEnum = TutorialStepEnum.PostBattleChoices,
+            stepID = 31,
+        };
+        // Engagement panel, first time the enemy roster contains Outriders.
+        public static TutorialStep EnemyOutriders = new()
+        {
+            tutorialStepEnum = TutorialStepEnum.EnemyOutriders,
+            stepID = 32,
+        };
+        public static TutorialStep FogWeather = new()
+        {
+            tutorialStepEnum = TutorialStepEnum.FogWeather,
+            stepID = 33,
+        };
+        public static TutorialStep SnowWeather = new()
+        {
+            tutorialStepEnum = TutorialStepEnum.SnowWeather,
+            stepID = 34,
+        };
+        // Callout on the map HUD's free camera button, after the first node is completed.
+        public static TutorialStep FreeCamera = new()
+        {
+            tutorialStepEnum = TutorialStepEnum.FreeCamera,
+            stepID = 35,
+        };
+        // Callout on the battle Cease Fire button, first time a shooter is selected.
+        public static TutorialStep CeaseFire = new()
+        {
+            tutorialStepEnum = TutorialStepEnum.CeaseFire,
+            stepID = 36,
+        };
+        // Game Over screen, first run end: Renown is kept and spent under Upgrades.
+        public static TutorialStep RenownCarriesOver = new()
+        {
+            tutorialStepEnum = TutorialStepEnum.RenownCarriesOver,
+            stepID = 37,
+        };
+        // Map HUD, first time a single unit card is selected while no other tip is showing.
+        public static TutorialStep RenameSquad = new()
+        {
+            tutorialStepEnum = TutorialStepEnum.RenameSquad,
+            stepID = 38,
         };
     }
 }

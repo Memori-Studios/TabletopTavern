@@ -121,10 +121,6 @@ public enum UnitName
     public int2 widthAndDepth;
     public quaternion squadRotation;
 }
-[System.Serializable] public struct SquadSaveData {
-    public List<SquadSpawnData> squads;
-    public List<SquadSpawnData> enemies;
-}
 [System.Serializable] public struct UnitFormationNoise {
     public UnitName unitName;
     [Range(0, 1)] public float noise;

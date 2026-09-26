@@ -3,6 +3,7 @@ using UnityEngine;
 using System;
 using System.Collections.Generic;
 using Unity.Mathematics;
+using TabletopTavern.Analytics;
 
 namespace TJ.Engagement
 {
@@ -60,16 +61,19 @@ namespace TJ.Engagement
         public readonly int HeroID;
         public readonly Race HeroRace;
         public readonly Race EnemyRace;
-        // The live Bushido Discipline gate: every player squad is Sakura Dynasty.
+        // The live Bushido Discipline gate: every squad on the hero's side is Sakura Dynasty.
         public readonly bool OnlySakuraUnits;
+        // The side this hero leads; squads on the other side never take its rules.
+        public readonly Team Side;
 
-        public AutoResolveHeroContext(int heroID, Race heroRace, Race enemyRace, bool onlySakuraUnits)
+        public AutoResolveHeroContext(int heroID, Race heroRace, Race enemyRace, bool onlySakuraUnits, Team side = Team.Player)
         {
             HasHero = heroID != -1;
             HeroID = heroID;
             HeroRace = heroRace;
             EnemyRace = enemyRace;
             OnlySakuraUnits = onlySakuraUnits;
+            Side = side;
         }
 
         public static AutoResolveHeroContext None => default;
@@ -86,6 +90,19 @@ namespace TJ.Engagement
                 foreach (SquadToLoad squad in playerArmy)
                     if (TabletopTavernData.Instance.GetRaceFromUnitName(squad.UnitName) != Race.SakuraDynasty) { onlySakura = false; break; }
             return new AutoResolveHeroContext(heroID, HeroData.GetRaceFromHero(heroID), enemyRace, onlySakura);
+        }
+
+        // The enemy warlord saved with the army (EnemyWarlord), leading the enemy side. Same inputs
+        // BattleCleanUpManager gives the live battle: his EnemyRace rules read the player's hero race.
+        public static AutoResolveHeroContext ForWarlord(int warlordHeroID, int playerHeroID, SquadToLoad[] enemyArmy)
+        {
+            if (warlordHeroID <= 0) return None;
+            Race playerRace = playerHeroID == -1 ? Race.Special : HeroData.GetRaceFromHero(playerHeroID);
+            bool onlySakura = enemyArmy != null && enemyArmy.Length > 0;
+            if (onlySakura)
+                foreach (SquadToLoad squad in enemyArmy)
+                    if (TabletopTavernData.Instance.GetRaceFromUnitName(squad.UnitName) != Race.SakuraDynasty) { onlySakura = false; break; }
+            return new AutoResolveHeroContext(warlordHeroID, HeroData.GetRaceFromHero(warlordHeroID), playerRace, onlySakura, Team.Enemy);
         }
     }
     public class AutoResolveBattleManager : MonoBehaviour
@@ -288,11 +305,11 @@ namespace TJ.Engagement
 
         if (rain) accuracyMultiplier *= WeatherRuleData.Rain.AutoResolveAccuracyModifier;
 
-        // Hero rules, player squads only, ahead of gear as in UnitSetUpSystem. Each stat lands on
-        // the same local the rest of this method reads, so a rule reaches the simulation the way
+        // Hero rules for the side the hero leads, ahead of gear as in UnitSetUpSystem. Each stat lands
+        // on the same local the rest of this method reads, so a rule reaches the simulation the way
         // it reaches the live battle. Accuracy rules are in percent points; this method holds a
         // fraction.
-        if (hero.HasHero && _team == Team.Player)
+        if (hero.HasHero && _team == hero.Side)
         {
             float HeroBonus(UnitStat stat, float current)
             {
@@ -340,7 +357,7 @@ namespace TJ.Engagement
                     WeaponStrength += GearData.GetGear(GearID.Glaives).GearModifierValue;
                 if(hasGear(GearID.TexanBBQ) && TabletopTavernConstants.FightsInMelee(unitType))
                     WeaponStrength += GearData.GetGear(GearID.TexanBBQ).GearModifierValue;
-                if(hasGear(GearID.BallisticCharts)) 
+                if(hasGear(GearID.BallisticCharts) && unitType == UnitType.Ranged)
                     accuracy += (GearData.GetGear(GearID.BallisticCharts).GearModifierValue/100f);
                 if(hasGear(GearID.ConscriptionOrders) && squadStats.RarityTier == UnitRarity.Common) {
                     meleeAttack += GearData.GetGear(GearID.ConscriptionOrders).GearModifierValue;
@@ -458,8 +475,11 @@ namespace TJ.Engagement
             playerAutoResolveStats[i] = GenerateAutoResolveSquadStats(playerArmy[i], i, Team.Player, CampaignManager.Instance.CampaignSaveManager, hero: hero);
             // Debug.Log($"Squad {playerArmy[i].UnitName} has {playerAutoResolveStats[i].UnitsAlive} units alive");
         }
+        AutoResolveHeroContext warlord = AutoResolveHeroContext.ForWarlord(
+            CampaignManager.Instance.CampaignSaveManager.SaveData.enemyWarlordHeroID,
+            CampaignManager.Instance.CampaignSaveManager.SaveData.heroID, enemyArmy);
         for (int i = 0; i < enemyArmy.Length; i++) {
-            enemyAutoResolveStats[i] = GenerateAutoResolveSquadStats(enemyArmy[i], i + playerArmy.Length, Team.Enemy, CampaignManager.Instance.CampaignSaveManager);
+            enemyAutoResolveStats[i] = GenerateAutoResolveSquadStats(enemyArmy[i], i + playerArmy.Length, Team.Enemy, CampaignManager.Instance.CampaignSaveManager, hero: warlord);
             // Debug.Log($"Squad {enemyArmy[i].UnitName} has {enemyAutoResolveStats[i].UnitsAlive} units alive");
         }
     }
@@ -874,6 +894,44 @@ namespace TJ.Engagement
         }
         return new();
     }
+    // The simulation's own counts. Auto-resolve has no deployment, mana or player orders to report.
+    private AnalyticsBattleReport BuildBattleReport()
+    {
+        var report = new AnalyticsBattleReport
+        {
+            Mode = "auto",
+            Result = enemyArmyIsDefeated ? "Win" : "Loss",
+            Garrison = _isGarrisonBattle,
+            EnemyRace = enemyArmy.Length > 0 ? TabletopTavernData.Instance.GetRaceFromUnitName(enemyArmy[0].UnitName).ToString() : null,
+        };
+        AddSquadResults(report.Player, playerAutoResolveStats, playerArmy, true);
+        AddSquadResults(report.Enemy, enemyAutoResolveStats, enemyArmy, false);
+        return report;
+    }
+    private static void AddSquadResults(List<AnalyticsSquadResult> results, AutoResolveSquad[] stats, SquadToLoad[] army, bool isPlayer)
+    {
+        for (int i = 0; i < stats.Length; i++)
+        {
+            for (int j = 0; j < army.Length; j++)
+            {
+                if (isPlayer && army[j].UnitIndex == -1) continue;
+                if (stats[i].UniqueID != army[j].UniqueID) continue;
+                int unitsEnd = stats[i].healthPerKill > 0 ? math.max(0, stats[i].finalHealth) / stats[i].healthPerKill : stats[i].UnitsAlive;
+                results.Add(new AnalyticsSquadResult
+                {
+                    Unit = army[j].UnitName.ToString(),
+                    Slot = isPlayer ? army[j].UnitIndex : -1,
+                    Prestige = army[j].UnitPrestige,
+                    Trait = army[j].PrestigeTrait.ToString(),
+                    UnitsStart = stats[i].maxUnits,
+                    UnitsEnd = unitsEnd,
+                    Kills = stats[i].UnitsSlain,
+                    Status = unitsEnd <= 0 ? "Dead" : stats[i].Broken ? "Broke" : "Stand",
+                });
+                break;
+            }
+        }
+    }
     private void RecordResults(bool _save)
     {
         string playerKey = GetPlayerArmyKey();
@@ -948,7 +1006,8 @@ namespace TJ.Engagement
                 Debug.Log($"[AutoResolve] Result cached. Cache size: {_resultCache.Count}. Player defeated: {playerArmyIsDefeated}, Enemy defeated: {enemyArmyIsDefeated}");
             }
             if(_save){
-                CampaignManager.Instance.CampaignSaveManager.SaveSquadsPostAutoresolve(playerArmy, enemyArmy, enemyArmyIsDefeated, squadKillsStored, squadLossesStored);
+                AnalyticsBattleReport report = GameEventTracker.TryBuild("battleEnded", () => BuildBattleReport());
+                CampaignManager.Instance.CampaignSaveManager.SaveSquadsPostAutoresolve(playerArmy, enemyArmy, enemyArmyIsDefeated, squadKillsStored, squadLossesStored, report);
             }
         } else {
             //reset unit counts to max unit counts this is just for testing in editor

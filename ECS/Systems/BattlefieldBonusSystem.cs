@@ -23,7 +23,6 @@ partial struct BattlefieldBonusSystem : ISystem
     private ComponentLookup<InRainTag> _inRainLookup;
     private ComponentLookup<InSnowTag> _inSnowLookup;
     private ComponentLookup<InForestTag> _inForestLookup;
-    private ComponentLookup<RallyingTag> _rallyingLookup;
     private ComponentLookup<ChargeEmpoweredTag> _chargeEmpoweredLookup;
     private ComponentLookup<LargeTag> _largeTagLookup;
     private ComponentLookup<LocalTransform> _existsLookup;
@@ -52,7 +51,6 @@ partial struct BattlefieldBonusSystem : ISystem
         _inRainLookup            = state.GetComponentLookup<InRainTag>(true);
         _inSnowLookup            = state.GetComponentLookup<InSnowTag>(true);
         _inForestLookup          = state.GetComponentLookup<InForestTag>(true);
-        _rallyingLookup          = state.GetComponentLookup<RallyingTag>(true);
         _chargeEmpoweredLookup   = state.GetComponentLookup<ChargeEmpoweredTag>(true);
         _largeTagLookup          = state.GetComponentLookup<LargeTag>(true);
         _existsLookup            = state.GetComponentLookup<LocalTransform>(true);
@@ -81,7 +79,6 @@ partial struct BattlefieldBonusSystem : ISystem
         _inRainLookup.Update(ref state);
         _inSnowLookup.Update(ref state);
         _inForestLookup.Update(ref state);
-        _rallyingLookup.Update(ref state);
         _chargeEmpoweredLookup.Update(ref state);
         _largeTagLookup.Update(ref state);
         _existsLookup.Update(ref state);
@@ -117,7 +114,6 @@ partial struct BattlefieldBonusSystem : ISystem
             InRainLookup            = _inRainLookup,
             InSnowLookup            = _inSnowLookup,
             InForestLookup          = _inForestLookup,
-            RallyingLookup          = _rallyingLookup,
             ChargeEmpoweredLookup   = _chargeEmpoweredLookup,
             LargeTagLookup          = _largeTagLookup,
             ExistsLookup            = _existsLookup,
@@ -153,7 +149,6 @@ partial struct BattlefieldBonusJob : IJobEntity
     [ReadOnly] public ComponentLookup<InRainTag>                   InRainLookup;
     [ReadOnly] public ComponentLookup<InSnowTag>                   InSnowLookup;
     [ReadOnly] public ComponentLookup<InForestTag>                 InForestLookup;
-    [ReadOnly] public ComponentLookup<RallyingTag>                 RallyingLookup;
     [ReadOnly] public ComponentLookup<ChargeEmpoweredTag>          ChargeEmpoweredLookup;
     [ReadOnly] public ComponentLookup<LargeTag>                    LargeTagLookup;
     [ReadOnly] public ComponentLookup<LocalTransform>              ExistsLookup;
@@ -165,6 +160,35 @@ partial struct BattlefieldBonusJob : IJobEntity
     [NativeDisableParallelForRestriction] public ComponentLookup<MoraleComponent> MoraleComponentLookup;
     [ReadOnly] public double ElapsedTime;
     public EntityCommandBuffer.ParallelWriter Ecb;
+
+    // Applied elements of one bonus kind on this squad, skipping skipIndex. The sum counts each spell once,
+    // so a recast of the same spell refreshes rather than doubles, while different spells add up.
+    static int CountApplied(DynamicBuffer<BattlefieldBonusBufferElement> bonusBuffer, BattlefieldBonusEnum kind, int skipIndex, out float valueSum)
+    {
+        int count = 0;
+        valueSum = 0f;
+        for (int k = 0; k < bonusBuffer.Length; k++)
+        {
+            if (k == skipIndex) continue;
+            BattlefieldBonus other = bonusBuffer[k].Value;
+            if (!other.Applied || other.BattlefieldBonusEnum != kind) continue;
+            count++;
+
+            bool sameSpellCounted = false;
+            for (int j = 0; j < k && other.StatusSpellId != 0; j++)
+            {
+                if (j == skipIndex) continue;
+                BattlefieldBonus earlier = bonusBuffer[j].Value;
+                if (earlier.Applied && earlier.BattlefieldBonusEnum == kind && earlier.StatusSpellId == other.StatusSpellId)
+                {
+                    sameSpellCounted = true;
+                    break;
+                }
+            }
+            if (!sameSpellCounted) valueSum += other.Value;
+        }
+        return count;
+    }
 
     public void Execute([ChunkIndexInQuery] int sortKey, Entity entity,
         in SquadMovementComponent squadMovement,
@@ -430,16 +454,14 @@ partial struct BattlefieldBonusJob : IJobEntity
                 else if (bonus.BattlefieldBonusEnum == BattlefieldBonusEnum.LesserMoraleSpell)
                 {
                     // Squad-level, like Snow above - morale lives on the squad entity, not its units,
-                    // so this cannot be a case in the per-unit UnitStat switch below. The tag carries a
-                    // regen rate that MoraleUpdateJob adds each frame; removal is handled in the
-                    // distance/duration block further down and needs no reversal arithmetic.
+                    // so this cannot be a case in the per-unit UnitStat switch below. The tag carries the
+                    // summed rate of every applied morale spell, which MoraleUpdateJob adds each frame;
+                    // AddComponent overwrites the value when the tag is already there.
                     bonus.Applied = true;
                     bonusBuffer.RemoveAt(i--);
                     bonusBuffer.Add(new BattlefieldBonusBufferElement { Value = bonus });
-                    if (!RallyingLookup.HasComponent(entity))
-                    {
-                        Ecb.AddComponent(sortKey, entity, new RallyingTag { MoralePerSecond = bonus.Value });
-                    }
+                    CountApplied(bonusBuffer, BattlefieldBonusEnum.LesserMoraleSpell, -1, out float moraleRate);
+                    Ecb.AddComponent(sortKey, entity, new RallyingTag { MoralePerSecond = moraleRate });
                 }
                 else if (bonus.BattlefieldBonusEnum == BattlefieldBonusEnum.RallyTheBanners)
                 {
@@ -590,16 +612,24 @@ partial struct BattlefieldBonusJob : IJobEntity
                     if (bonus.BattlefieldBonusEnum == BattlefieldBonusEnum.Forest && InForestLookup.HasComponent(entity))
                         Ecb.RemoveComponent<InForestTag>(sortKey, entity);
 
-                    // Squad left the radius or the spell expired - drop the regen tag. The per-unit
-                    // loop below no-ops for this bonus since there is no UnitStat.Leadership case.
+                    // Squad left the radius or the spell expired - drop this spell's share of the regen
+                    // tag, and the tag itself only when no other morale spell is still applied. The
+                    // per-unit loop below no-ops for this bonus since there is no UnitStat.Leadership case.
                     if (bonus.BattlefieldBonusEnum == BattlefieldBonusEnum.LesserMoraleSpell)
-                        Ecb.RemoveComponent<RallyingTag>(sortKey, entity);
+                    {
+                        if (CountApplied(bonusBuffer, BattlefieldBonusEnum.LesserMoraleSpell, i, out float remainingRate) == 0)
+                            Ecb.RemoveComponent<RallyingTag>(sortKey, entity);
+                        else
+                            Ecb.AddComponent(sortKey, entity, new RallyingTag { MoralePerSecond = remainingRate });
+                    }
 
                     // Same shape as the regen tag above - no UnitStat.ChargeBonus case exists in the
                     // per-unit loop below, so dropping the tag is the whole reversal. Any charge bonus
                     // already granted stays until RemoveChargeBonusTag strips it, which is correct:
                     // the banner empowered that charge, and expiry should not claw it back mid-impact.
-                    if (bonus.BattlefieldBonusEnum == BattlefieldBonusEnum.RallyTheBanners)
+                    // A second banner still running keeps the tag.
+                    if (bonus.BattlefieldBonusEnum == BattlefieldBonusEnum.RallyTheBanners
+                        && CountApplied(bonusBuffer, BattlefieldBonusEnum.RallyTheBanners, i, out _) == 0)
                         Ecb.RemoveComponent<ChargeEmpoweredTag>(sortKey, entity);
 
                     for (int j = 0; j < entityBuffer.Length; j++)

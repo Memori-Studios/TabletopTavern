@@ -58,7 +58,7 @@ namespace TJ.MainMenu
             string difficultyName = loc.GetText(difficultyData.difficultyName);
             string act = string.Format(loc.GetText("RunHistoryActReached"), record.actReached);
             string date = record.EndedAtUtc.ToLocalTime().ToString("d", CultureInfo.CurrentCulture);
-            summaryText.text = $"{loc.GetText("Level")} {(int)record.difficulty}: {difficultyName}  |  {act}  |  {date}";
+            summaryText.text = $"{difficultyName}  |  {act}  |  {date}";
 
             goldText.text = $"<color={ColorData.Gold}>{record.goldAtEnd}</color> {loc.GetText("Gold")}  |  {LeaderboardRow.FormatTime(record.playTimeSeconds)}";
 

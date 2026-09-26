@@ -15,6 +15,7 @@ using Memori.Localization;
 using Memori.Audio;
 using Memori.Scenes;
 using System.Threading.Tasks;
+using TabletopTavern.Analytics;
 
 namespace Memori.SaveData
 {
@@ -550,8 +551,74 @@ namespace Memori.SaveData
             foreach (SquadToLoad squad in enemyArmyLoaded) AddLossEntry(squad);
 
             SteamAchievements.AddStat(SteamStatId.UnitKills, SpellKillCount);
-            SaveDataHandler.SaveSquadsPostBattle(playerArmyLoaded, enemyArmyLoaded, _playerWonBattle, squadGUIDKillCounter, squadGUIDLossCounter, SpellKillCount);
+            AnalyticsBattleReport report = GameEventTracker.TryBuild("battleEnded", () => BuildBattleReport(playerArmyLoaded, enemyArmyLoaded, _playerWonBattle));
+            SaveDataHandler.SaveSquadsPostBattle(playerArmyLoaded, enemyArmyLoaded, _playerWonBattle, squadGUIDKillCounter, squadGUIDLossCounter, SpellKillCount, report);
             Debug.Log($"Saved post-battle squad data for {( _playerWonBattle ? "player" : "enemy")} with {squadGUIDKillCounter.Count} entries");
+        }
+
+        /// <summary>A battle the player walked away from: the armies as they stand now. Nothing is saved.</summary>
+        public AnalyticsBattleReport BuildAbandonReport()
+        {
+            SquadToLoad[] playerArmyLoaded = BattleManager.Instance.BattleSaveManager.GetArmyFromSaveData(true).Item1;
+            SquadToLoad[] enemyArmyLoaded = BattleManager.Instance.BattleSaveManager.GetArmyFromSaveData(false).Item1;
+            ApplyLiveUnitCounts(playerArmyLoaded);
+            ApplyLiveUnitCounts(enemyArmyLoaded);
+            AnalyticsBattleReport report = BuildBattleReport(playerArmyLoaded, enemyArmyLoaded, false);
+            report.Result = "Abandon";
+            return report;
+        }
+
+        private void ApplyLiveUnitCounts(SquadToLoad[] army)
+        {
+            for (int i = 0; i < army.Length; i++)
+            {
+                if (!uniqueIDToSquadId.TryGetValue(army[i].UniqueID, out int squadId)) continue;
+                if (!squadIdToUnitCount.TryGetValue(squadId, out int units)) continue;
+                army[i].SquadCurrentHealth = units * TabletopTavernData.Instance.GetHitPointsPerUnit(army[i].UnitName);
+            }
+        }
+
+        // Everything the battle scene knows about the result. SaveSquadsPostBattle adds the spell tally.
+        private AnalyticsBattleReport BuildBattleReport(SquadToLoad[] playerArmy, SquadToLoad[] enemyArmy, bool playerWon)
+        {
+            var report = new AnalyticsBattleReport
+            {
+                Mode = "manual",
+                Result = BattleManager.Instance.Conceded ? "Concede" : playerWon ? "Win" : "Loss",
+                Garrison = BattleManager.Instance.BattleSaveManager.IsGarrisonBattle,
+                EnemyRace = enemyArmy.Length > 0 ? TabletopTavernData.Instance.GetRaceFromUnitName(enemyArmy[0].UnitName).ToString() : null,
+                Layout = LayoutType.ToString(),
+            };
+#if SPELLS
+            var spellManager = BattleManager.Instance.SpellManager;
+            if (spellManager != null)
+            {
+                report.ManaMax = spellManager.ManaMax;
+                report.ManaLeft = spellManager.ManaRemaining;
+            }
+#endif
+            foreach (SquadToLoad squad in playerArmy) AddSquadResult(report.Player, squad, true);
+            foreach (SquadToLoad squad in enemyArmy) AddSquadResult(report.Enemy, squad, false);
+            return report;
+        }
+
+        private void AddSquadResult(List<AnalyticsSquadResult> results, SquadToLoad squad, bool isPlayer)
+        {
+            if (!uniqueIDToSquadId.TryGetValue(squad.UniqueID, out int squadId)) return;
+            int hitPoints = TabletopTavernData.Instance.GetHitPointsPerUnit(squad.UnitName);
+            int unitsEnd = hitPoints > 0 ? squad.SquadCurrentHealth / hitPoints : 0;
+            bool withdrew = isPlayer && withdrawnSquads.Any(s => s.UniqueID == squad.UniqueID);
+            results.Add(new AnalyticsSquadResult
+            {
+                Unit = squad.UnitName.ToString(),
+                Slot = isPlayer ? squad.UnitIndex : -1,
+                Prestige = squad.UnitPrestige,
+                Trait = squad.PrestigeTrait.ToString(),
+                UnitsStart = squadIdToInitialUnitCount.TryGetValue(squadId, out int unitsStart) ? unitsStart : unitsEnd,
+                UnitsEnd = unitsEnd,
+                Kills = squadIdKillCounter.TryGetValue(squadId, out int kills) ? kills : 0,
+                Status = withdrew ? "Withdrew" : unitsEnd <= 0 ? "Dead" : "Stand",
+            });
         }
         #endregion
         private void TeleportToEncirclementColumns(SquadToLoad[] squads, Vector3 center, Quaternion baseRotation)

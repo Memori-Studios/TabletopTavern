@@ -27,7 +27,13 @@ namespace TJ.MainMenu
 
         [Header("Buttons")]
         [SerializeField] private Button playPanelButton;
-        [SerializeField] private Button upgradesPanelButton, questsPanelButton, runHistoryPanelButton, leaderboardPanelButton, collectionPanelButton, settingsPanelButton, exitPanelButton, abandonRunButton, customBattleButton, modsPanelButton;
+        [SerializeField] private Button upgradesPanelButton, questsPanelButton, collectionPanelButton, settingsPanelButton, exitPanelButton, abandonRunButton, customBattleButton, modsPanelButton;
+
+        [Header("Run Summary")]
+        [SerializeField] private TMP_Text runSummaryText;
+        // The Play button grows to fit the hero and act line under its label while a run is in progress.
+        private const float PlayButtonHeight = 45f;
+        private const float PlayButtonHeightWithSummary = 62f;
 
         [Header("Collection Button Badge")]
         [SerializeField] private TMP_Text collectionTotalText;
@@ -63,7 +69,6 @@ namespace TJ.MainMenu
         [Header("Demo Save Import")]
         [SerializeField] private MemoriCanvasGroup demoSaveImportCanvasGroup;
         [SerializeField] private Button keepDemoSaveButton, deleteDemoSaveButton;
-        [SerializeField] private Button openDemoSaveImportButton;
 
         [Header("Localization")]
         [SerializeField] private Button openLocalizationPanelButton;
@@ -83,8 +88,6 @@ namespace TJ.MainMenu
             customBattleButton.onClick.AddListener(() => HandleCustomBattle());
             upgradesPanelButton.onClick.AddListener(() => OpenPanel(PanelType.Upgrades));
             questsPanelButton.onClick.AddListener(() => OpenPanel(PanelType.Quests));
-            runHistoryPanelButton.onClick.AddListener(() => OpenPanel(PanelType.RunHistory));
-            leaderboardPanelButton.onClick.AddListener(() => OpenPanel(PanelType.Leaderboard));
             collectionPanelButton.onClick.AddListener(() => OpenPanel(PanelType.Collection));
             modsPanelButton.onClick.AddListener(() => OpenPanel(PanelType.Mods));
             settingsPanelButton.onClick.AddListener(() => OpenSettingsPanel());
@@ -93,17 +96,13 @@ namespace TJ.MainMenu
             roadmapCanvasGroup.CGDisable();
             keepDemoSaveButton.onClick.AddListener(KeepDemoSave);
             deleteDemoSaveButton.onClick.AddListener(DeleteDemoSave);
-            openDemoSaveImportButton.onClick.AddListener(OpenDemoSaveImportPrompt);
             demoSaveImportCanvasGroup.CGDisable();
 
 #if !SPELLS
-            // The Quests board lists every achievement in the registry, half of which only exist on
-            // the Steam backend from the SPELLS release on. Keep it out of the pre-SPELLS menu.
-            // Run History and the Leaderboard are revealed with the same release. Recording and
-            // the Godking submit run regardless, so both boards are populated the day the buttons appear.
+            // The Records button opens the Quests board, which lists every achievement in the registry,
+            // half of which only exist on the Steam backend from the SPELLS release on. Run History and
+            // the Leaderboard are tabs of the same screen and are revealed with the same release.
             questsPanelButton.gameObject.SetActive(false);
-            runHistoryPanelButton.gameObject.SetActive(false);
-            leaderboardPanelButton.gameObject.SetActive(false);
 #endif
 
             mainMenuPanel.SetUp(this);
@@ -132,7 +131,7 @@ namespace TJ.MainMenu
                 demoSubscript.enabled = false;
             #endif
         }
-        private void Load()
+        private async void Load()
         {
             bool isNewPlayer = !SaveDataHandler.PlayerSaveDataExists();
             mainMenuCanvas.enabled = true;
@@ -144,6 +143,10 @@ namespace TJ.MainMenu
                 _hasCheckedModCountThisSession = true;
                 CheckModCountChanged();
             }
+
+            // Restart paths pass through here on their way to the Map or a battle and must not wait.
+            if (SceneHandler.Instance.CurrentGameState == GameStateEnum.MainMenu)
+                await WaitForTavernTheme();
 
             SceneHandler.Instance.AlertOfSceneSetUpComlete();
 
@@ -169,6 +172,20 @@ namespace TJ.MainMenu
             //     OpenMainMenuPanel();
             // }
 
+        }
+        private const int TavernThemeWaitLimitMs = 10000;
+
+        // The doors stay shut until the theme's figures are placed; the limit stops a stuck load from trapping the player.
+        private static async Task WaitForTavernTheme()
+        {
+            TavernThemeManager themeManager = TavernThemeManager.InstanceIfExists;
+            if (themeManager == null) return;
+
+            Task themeLoad = themeManager.BootThemeLoaded;
+            if (themeLoad.IsCompleted) return;
+
+            if (await Task.WhenAny(themeLoad, Task.Delay(TavernThemeWaitLimitMs)) != themeLoad)
+                Debug.LogWarning($"[MainMenu] Tavern theme still loading after {TavernThemeWaitLimitMs} ms, opening the doors anyway.");
         }
         private async void CheckModCountChanged()
         {
@@ -391,12 +408,12 @@ namespace TJ.MainMenu
                 SettingsManager.Instance.CloseSettingsPanel();
                 return;
             }
-            if (abandonRunConfirmationCanvasGroup.canvasGroup.alpha == 1)
+            if (abandonRunConfirmationCanvasGroup.alpha == 1)
             {
                 CancelAbandonRun();
                 return;
             }
-            if (roadmapCanvasGroup.canvasGroup.alpha == 1)
+            if (roadmapCanvasGroup.alpha == 1)
             {
                 // Whichever close handler is currently bound (first-time or regular).
                 closeRoadmapCanvasButton.onClick.Invoke();
@@ -432,7 +449,32 @@ namespace TJ.MainMenu
                 abandonRunButton.gameObject.SetActive(false);
             }
             playPanelButton.GetComponentInChildren<TMP_Text>().text = campaignSaveDataExists ? LocalizationManager.Instance.GetText("continueButton") : LocalizationManager.Instance.GetText("newCampaignButton");
+            RefreshRunSummary();
+        }
+        /// <summary>
+        /// The hero and act line under Continue. Reads the campaign file directly; it is not cached.
+        /// </summary>
+        private void RefreshRunSummary()
+        {
+            RectTransform playRect = (RectTransform)playPanelButton.transform;
+            TMP_Text playLabel = playPanelButton.GetComponentInChildren<TMP_Text>();
+            Vector4 labelMargin = playLabel.margin;
+            if (!campaignSaveDataExists)
+            {
+                runSummaryText.gameObject.SetActive(false);
+                playRect.sizeDelta = new Vector2(playRect.sizeDelta.x, PlayButtonHeight);
+                playLabel.margin = new Vector4(labelMargin.x, labelMargin.y, labelMargin.z, 0f);
+                return;
+            }
 
+            CampaignSaveData save = SaveDataHandler.Load();
+            string heroName = LocalizationManager.Instance.GetText(HeroData.GetHeroByID(save.heroID).HeroName);
+            string act = LocalizationManager.Instance.GetText("Act");
+            runSummaryText.text = $"{heroName}  -  {act} {save.bookNumber}";
+            runSummaryText.gameObject.SetActive(true);
+            playRect.sizeDelta = new Vector2(playRect.sizeDelta.x, PlayButtonHeightWithSummary);
+            // Lifts the label so the summary line fits under it.
+            playLabel.margin = new Vector4(labelMargin.x, labelMargin.y, labelMargin.z, PlayButtonHeightWithSummary - PlayButtonHeight);
         }
         private void AbandonRunConfirmationPopUp()
         {
@@ -444,7 +486,7 @@ namespace TJ.MainMenu
             if (SaveDataHandler.CampaignSaveExists())
             {
                 var abandonedSave = SaveDataHandler.Load();
-                GameEventTracker.RunEnded(abandonedSave.heroID, (int)abandonedSave.difficultyLevel, RunResult.Abandon, abandonedSave.RunStats.chaptersCompleted);
+                GameEventTracker.RunClosed(abandonedSave, RunResult.Abandon, "abandonMenu");
                 SaveDataHandler.RecordAbandonedRun(abandonedSave);
             }
             SaveDataHandler.DeleteCampaignSave();
@@ -495,15 +537,14 @@ namespace TJ.MainMenu
             abandonRunButton.GetComponentInChildren<TMP_Text>().text = LocalizationManager.Instance.GetText("abandonRunButton");
             customBattleButton.GetComponentInChildren<TMP_Text>().text = LocalizationManager.Instance.GetText("customBattleButton");
             upgradesPanelButton.GetComponentInChildren<TMP_Text>().text = LocalizationManager.Instance.GetText("upgradesButton");
-            questsPanelButton.GetComponentInChildren<TMP_Text>().text = LocalizationManager.Instance.GetText("questsButton");
-            runHistoryPanelButton.GetComponentInChildren<TMP_Text>().text = LocalizationManager.Instance.GetText("runHistoryButton");
-            leaderboardPanelButton.GetComponentInChildren<TMP_Text>().text = LocalizationManager.Instance.GetText("leaderboardButton");
+            questsPanelButton.GetComponentInChildren<TMP_Text>().text = LocalizationManager.Instance.GetText("recordsButton");
             collectionPanelButton.GetComponentInChildren<TMP_Text>().text = LocalizationManager.Instance.GetText("collectionButton");
             modsPanelButton.GetComponentInChildren<TMP_Text>().text = LocalizationManager.Instance.GetText("modsButton");
             settingsPanelButton.GetComponentInChildren<TMP_Text>().text = LocalizationManager.Instance.GetText("settingsButton");
             exitPanelButton.GetComponentInChildren<TMP_Text>().text = LocalizationManager.Instance.GetText("exitButton");
             playPanelButton.GetComponentInChildren<TMP_Text>().text = campaignSaveDataExists ?
                 LocalizationManager.Instance.GetText("continueButton") : LocalizationManager.Instance.GetText("newCampaignButton");
+            RefreshRunSummary();
 
             activeLocaleText.text = LocalizationManager.Instance.GetActiveLocaleName();
             CloseLocalizationPanel();

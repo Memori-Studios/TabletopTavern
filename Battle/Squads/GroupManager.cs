@@ -25,7 +25,9 @@ public struct LockedSlot
     public class GroupManager : MonoBehaviour
     {
         [Header("Group UI")]
-        [SerializeField] private SquadGroup[] squadGroups = new SquadGroup[6];
+        // Keys 1-9 and 0 select groups 1-10; the scene may still serialize the old six-slot array.
+        const int GroupCount = 10;
+        [SerializeField] private SquadGroup[] squadGroups = new SquadGroup[GroupCount];
         [SerializeField] private GroupUI groupUIPrefab;
         [SerializeField] private List<GroupUI> groupUIs = new ();
         [SerializeField] private Transform groupUIParent;
@@ -41,6 +43,7 @@ public struct LockedSlot
         public void Load()
         {
             // Only needed once – creates the actual objects
+            if (squadGroups.Length != GroupCount) squadGroups = new SquadGroup[GroupCount];
             for (int i = 0; i < squadGroups.Length; i++)
             {
                 squadGroups[i] = new SquadGroup();
@@ -54,6 +57,10 @@ public struct LockedSlot
             InputHandler.Instance.OnSelectedGroup4 -= SelectGroup4;
             InputHandler.Instance.OnSelectedGroup5 -= SelectGroup5;
             InputHandler.Instance.OnSelectedGroup6 -= SelectGroup6;
+            InputHandler.Instance.OnSelectedGroup7 -= SelectGroup7;
+            InputHandler.Instance.OnSelectedGroup8 -= SelectGroup8;
+            InputHandler.Instance.OnSelectedGroup9 -= SelectGroup9;
+            InputHandler.Instance.OnSelectedGroup10 -= SelectGroup10;
             InputHandler.Instance.OnSelectAll -= SelectAllSquads;
 
             BattleManager.Instance.UIManager.OnSquadDisplaysChanged -= OnSquadDisplaysChanged;
@@ -68,6 +75,10 @@ public struct LockedSlot
             InputHandler.Instance.OnSelectedGroup4 += SelectGroup4;
             InputHandler.Instance.OnSelectedGroup5 += SelectGroup5;
             InputHandler.Instance.OnSelectedGroup6 += SelectGroup6;
+            InputHandler.Instance.OnSelectedGroup7 += SelectGroup7;
+            InputHandler.Instance.OnSelectedGroup8 += SelectGroup8;
+            InputHandler.Instance.OnSelectedGroup9 += SelectGroup9;
+            InputHandler.Instance.OnSelectedGroup10 += SelectGroup10;
             InputHandler.Instance.OnSelectAll += SelectAllSquads;
 
             BattleManager.Instance.UIManager.OnSquadDisplaysChanged += OnSquadDisplaysChanged;
@@ -104,6 +115,22 @@ public struct LockedSlot
         private void SelectGroup6()
         {
             TryToSelectGroup(6);
+        }
+        private void SelectGroup7()
+        {
+            TryToSelectGroup(7);
+        }
+        private void SelectGroup8()
+        {
+            TryToSelectGroup(8);
+        }
+        private void SelectGroup9()
+        {
+            TryToSelectGroup(9);
+        }
+        private void SelectGroup10()
+        {
+            TryToSelectGroup(10);
         }
         public void CreateGroup()
         {
@@ -306,7 +333,7 @@ public struct LockedSlot
         {
             groupHovered = 0;
         }
-        // Returns 1-6 if the squad is in a group, -1 if not.
+        // Returns 1-10 if the squad is in a group, -1 if not.
         public int GetGroupNumberForSquad(int _squadId)
         {
             for (int i = 0; i < squadGroups.Length; i++)
@@ -315,7 +342,7 @@ public struct LockedSlot
             }
             return -1;
         }
-        // Returns the group number (1-6) of the card at the given display index, or -1 if ungrouped/out of range.
+        // Returns the group number (1-10) of the card at the given display index, or -1 if ungrouped/out of range.
         public int GetGroupNumberForSquadAtIndex(int _index)
         {
             if(_index < 0 || _index >= squadDisplays.Count) return -1;
@@ -474,6 +501,10 @@ public struct LockedSlot
                 InputHandler.Instance.OnSelectedGroup4 -= SelectGroup4;
                 InputHandler.Instance.OnSelectedGroup5 -= SelectGroup5;
                 InputHandler.Instance.OnSelectedGroup6 -= SelectGroup6;
+                InputHandler.Instance.OnSelectedGroup7 -= SelectGroup7;
+                InputHandler.Instance.OnSelectedGroup8 -= SelectGroup8;
+                InputHandler.Instance.OnSelectedGroup9 -= SelectGroup9;
+                InputHandler.Instance.OnSelectedGroup10 -= SelectGroup10;
                 InputHandler.Instance.OnSelectAll -= SelectAllSquads;
             }
             if(BattleManager.HasInstance && BattleManager.Instance.UIManager != null)

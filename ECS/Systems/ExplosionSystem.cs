@@ -28,6 +28,10 @@ partial struct ExplosionSystem : ISystem
         PhysicsWorldSingleton physicsWorldSingleton = SystemAPI.GetSingleton<PhysicsWorldSingleton>();
         CollisionWorld collisionWorld = physicsWorldSingleton.CollisionWorld;
         NativeList<DistanceHit> distanceHitList = new NativeList<DistanceHit>(Allocator.Temp);
+        // The broadphase build may still be in flight when this system reads the singleton, and an
+        // OverlapSphere against a half-built tree returns nothing. An explosion is one-shot, so a miss
+        // is a blast that hits nobody. Same fix as SpellSystem: sync once per frame, only when one fires.
+        bool jobsCompleted = false;
 
         float deltaTime = SystemAPI.Time.DeltaTime;
 
@@ -41,6 +45,12 @@ partial struct ExplosionSystem : ISystem
                 continue;
             }
 
+            if (!jobsCompleted)
+            {
+                entityManager.CompleteAllTrackedJobs();
+                collisionWorld = SystemAPI.GetSingleton<PhysicsWorldSingleton>().CollisionWorld;
+                jobsCompleted = true;
+            }
             distanceHitList.Clear();
             CollisionFilter collisionFilter = new()
             {
@@ -69,6 +79,23 @@ partial struct ExplosionSystem : ISystem
                             // Debug.Log($"ExplosionSystem: Entity {distanceHit.Entity} is gonna die, skipping");
                             continue;
                         }
+                    }
+
+                    // A Shieldwall brace stops the throw but not the blast's damage; innate knockback immunity still skips both.
+                    if (SystemAPI.HasComponent<ShieldwallResistGrantedTag>(distanceHit.Entity)
+                        && SystemAPI.GetComponent<Unit>(distanceHit.Entity).Team != Explosion.ValueRO.KnockbackSquadTeam
+                        && Explosion.ValueRO.KnockbackInitialDamage > 0)
+                    {
+                        SystemAPI.GetBuffer<DamageBufferElement>(distanceHit.Entity).Add(new DamageBufferElement
+                        {
+                            AttackStrength = Explosion.ValueRO.KnockbackInitialDamage,
+                            DamageSource = DamageSource.Melee,
+                            DamageType = DamageType.Physical,
+                            TeamOfSource = Explosion.ValueRO.KnockbackSquadTeam,
+                            DamageSourceSquadId = Explosion.ValueRO.KnockbackSquadID,
+                            SourceIsArtillery = true,
+                        });
+                        continue;
                     }
 
                     //if it can resist the knockback or is on the same team as the explosion, skip it

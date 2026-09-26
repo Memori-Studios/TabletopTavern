@@ -30,7 +30,7 @@ public class SquadDisplayCardBattle : SquadDisplayCard, IDragHandler, IEndDragHa
     LayoutElement layoutElement;
     GameObject cachedDummySquadCard;
     Canvas canvas;
-    int _dragGroupNumber; // group number (1-6) of this card during a drag, or -1 if ungrouped
+    int _dragGroupNumber; // group number (1-10) of this card during a drag, or -1 if ungrouped
     const float BAR_UPDATE_SPEED = 0.25f;
     float updateTimer = 0f;
     bool isMoving;
@@ -164,6 +164,9 @@ public class SquadDisplayCardBattle : SquadDisplayCard, IDragHandler, IEndDragHa
     }
     public void OnBeginDrag(PointerEventData eventData)
     {
+        // Each mouse button runs its own drag; a second one would spawn a placeholder that is never destroyed.
+        if(eventData.button != PointerEventData.InputButton.Left) return;
+
         _dragGroupNumber = BattleManager.Instance.GroupManager.GetGroupNumberForSquad(squadEntity.SquadId);
 
         initialPosition = transform.position;
@@ -181,6 +184,7 @@ public class SquadDisplayCardBattle : SquadDisplayCard, IDragHandler, IEndDragHa
     }
     public void OnDrag(PointerEventData eventData)
     {
+        if(eventData.button != PointerEventData.InputButton.Left) return;
         if(cachedDummySquadCard == null) return;
 
         transform.position = InputHandler.Instance.MousePosition;
@@ -217,6 +221,7 @@ public class SquadDisplayCardBattle : SquadDisplayCard, IDragHandler, IEndDragHa
     }
     public void OnEndDrag(PointerEventData eventData)
     {
+        if(eventData.button != PointerEventData.InputButton.Left) return;
         if(cachedDummySquadCard == null) return;
 
         int newIndex = cachedDummySquadCard.transform.GetSiblingIndex();

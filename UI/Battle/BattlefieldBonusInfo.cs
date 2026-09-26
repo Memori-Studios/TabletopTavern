@@ -43,14 +43,14 @@ namespace TJ
                 float t = elapsedTime / turnOnDuration;
 
                 //fade in alpha of canvas group
-                squadHoverPopup.canvasGroup.alpha = t;
+                squadHoverPopup.alpha = t;
 
                 elapsedTime += Time.unscaledDeltaTime;
                 yield return null;
             }
 
             // Ensure final values are set
-            squadHoverPopup.canvasGroup.alpha = 1;
+            squadHoverPopup.alpha = 1;
             
 
             // Pause for 3 seconds
@@ -64,13 +64,13 @@ namespace TJ
             {
                 float t = elapsedTime / turnOffDuration;
 
-                squadHoverPopup.canvasGroup.alpha = 1 - t;
+                squadHoverPopup.alpha = 1 - t;
                 elapsedTime += Time.unscaledDeltaTime;
                 yield return null;
             }
 
             // Ensure final values are set
-            squadHoverPopup.canvasGroup.alpha = 0;
+            squadHoverPopup.alpha = 0;
         }
         public void Load(BattlefieldBonus _battlefieldBonus)
         {
@@ -81,12 +81,12 @@ namespace TJ
             if (_battlefieldBonus.BattlefieldBonusEnum == BattlefieldBonusEnum.Forest)
             {
                 bonusNameText.text = LocalizationManager.Instance.GetText("Forest");
-                bonusDescriptionText.text = LocalizationManager.Instance.GetText("InForestDesc");
+                bonusDescriptionText.text = ColorData.ApplyColorVision(LocalizationManager.Instance.GetText("InForestDesc"));
             }
             else if (_battlefieldBonus.BattlefieldBonusEnum == BattlefieldBonusEnum.Swamp)
             {
                 bonusNameText.text = LocalizationManager.Instance.GetText("Swamp");
-                bonusDescriptionText.text = LocalizationManager.Instance.GetText("InSwampDesc");
+                bonusDescriptionText.text = ColorData.ApplyColorVision(LocalizationManager.Instance.GetText("InSwampDesc"));
             }
             else
             {

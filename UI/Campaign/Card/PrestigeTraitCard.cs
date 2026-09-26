@@ -28,7 +28,7 @@ namespace TJ
             string nameLocalized = LocalizationManager.Instance.GetText(trait.ToString());
             string descLocalized = LocalizationManager.Instance.GetText(trait.ToString() + "Desc");
             _traitNameText.text = nameLocalized;
-            _traitDescriptionText.text = descLocalized;
+            KeywordText.Apply(_traitDescriptionText, descLocalized);
 
             animator.SetBool("Normal", true);
 

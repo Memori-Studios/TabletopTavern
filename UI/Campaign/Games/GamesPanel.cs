@@ -73,7 +73,8 @@ namespace TJ.Games
             campaignSaveManager = _csm;
             mapSceneUIManager = _msui;
 
-            int bookNumber = Mathf.Clamp(campaignSaveManager.SaveData.bookNumber, 1, 3);
+            // Bets keep growing into the first endless acts, then stop; the bank is bigger by then, not bottomless.
+            int bookNumber = Mathf.Clamp(campaignSaveManager.SaveData.bookNumber, 1, 5);
             smallBet  = SmallBetBase  * bookNumber;
             mediumBet = MediumBetBase * bookNumber;
             largeBet  = LargeBetBase  * bookNumber;

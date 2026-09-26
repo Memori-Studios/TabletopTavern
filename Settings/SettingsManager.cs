@@ -13,7 +13,10 @@ using Memori.Localization;
 using System;
 using Memori.Core;
 using Memori.UI;
+using Memori.Tooltip;
 using TabletopTavern.Analytics;
+using UnityEngine.SceneManagement;
+using TMPro;
 
 namespace TJ
 {
@@ -24,6 +27,23 @@ namespace TJ
         [Header("Main Buttons")]
         [SerializeField] private Button resumeGameButton;
         [SerializeField] private Button exitToMenuButton, exitToDesktopButton, abandonRunButton, quickRestartButton, creditsButton, concedeDefeatButton, collectionButton;
+
+        [Header("Delete All Progress")]
+        [SerializeField] private Button deleteProgressButton;
+        [SerializeField] private GameObject deleteProgressGroup;
+
+        [Header("Codex Rail")]
+        [SerializeField] private RailEntry[] railEntries;
+        [SerializeField] private Button devToolsButton;
+        [SerializeField] private MemoriCanvasGroup devToolsCanvasGroup;
+        [SerializeField] private TMP_Text closeLabel;
+
+        [Serializable]
+        private struct RailEntry
+        {
+            public MemoriCanvasGroup page;
+            public TJ.MainMenu.CollectionRailRow row;
+        }
 
         [Header("Abandon Run")]
         [SerializeField] private MemoriCanvasGroup abandonRunConfirmationCanvasGroup;
@@ -42,11 +62,12 @@ namespace TJ
         [SerializeField] private Button infoButton;
         [SerializeField] private Button gameSettingsButton, audioSettingsButton, graphicsSettingsButton, controlsSettingsButton;
         [SerializeField] private MemoriCanvasGroup infoCanvasGroup, gameSettingsCanvasGroup, audioSettingsCanvasGroup, graphicsSettingsCanvasGroup, controlsSettingsCanvasGroup, creditsCanvasGroup;
-        [SerializeField] private SettingsToggleV2 disbandConfirmationToggle;
         [SerializeField] private SettingsToggleV2 hideUnitInfoInBattleToggle;
         [SerializeField] private SettingsToggleV2 cameraShakeToggle;
         [SerializeField] private SettingsToggleV2 autoRollInitiativeToggle;
         [SerializeField] private SettingsToggleV2 invertMouseToggle;
+        [SerializeField] private SettingsToggleV2 colorblindModeToggle;
+        [SerializeField] private SettingsToggleV2 tapInsteadOfHoldToggle;
         [SerializeField] private MemoriButtonV2 resetTutorialButton;
         public Action<bool> OnSettingsPanelToggled;
 
@@ -63,13 +84,19 @@ namespace TJ
         [SerializeField] private MonitoredDataSlider cameraMovementSpeedSlider;
         [SerializeField] private MonitoredDataSlider cameraZoomSpeedSlider;
 
+        public MonitoredData<float> UIScale = new();
+
+        [Header("Game Scale")]
+        [SerializeField] private TMP_Dropdown uiScaleDropdown;
+        [SerializeField] private TMP_Dropdown battlefieldFlagsDropdown;
+
         MemoriCanvasGroup activeCanvasGroup;
         float cachedTimeValue;
 
         // Live read, not cached: CurrentGameState flips the instant a transition starts, so this never goes stale.
         bool InBattle => SceneHandler.Instance.CurrentGameState == GameStateEnum.Battle;
 
-        public bool SettingsPanelOpen => settingsCanvasGroup.canvasGroup.alpha == 1;
+        public bool SettingsPanelOpen => settingsCanvasGroup.alpha == 1;
         private void Start()
         {
             settingsCanvasGroup.CGDisable();
@@ -77,6 +104,7 @@ namespace TJ
             collectionButton.onClick.AddListener(OpenCollectionPanel);
             exitToMenuButton.onClick.AddListener(ExitToMenu);
             exitToDesktopButton.onClick.AddListener(ExitToDesktop);
+            deleteProgressButton.onClick.AddListener(OpenDeleteProgressPrompt);
 
             abandonRunButton.onClick.AddListener(AbandonRunConfirmationPopUp);
             abandonRunConfirmationButton.SetUp(this);
@@ -93,8 +121,11 @@ namespace TJ
             concedeDefeatConfirmationButton.onClick.AddListener(ConcedeDefeat);
             concedeDefeatCancelButton.onClick.AddListener(CancelConcedeDefeat);
 
+            // Pages stay switched off until opened: all of them live at boot broke Addressables loading in player builds.
             activeCanvasGroup = gameSettingsCanvasGroup;
-            gameSettingsCanvasGroup.CGEnable();
+            foreach (RailEntry entry in railEntries)
+                if (entry.page.gameObject.activeSelf)
+                    Debug.LogError($"SettingsManager: the Settings page '{entry.page.name}' is switched on in the scene. Switch it off; player builds fail to load localization when every page starts at boot.");
 
             infoButton.onClick.RemoveAllListeners();
             gameSettingsButton.onClick.RemoveAllListeners();
@@ -112,9 +143,21 @@ namespace TJ
             creditsButton.onClick.AddListener(() => SwitchSettingsFocus(creditsCanvasGroup));
             resetTutorialButton.Button.onClick.AddListener(() => ResetTutorial());
 
+            devToolsButton.onClick.RemoveAllListeners();
+            devToolsButton.onClick.AddListener(() => SwitchSettingsFocus(devToolsCanvasGroup));
+            devToolsButton.gameObject.SetActive(SaveDataHandler.IsDevToolUser());
+            // Here, not in CollectionRailRow: CollectionPanel already clicks for the Collection's own rail.
+            foreach (TJ.MainMenu.CollectionRailRow row in settingsCanvasGroup.GetComponentsInChildren<TJ.MainMenu.CollectionRailRow>(true))
+                row.Button.onClick.AddListener(() => IAudioRequester.Instance.PlaySFX(SFXData.ButtonClick));
+            RefreshRail();
+
             SceneHandler.Instance.OnGameStateChanged += OnGameStateChanged;
             InputHandler.Instance.SettingsButtonPressed += SettingsHotkeyPressed;
-            infoCanvasGroup.gameObject.SetActive(false);
+            hideUnitInfoInBattleToggle.Load();
+            cameraShakeToggle.Load();
+            autoRollInitiativeToggle.Load();
+            invertMouseToggle.Load();
+            HideSquadInfoInBattle.Value = hideUnitInfoInBattleToggle.OnToggle.isOn;
             hideUnitInfoInBattleToggle.OnToggle.onValueChanged.AddListener(SetHideSquadInfoInBattle);
             CameraShakeEnabled.Value = cameraShakeToggle.OnToggle.isOn;
             cameraShakeToggle.OnToggle.onValueChanged.AddListener(val => CameraShakeEnabled.Value = val);
@@ -125,12 +168,64 @@ namespace TJ
             InvertMouseY.Value = invertMouseToggle.OnToggle.isOn;
             invertMouseToggle.OnToggle.onValueChanged.AddListener(val => InvertMouseY.Value = val);
 
+            colorblindModeToggle.Load();
+            SetColorblindMode(colorblindModeToggle.OnToggle.isOn);
+            colorblindModeToggle.OnToggle.onValueChanged.AddListener(SetColorblindMode);
+
+            tapInsteadOfHoldToggle.Load();
+            InputHandler.Instance.SetTapInsteadOfHold(tapInsteadOfHoldToggle.OnToggle.isOn);
+            tapInsteadOfHoldToggle.OnToggle.onValueChanged.AddListener(InputHandler.Instance.SetTapInsteadOfHold);
+
             CameraRotationSpeed.Value = PlayerPrefs.GetFloat("cameraRotationSpeed", 0.5f);
             CameraMovementSpeed.Value = PlayerPrefs.GetFloat("cameraMovementSpeed", 0.5f);
             CameraZoomSpeed.Value = PlayerPrefs.GetFloat("cameraZoomSpeed", 0.5f);
             cameraRotationSpeedSlider.AssignMonitoredData(CameraRotationSpeed);
             cameraMovementSpeedSlider.AssignMonitoredData(CameraMovementSpeed);
             cameraZoomSpeedSlider.AssignMonitoredData(CameraZoomSpeed);
+
+            float uiScale = PlayerPrefs.GetFloat(UIScaler.PrefKey, UIScaler.Default);
+            PlayerPrefs.SetFloat(UIScaler.PrefKey, uiScale);
+            UIScale.Value = uiScale;
+            UIScale.OnValueChanged += UIScaler.Apply;
+            SceneManager.sceneLoaded += OnSceneLoadedApplyUIScale;
+            UIScaler.Apply(uiScale);
+            FillScaleDropdown(uiScaleDropdown, UIScaler.Steps, UIScaler.StepIndex(uiScale), SetUIScale);
+
+            float flags = PlayerPrefs.GetFloat(BattlefieldMarkerScale.PrefKey, BattlefieldMarkerScale.Default);
+            PlayerPrefs.SetFloat(BattlefieldMarkerScale.PrefKey, flags);
+            BattlefieldMarkerScale.Apply(flags);
+            FillScaleDropdown(battlefieldFlagsDropdown, BattlefieldMarkerScale.Steps, BattlefieldMarkerScale.StepIndex(flags), SetBattlefieldFlagsScale);
+        }
+        // Both scale settings apply on change: they are not video modes, so the player sees the result at once.
+        private static void FillScaleDropdown(TMP_Dropdown dropdown, float[] steps, int currentIndex, System.Action<float> onChanged)
+        {
+            var options = new List<string>();
+            foreach (float step in steps) options.Add(Mathf.RoundToInt(step * 100f) + "%");
+            dropdown.ClearOptions();
+            dropdown.AddOptions(options);
+            dropdown.SetValueWithoutNotify(currentIndex);
+            dropdown.RefreshShownValue();
+            dropdown.onValueChanged.AddListener(index => onChanged(steps[index]));
+        }
+        // Applies on change like the scale settings; battle visuals listen to ColorVision.Changed.
+        private static void SetColorblindMode(bool isOn)
+        {
+            ColorVision.Apply(isOn ? ColorVisionMode.Colorblind : ColorVisionMode.Off);
+        }
+        public void SetBattlefieldFlagsScale(float scale)
+        {
+            PlayerPrefs.SetFloat(BattlefieldMarkerScale.PrefKey, scale);
+            BattlefieldMarkerScale.Apply(scale);
+        }
+        // Map, MainMenu, Collection and TavernBattle bring their own root canvases after Core.
+        private void OnSceneLoadedApplyUIScale(Scene scene, LoadSceneMode mode)
+        {
+            UIScaler.Apply(UIScale.Value);
+        }
+        public void SetUIScale(float scale)
+        {
+            UIScale.Value = scale;
+            PlayerPrefs.SetFloat(UIScaler.PrefKey, scale);
         }
         /// <summary>
         /// Opens the Collection as an additive overlay. The Settings panel deliberately stays open
@@ -152,11 +247,13 @@ namespace TJ
             Debug.Log($"SettingsManager.SettingsHotkeyPressed() - SettingsPanelOpen: {SettingsPanelOpen}");
             if(SceneHandler.Instance.CurrentGameState == GameStateEnum.MainMenu)
             {
-                OnSettingsPanelToggled?.Invoke(true);
+                // Esc never opens Settings in the main menu: it closes it, or steps the menu back to its main panel.
+                if (SettingsPanelOpen) CloseSettingsPanel();
+                else OnSettingsPanelToggled?.Invoke(true);
                 return;
             }
 
-            if(settingsCanvasGroup.canvasGroup.alpha == 1) {
+            if(settingsCanvasGroup.alpha == 1) {
                 CloseSettingsPanel();
             } else {
                 OpenSettingsPanel();
@@ -165,8 +262,8 @@ namespace TJ
         public void OpenSettingsPanel()
         {
             SwitchSettingsFocus(gameSettingsCanvasGroup);
-            infoCanvasGroup.gameObject.SetActive(true);
-            // disbandConfirmationToggle.OverrideToggleFromSettings();
+            bool inMainMenu = SceneHandler.Instance.CurrentGameState == GameStateEnum.MainMenu;
+            closeLabel.text = LocalizationManager.Instance.GetText(inMainMenu ? "Close" : "resumeGameButton");
             settingsCanvasGroup.CGEnable();
             IAudioRequester.Instance.PlaySFX(SFXData.OpenUI);
             IAudioRequester.Instance.SetAmbienceDuck(AmbienceDuckSource.Settings, true);
@@ -180,7 +277,7 @@ namespace TJ
         {
             abandonRunConfirmationCanvasGroup.CGDisable();
             settingsCanvasGroup.CGDisable();
-            infoCanvasGroup.gameObject.SetActive(false);
+            activeCanvasGroup.gameObject.SetActive(false);
             IAudioRequester.Instance.PlaySFX(SFXData.CloseUI);
             IAudioRequester.Instance.SetAmbienceDuck(AmbienceDuckSource.Settings, false);
             if (InBattle)
@@ -215,7 +312,7 @@ namespace TJ
             if (SaveDataHandler.CampaignSaveExists())
             {
                 var restartedRun = SaveDataHandler.Load();
-                GameEventTracker.RunEnded(restartedRun.heroID, (int)restartedRun.difficultyLevel, RunResult.Abandon, restartedRun.RunStats.chaptersCompleted);
+                GameEventTracker.RunClosed(restartedRun, RunResult.Abandon, "quickRestart");
                 SaveDataHandler.RecordAbandonedRun(restartedRun);
             }
 
@@ -256,14 +353,37 @@ namespace TJ
             Application.Quit();
             #endif
         }
+        /// <summary>Opens Settings on the Battle Guide at one topic, for tutorial prompts that link to it.</summary>
+        public void OpenGuide(string topicId)
+        {
+            if (!SettingsPanelOpen) OpenSettingsPanel();
+            SwitchSettingsFocus(infoCanvasGroup);
+            BattleGuideView guide = infoCanvasGroup.GetComponentInChildren<BattleGuideView>(true);
+            if (guide == null)
+            {
+                Debug.LogError("SettingsManager.OpenGuide: no BattleGuideView under the Info panel.");
+                return;
+            }
+            guide.OpenBrowser(topicId);
+        }
         public void SwitchSettingsFocus(MemoriCanvasGroup _canvasGroup)
         {
-            if(activeCanvasGroup == _canvasGroup) return;
-
-            activeCanvasGroup.CGDisable();
+            // A hidden page is switched off, not just transparent, so its rows only start once it is shown.
+            if (activeCanvasGroup != _canvasGroup)
+            {
+                activeCanvasGroup.CGDisable();
+                activeCanvasGroup.gameObject.SetActive(false);
+            }
+            _canvasGroup.gameObject.SetActive(true);
             _canvasGroup.CGEnable();
 
             activeCanvasGroup = _canvasGroup;
+            RefreshRail();
+        }
+        private void RefreshRail()
+        {
+            foreach (RailEntry entry in railEntries)
+                entry.row.SetActive(entry.page == activeCanvasGroup);
         }
         private void OnGameStateChanged(GameStateEnum gameStateEnum)
         {
@@ -273,18 +393,33 @@ namespace TJ
                 quickRestartButton.gameObject.SetActive(false);
                 exitToMenuButton.gameObject.SetActive(false);
                 concedeDefeatButton.gameObject.SetActive(false);
+                deleteProgressGroup.SetActive(true);
             } else if(gameStateEnum.Equals(GameStateEnum.Map)) {
                 abandonRunButton.gameObject.SetActive(true);
                 exitToMenuButton.gameObject.SetActive(true);
                 quickRestartButton.gameObject.SetActive(true);
                 concedeDefeatButton.gameObject.SetActive(false);
+                deleteProgressGroup.SetActive(false);
             } else if(gameStateEnum.Equals(GameStateEnum.Battle)) {
                 bool IsCustomBattle = SaveDataHandler.LoadPlayerSaveData().customBattle;
                 abandonRunButton.gameObject.SetActive(!IsCustomBattle);
                 quickRestartButton.gameObject.SetActive(false);
                 exitToMenuButton.gameObject.SetActive(false);
                 concedeDefeatButton.gameObject.SetActive(true);
+                deleteProgressGroup.SetActive(false);
             }
+        }
+        // The confirmation pop-up lives in the MainMenu scene, so this button only shows there.
+        private void OpenDeleteProgressPrompt()
+        {
+            CloseSettingsPanel();
+            TJ.MainMenu.MainMenu mainMenu = FindFirstObjectByType<TJ.MainMenu.MainMenu>();
+            if (mainMenu == null)
+            {
+                Debug.LogError("Delete All Progress pressed with no MainMenu loaded.");
+                return;
+            }
+            mainMenu.OpenDemoSaveImportPrompt();
         }
         private void ResetTutorial()
         {
@@ -297,6 +432,7 @@ namespace TJ
             NotificationManager.Instance.DisplayNotification(notificationText);
 
             PlayerPrefs.SetInt("battleTutorial", 0);
+            PlayerPrefs.DeleteKey(BattleGuideProgress.LegacyGarrisonPref);
         }
         private void OnApplicationFocus(bool hasFocus)
         {
@@ -314,6 +450,8 @@ namespace TJ
             {
                 InputHandler.Instance.SettingsButtonPressed -= SettingsHotkeyPressed;
             }
+            UIScale.OnValueChanged -= UIScaler.Apply;
+            SceneManager.sceneLoaded -= OnSceneLoadedApplyUIScale;
         }
         private void SetHideSquadInfoInBattle(bool isOn)
         {

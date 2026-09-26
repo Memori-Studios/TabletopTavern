@@ -3,6 +3,7 @@ using UnityEngine.Experimental.Rendering;
 using UnityEngine.Rendering;
 using UnityEngine.Rendering.RenderGraphModule;
 using UnityEngine.Rendering.Universal;
+using Memori.Utilities;
 
 /// <summary>
 /// Draws the unit outlines and ground markers. UnitOutlineSystem marks hovered and selected meshes
@@ -56,7 +57,10 @@ public class UnitOutlineFeature : ScriptableRendererFeature
         uint activeOutlines = UnitOutlineState.ActiveMask;
         if (activeOutlines == 0 && UnitMarkerState.Count == 0) return;
 
-        _pass.Configure(activeOutlines, modelLayers, grassHeight, markerMinPixels, widthPixels, interiorEdgeRatio, hoverPlayerColor, hoverEnemyColor, selectedColor);
+        float markerScale = TJ.BattlefieldMarkerScale.Current;
+        // Only player squads can be selected, so the selected colour is a player colour.
+        _pass.Configure(activeOutlines, modelLayers, grassHeight, markerMinPixels * markerScale, widthPixels * markerScale, interiorEdgeRatio,
+            ColorVision.Good(hoverPlayerColor), ColorVision.Bad(hoverEnemyColor), ColorVision.Good(selectedColor));
         renderer.EnqueuePass(_pass);
     }
 
@@ -173,7 +177,9 @@ public class UnitOutlineFeature : ScriptableRendererFeature
             if (units > 0) cmd.SetBufferData(_markerBuffer, UnitMarkerState.Units.AsArray(), 0, 0, units);
             if (preview > 0) cmd.SetBufferData(_markerBuffer, UnitMarkerState.Preview, 0, units, preview);
             _markerProperties.SetBuffer(MarkersId, _markerBuffer);
-            _markerProperties.SetVector(MarkerWidthId, new Vector4(UnitMarkerState.LineThickness * 0.5f, _markerMinPixels * 0.5f, 0f, 0f));
+            // z scales the chevron footprint itself; the pixel minimum was already scaled through Configure.
+            float markerScale = TJ.BattlefieldMarkerScale.Current;
+            _markerProperties.SetVector(MarkerWidthId, new Vector4(UnitMarkerState.LineThickness * 0.5f * markerScale, _markerMinPixels * 0.5f, markerScale, 0f));
             return total;
         }
 

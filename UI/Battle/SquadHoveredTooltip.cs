@@ -4,6 +4,7 @@ using UnityEngine.UI;
 using Unity.Entities;
 using Memori.Localization;
 using TJ.Morale;
+using Memori.Utilities;
 
 namespace TJ
 {
@@ -28,10 +29,14 @@ namespace TJ
         EntityManager entityManager;
         RectTransform rt;
 
+        Color _winningOff, _losingOff;
+
         private void Awake()
         {
             squadHoverPopup = GetComponent<MemoriCanvasGroup>();
             rt = transform as RectTransform;
+            _winningOff = _winningImage.color;
+            _losingOff = _losingImage.color;
         }
         public void Load(SquadEntity _squadEntity)
         {
@@ -65,7 +70,8 @@ namespace TJ
             if(!shown) return;
             
             Vector3 mousePos = transform.parent.position;
-            if(mousePos.y < 250) {
+            // 250 canvas units, so the flip point follows the UI scale instead of raw pixels.
+            if(mousePos.y < 250f * rt.lossyScale.y) {
                 rt.pivot = new Vector2(rt.pivot.x, 0);
             } else {
                 rt.pivot = new Vector2(rt.pivot.x, 1.25f);
@@ -106,6 +112,8 @@ namespace TJ
 
                     _winningImage.gameObject.SetActive(combatStatus == CombatStatus.Winning);
                     _losingImage.gameObject.SetActive(combatStatus == CombatStatus.Losing);
+                    _winningImage.color = ColorVision.Good(_winningOff);
+                    _losingImage.color = ColorVision.Bad(_losingOff);
                     _neutralImage.gameObject.SetActive(combatStatus == CombatStatus.None);
                     string localizedCombatStatusText = LocalizationManager.Instance.GetText("CombatStatus" + combatStatus.ToString());
                     _combatStatusText.text = localizedCombatStatusText;

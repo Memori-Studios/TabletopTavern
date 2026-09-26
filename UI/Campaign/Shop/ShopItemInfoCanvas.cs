@@ -17,8 +17,8 @@ public class ShopItemInfoCanvas : MonoBehaviour
     public void SetUp(string _title, string _description)
     {
         titleText.text = _title;
-        ColorData.XMLTagColorApplicator(ref _description);
-        descriptionText.text = _description;
+        // A world-space sign over the shop stall: nothing on it is hovered.
+        descriptionText.text = KeywordText.Render(_description, false);
     }
     void Update()
     {

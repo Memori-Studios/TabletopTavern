@@ -1,0 +1,23 @@
+{
+    "name": "TabletopTavern.Guide.Editor",
+    "rootNamespace": "",
+    "references": [
+        "TabletopTavern.Core",
+        "TabletopTavern.Core.Components",
+        "Unity.TextMeshPro",
+        "Unity.Localization",
+        "Unity.Localization.Editor",
+        "UnityEngine.UI"
+    ],
+    "includePlatforms": [
+        "Editor"
+    ],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": false,
+    "precompiledReferences": [],
+    "autoReferenced": false,
+    "defineConstraints": [],
+    "versionDefines": [],
+    "noEngineReferences": false
+}

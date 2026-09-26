@@ -306,8 +306,7 @@ namespace TJ.Treasure
             string descriptionLocalized = LocalizationManager.Instance.GetText(gearItemEnum + "Desc");
             descriptionLocalized = string.Format(descriptionLocalized, gearItem.GearModifierValue);
 
-            ColorData.XMLTagColorApplicator(ref descriptionLocalized);
-            gearDescriptionText.text = descriptionLocalized;
+            KeywordText.Apply(gearDescriptionText, descriptionLocalized);
             IAudioRequester.Instance.PlaySFX(SFXData.ChestOpen);
             claimGearButton.gameObject.SetActive(true);
             gearInfoCanvasGroup.FadeInAsync(1);

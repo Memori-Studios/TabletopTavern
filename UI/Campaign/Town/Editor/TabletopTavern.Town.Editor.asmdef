@@ -1,0 +1,23 @@
+{
+    "name": "TabletopTavern.Town.Editor",
+    "rootNamespace": "",
+    "references": [
+        "TabletopTavern.Core",
+        "Unity.TextMeshPro",
+        "UnityEngine.UI",
+        "Unity.Localization",
+        "Unity.Localization.Editor",
+        "Memori.Tooltip"
+    ],
+    "includePlatforms": [
+        "Editor"
+    ],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": false,
+    "precompiledReferences": [],
+    "autoReferenced": false,
+    "defineConstraints": [],
+    "versionDefines": [],
+    "noEngineReferences": false
+}

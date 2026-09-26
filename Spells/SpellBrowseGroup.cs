@@ -5,8 +5,9 @@ using UnityEngine.UI;
 namespace TJ.Spells
 {
     /// <summary>
-    /// One faction band in the <see cref="SpellBrowseMenu"/>: a colour dot, the faction name, and the
-    /// parent every row of that faction is instantiated under.
+    /// One faction band: the parent every row of that faction is instantiated under, marked either by
+    /// a colour dot and the faction name (run-setup grimoire) or by a tray tinted in the faction colour
+    /// (battle picker, which names the faction only for the hovered spell).
     ///
     /// Grouping is what makes the faction colouring worth having. Ungrouped, twenty identically-treated
     /// tiles carry no information until you read every cell, and the colour has nothing to reinforce.
@@ -16,18 +17,34 @@ namespace TJ.Spells
     /// </summary>
     public class SpellBrowseGroup : MonoBehaviour
     {
+        // All four optional: a prefab carries the label pair, the tray pair, or both.
         [SerializeField] private Image colourDot;
         [SerializeField] private TMP_Text labelText;
+        [SerializeField] private Image trayImage;
+        [SerializeField] private Image trayBorderImage;
         [SerializeField] private Transform tilesParent;
+        // A tray caption carries the faction colour itself, since it has no colour dot beside it.
+        [SerializeField] private bool labelInFactionColour;
+
+        // Faint enough that the tiles' own faction borders stay the loudest colour in the tray.
+        private const float TRAY_FILL_ALPHA = 0.12f;
+        private const float TRAY_BORDER_ALPHA = 0.35f;
 
         /// <summary>Where <see cref="SpellBrowseMenu"/> parents this faction's rows.</summary>
         public Transform TilesParent => tilesParent;
 
         public void SetUp(Race race)
         {
-            colourDot.color = ColorData.GetRaceDisplayColor(race);
-            labelText.text = SpellRaceLabel.Get(race);
-            SizeLabelToText();
+            Color factionColour = ColorData.GetRaceDisplayColor(race);
+            if(colourDot != null) colourDot.color = factionColour;
+            if(trayImage != null) trayImage.color = ColorData.WithAlpha255(factionColour, TRAY_FILL_ALPHA * 255f);
+            if(trayBorderImage != null) trayBorderImage.color = ColorData.WithAlpha255(factionColour, TRAY_BORDER_ALPHA * 255f);
+            if(labelText != null)
+            {
+                labelText.text = SpellRaceLabel.Get(race);
+                if(labelInFactionColour) labelText.color = factionColour;
+                SizeLabelToText();
+            }
         }
 
         /// <summary>

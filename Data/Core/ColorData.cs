@@ -2,6 +2,7 @@ using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
 using Memori.Localization;
+using Memori.Utilities;
 
 namespace TJ
 {
@@ -10,11 +11,11 @@ namespace TJ
         public static string Primary = "#ECF0F1";
         public static string Secondary = "#BDC3C7";
 
-        public static string Player = "#D49B39";
-        public static string Enemy = "#D44339";
+        public static string Player => Pick(PlayerColors);
+        public static string Enemy => Pick(EnemyColors);
 
-        public static string Green = "#43F86C";
-        public static string Error = "#CC2626";
+        public static string Green => Pick(GreenColors);
+        public static string Error => Pick(ErrorColors);
 
         public static string Tier1 = "#BDC3C7";
         public static string Tier2 = "#8AFA88";
@@ -22,8 +23,8 @@ namespace TJ
         public static string Tier4 = "#F1C40F";
 
         // For events
-        public static string Positive = "#47D439";
-        public static string Negative = "#D44339";
+        public static string Positive => Pick(PositiveColors);
+        public static string Negative => Pick(NegativeColors);
 
         public static string Gold = "#E3BB71";
         public static string TroopHealth = "#E37188";
@@ -31,10 +32,38 @@ namespace TJ
         public static string UnitStat = "#E3BB71";
 
         // Battlefield
-        public static string MinimapPlayer = "#15ff00ff";
-        public static string MinimapEnemy = "#ff0000ff";
-        public static string PlayerTeamOutline = "#FFE300";
-        public static string EnemyTeamOutline = "#FF0000";
+        public static string MinimapPlayer => Pick(MinimapPlayerColors);
+        public static string MinimapEnemy => Pick(MinimapEnemyColors);
+        public static string PlayerTeamOutline => Pick(PlayerTeamOutlineColors);
+        public static string EnemyTeamOutline => Pick(EnemyTeamOutlineColors);
+
+        #region Colorblind Mode
+
+        // Today's colour first, its Colorblind Mode version second.
+        static readonly string[] PlayerColors = Good("#D49B39");
+        static readonly string[] EnemyColors = Bad("#D44339");
+        static readonly string[] GreenColors = Good("#43F86C");
+        static readonly string[] ErrorColors = Bad("#CC2626");
+        static readonly string[] PositiveColors = Good("#47D439");
+        static readonly string[] NegativeColors = Bad("#D44339");
+        static readonly string[] MinimapPlayerColors = Good("#15ff00ff");
+        static readonly string[] MinimapEnemyColors = Bad("#ff0000ff");
+        static readonly string[] PlayerTeamOutlineColors = Good("#FFE300");
+        static readonly string[] EnemyTeamOutlineColors = Bad("#FF0000");
+
+        static string[] Good(string hex) => new[] { hex, ColorVision.Blue(hex) };
+        static string[] Bad(string hex) => new[] { hex, ColorVision.Orange(hex) };
+        static string Pick(string[] colors) => ColorVision.IsOn ? colors[1] : colors[0];
+
+        /// <summary>Localized text that embeds today's green and red hex codes gets their Colorblind Mode versions.</summary>
+        public static string ApplyColorVision(string text)
+        {
+            if (!ColorVision.IsOn || string.IsNullOrEmpty(text)) return text;
+            return text.Replace(GreenColors[0], GreenColors[1], System.StringComparison.OrdinalIgnoreCase)
+                       .Replace(ErrorColors[0], ErrorColors[1], System.StringComparison.OrdinalIgnoreCase);
+        }
+
+        #endregion
 
         public static Vector4 HexToRgba(string hexColor)
         {
@@ -77,6 +106,21 @@ namespace TJ
                 _ => HexToRgba(Primary)
             };
         }
+        public static string GetGearRarityColorString(GearRarity _gearRarity)
+        {
+            return _gearRarity switch
+            {
+                GearRarity.Common => Tier1,
+                GearRarity.Uncommon => Tier2,
+                GearRarity.Rare => Tier3,
+                _ => Primary
+            };
+        }
+        /// <summary>The gear's rarity word in its rarity colour, so rarity reads without relying on the card tint.</summary>
+        public static string GearRarityLabel(GearRarity _gearRarity)
+        {
+            return $"<color={GetGearRarityColorString(_gearRarity)}>[{LocalizationManager.Instance.GetText(_gearRarity.ToString())}]</color>";
+        }
         public static Vector4 GetUnitStatColor(UnitStat _unitStat)
         {
             return HexToRgba(UnitStat);
@@ -106,158 +150,6 @@ namespace TJ
         public static Vector4 GetTeamMinimapColor(bool _isPlayerTeam)
         {
             return _isPlayerTeam ? HexToRgba(MinimapPlayer) : HexToRgba(MinimapEnemy);
-        }
-        #region Rarity tag cache
-
-        // XMLTagColorApplicator used to rebuild and re-localize all of this on EVERY call: 8 rarity
-        // and tier words, 16 unit stats and 27 damage attributes, so 51 string-table lookups plus 4
-        // array allocations per invocation. It runs once per gear card, which made it roughly 2,000
-        // lookups during a single Collection build. All of it is invariant for a given locale, so it
-        // is cached and invalidated on locale change. LocalizationManager lives in Core for the life
-        // of the process, so the one-time subscription below never needs unhooking.
-        // Terms to colour, not a strict UnitStat enum mirror - "Ranged" and "Morale" have no
-        // matching enum value. Morale is here so effects that move CurrentMorale can name it
-        // instead of misattributing themselves to [Leadership], which is the MaxMorale cap.
-        private static readonly string[] UnitStatKeys = new string[] { "MeleeAttack", "MeleeDefense", "WeaponStrength", "Accuracy", "Range", "MissileStrength", "HitPoints", "None", "Speed", "Armor", "ChargeBonus", "Leadership", "Ammunition", "ChargeImpactDamage", "Ranged", "Morale" };
-        private static readonly string[] DamageAttributeKeys = new string[] { "None", "ArmorPiercing", "AntiInfantry", "AntiLarge", "ArmorPiercingAntiInfantry", "ArmorPiercingAntiLarge", "Terror", "Outrider", "Rage", "StandardShields", "Terrifying", "Stalwart", "Ethereal", "SwampCreature", "ForestDweller", "ChickenFlight", "BloodFrenzy", "Emblazing", "Unstoppable", "HeavyShields", "ThrowingAxes", "ArmorSundering", "ForgefuryTempering", "FlamingAmmo", "MonsterSlayer", "DragonsHoard", "BackStabbers" };
-
-        private static string[] _rarityTags, _unitStatTags, _damageAttributeTags;
-        private static bool _tagsHooked;
-
-        private static void EnsureTagCache()
-        {
-            if (!_tagsHooked)
-            {
-                _tagsHooked = true;
-                LocalizationManager.Instance.OnLocalizedStringsLoaded += InvalidateTagCache;
-            }
-            if (_rarityTags != null) return;
-
-            LocalizationManager lm = LocalizationManager.Instance;
-            _rarityTags = new string[]
-            {
-                "[" + lm.GetText("Common") + "]",
-                "[" + lm.GetText("Uncommon") + "]",
-                "[" + lm.GetText("Rare") + "]",
-                "[" + lm.GetText("Legendary") + "]",
-                "[" + lm.GetText("Tier I") + "]",
-                "[" + lm.GetText("Tier II") + "]",
-                "[" + lm.GetText("Tier III") + "]",
-                "[" + lm.GetText("Tier IV") + "]"
-            };
-
-            _unitStatTags = new string[UnitStatKeys.Length];
-            for (int i = 0; i < UnitStatKeys.Length; i++)
-                _unitStatTags[i] = "[" + lm.GetText(UnitStatKeys[i]) + "]";
-
-            _damageAttributeTags = new string[DamageAttributeKeys.Length];
-            for (int i = 0; i < DamageAttributeKeys.Length; i++)
-                _damageAttributeTags[i] = "[" + lm.GetText(DamageAttributeKeys[i]) + "]";
-        }
-
-        private static void InvalidateTagCache()
-        {
-            _rarityTags = null;
-            _unitStatTags = null;
-            _damageAttributeTags = null;
-        }
-
-        #endregion
-
-        public static string XMLTagColorApplicator(ref string _text)
-        {
-            if (_text.Length <= 0) return _text;
-
-            EnsureTagCache();
-            string[] tags = _rarityTags;
-            string commonLocalized = tags[0];
-            string uncommonLocalized = tags[1];
-            string rareLocalized = tags[2];
-            string legendaryLocalized = tags[3];
-
-            //if text contains commonlocalized, replace common localized with the colordata xml tag
-            if (_text.Contains(commonLocalized))
-            {
-                _text = _text.Replace(commonLocalized, $"<color={Tier1}>{commonLocalized}</color>");
-            }
-            if (_text.Contains(uncommonLocalized))
-            {
-                _text = _text.Replace(uncommonLocalized, $"<color={Tier2}>{uncommonLocalized}</color>");
-            }
-            if (_text.Contains(rareLocalized))
-            {
-                _text = _text.Replace(rareLocalized, $"<color={Tier3}>{rareLocalized}</color>");
-            }
-            if (_text.Contains(legendaryLocalized))
-            {
-                _text = _text.Replace(legendaryLocalized, $"<color={Tier4}>{legendaryLocalized}</color>");
-            }
-
-            string tier1Localized = tags[4];
-            string tier2Localized = tags[5];
-            string tier3Localized = tags[6];
-            string tier4Localized = tags[7];
-
-            //if text contains commonlocalized, replace common localized with the colordata xml tag
-            if (_text.Contains(tier1Localized))
-            {
-                _text = _text.Replace(tier1Localized, $"<color={Tier1}>{tier1Localized}</color>");
-            }
-            if (_text.Contains(tier2Localized))
-            {
-                _text = _text.Replace(tier2Localized, $"<color={Tier2}>{tier2Localized}</color>");
-            }
-            if (_text.Contains(tier3Localized))
-            {
-                _text = _text.Replace(tier3Localized, $"<color={Tier3}>{tier3Localized}</color>");
-            }
-            if (_text.Contains(tier4Localized))
-            {
-                _text = _text.Replace(tier4Localized, $"<color={Tier4}>{tier4Localized}</color>");
-            }
-
-            if (_text.Contains("+"))
-            {
-                int currentIndex = 0;
-                while (currentIndex < _text.Length && currentIndex != -1)
-                {
-                    currentIndex = _text.IndexOf("+", currentIndex);
-                    if (currentIndex == -1) break; // No more + found
-
-                    int endIndex = _text.IndexOf(" ", currentIndex);
-                    if (endIndex == -1) endIndex = _text.Length; // Use end of string if no space follows
-
-                    if (endIndex > currentIndex)
-                    {
-                        string substring = _text.Substring(currentIndex, endIndex - currentIndex);
-                        _text = _text.Replace(substring, $"<color={Green}>{substring}</color>");
-                        currentIndex += substring.Length + Green.Length + 15; // Move past the replaced text (+15 for <color=...></color>)
-                    }
-                    else
-                    {
-                        currentIndex++; // Move past this + if no valid substring found
-                    }
-                }
-            }
-            string[] unitStatLocalized = _unitStatTags;
-            string[] damageAttributesLocalized = _damageAttributeTags;
-
-            for (int i = 0; i < unitStatLocalized.Length; i++)
-            {
-                if (_text.Contains(unitStatLocalized[i]))
-                {
-                    _text = _text.Replace(unitStatLocalized[i], $"<color={UnitStat}>{unitStatLocalized[i]}</color>");
-                }
-            }
-            for (int i = 0; i < damageAttributesLocalized.Length; i++)
-            {
-                if (_text.Contains(damageAttributesLocalized[i]))
-                {
-                    _text = _text.Replace(damageAttributesLocalized[i], $"<color={UnitStat}>{damageAttributesLocalized[i]}</color>");
-                }
-            }
-
-            return _text;
         }
         public static Color GetColorBasedOnAffordability(bool _canAfford)
         {
@@ -379,6 +271,20 @@ namespace TJ
         public static Color SpellFrameHover => (Color)HexToRgba(Primary);
         public static Color SpellFrameEquipped => WithAlpha255((Color)HexToRgba(Primary), 128f);
         public static Color SpellFrameActive => Color.white;
+
+        #endregion
+
+        #region Mana
+
+        // Tints for the white mana sprites (orb, gem strip, cost gems). Preview is the "this is what the
+        // hovered spell spends" pulse target; it must stay distinct from Full at a glance.
+        public static Color ManaFull => new Color32(90, 182, 255, 255);
+        public static Color ManaPreview => Color.white;
+        public static Color ManaPreviewBand => new Color32(168, 220, 255, 130);
+        public static Color ManaEmpty => new Color32(34, 48, 58, 255);
+        // Cost gems carry white text, so they sit darker than the strip gems.
+        public static Color ManaCostGem => new Color32(42, 120, 200, 255);
+        public static Color ManaUnaffordable => new Color32(178, 58, 51, 255);
 
         #endregion
 

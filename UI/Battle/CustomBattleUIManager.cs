@@ -14,6 +14,7 @@ using Memori.Steamworks;
 using TJ.Map;
 using System.Threading.Tasks;
 using Memori.Localization;
+using Memori.Tooltip;
 
 namespace TJ
 {
@@ -46,6 +47,7 @@ namespace TJ
         [Header("Battlefield Generation")]
         [SerializeField] private MemoriButtonV2 generateBattlefieldButton;
         [SerializeField] private Toggle useRandomSeedToggle;
+        [SerializeField] private Toggle spellTestModeToggle;
         [SerializeField] private TMP_InputField seedInputField;
         [SerializeField] private Biome biome;
         [SerializeField] private Weather weather;
@@ -61,6 +63,8 @@ namespace TJ
             if (!BattleManager.Instance.BattleSaveManager.IsCustomBattle && (SceneHandler.Instance.EditorOverride != SceneHandler.EditorOverrides.TavernBattle || SceneHandler.Instance.EditorLoadCampaignBattle))
             {
                 customBattlePanel.SetActive(false);
+                // The row sits under Start Battle, outside the custom battle panel, and test mode never applies in campaign.
+                if (spellTestModeToggle != null) spellTestModeToggle.transform.parent.gameObject.SetActive(false);
                 return;
             }
             customBattlePanel.SetActive(true);
@@ -161,6 +165,7 @@ namespace TJ
             ResetWeatherDropdownOptions();
 
             useRandomSeedToggle.onValueChanged.AddListener(ChangeRandomSeedToggle);
+            SetUpSpellTestModeToggle();
             seedInputField.text = _seed.ToString();
             seedInputField.onValueChanged.AddListener((string value) =>
             {
@@ -308,9 +313,45 @@ namespace TJ
             weatherDropdown.onValueChanged.RemoveAllListeners();
             mapRegionDropdown.onValueChanged.RemoveAllListeners();
 
+            if (spellTestModeToggle != null) spellTestModeToggle.onValueChanged.RemoveAllListeners();
+
             if (BattleManager.HasInstance)
+            {
                 BattleManager.Instance.OnCursorModeChanged -= OnCursorModeChanged;
+                BattleManager.Instance.OnGamePhaseChanged -= LockSpellTestModeToggle;
+            }
         }
+
+        #region Spell test mode
+        private void SetUpSpellTestModeToggle()
+        {
+            if (spellTestModeToggle == null) return;
+
+#if !SPELLS
+            spellTestModeToggle.transform.parent.gameObject.SetActive(false);
+            return;
+#endif
+            spellTestModeToggle.SetIsOnWithoutNotify(Spells.SpellTestMode.Enabled);
+            spellTestModeToggle.onValueChanged.RemoveAllListeners();
+            spellTestModeToggle.onValueChanged.AddListener(on => BattleManager.Instance.SpellManager.SetTestMode(on));
+            spellTestModeToggle.interactable = BattleManager.Instance.GamePhase == GamePhase.Deployment;
+
+            MemoriTooltipTrigger tooltip = spellTestModeToggle.transform.parent.GetComponent<MemoriTooltipTrigger>();
+            if (tooltip == null) tooltip = spellTestModeToggle.transform.parent.gameObject.AddComponent<MemoriTooltipTrigger>();
+            LocalizationManager loc = LocalizationManager.Instance;
+            tooltip.SetUpToolTip(loc.GetText("SpellTestModeLabel"),
+                string.Format(loc.GetText("SpellTestModeDesc"), Spells.SpellTestMode.ManaPool, Spells.SpellTestMode.CooldownSeconds));
+
+            BattleManager.Instance.OnGamePhaseChanged -= LockSpellTestModeToggle;
+            BattleManager.Instance.OnGamePhaseChanged += LockSpellTestModeToggle;
+        }
+
+        // The spell bar reloads when the mode changes, which is only safe before any spell is live.
+        private void LockSpellTestModeToggle(GamePhase phase)
+        {
+            if (spellTestModeToggle != null) spellTestModeToggle.interactable = phase == GamePhase.Deployment;
+        }
+        #endregion
         private async void RegenerateBattlefield()
         {
             BattleManager.Instance.BattleCleanUpManager.RegeneratingBattlefieldIndicator.SetActive(true);

@@ -371,15 +371,16 @@ public class SquadManager : MonoBehaviour
         // rule data instead of hardcoded per-hero checks, so mods can change them. The Sakura
         // Dynasty mono-race army gate (OnlySakuraUnits) is unchanged - not yet generalized to
         // other races.
-        if(_enemyData.Team == Team.Player && campaignSaveDataHolder.ActiveHeroID != -1)
+        BattleHeroContext hero = BattleHeroContext.For(campaignSaveDataHolder, _enemyData.Team);
+        if(hero.HasHero)
         {
             float SumHeroBonus(UnitStat stat, float currentValue)
             {
                 float total = 0f;
-                foreach (var bonus in HeroBonusManager.GetHeroStatBonus(stat, squadStats.unitName, campaignSaveDataHolder.ActiveHeroID, currentValue))
+                foreach (var bonus in HeroBonusManager.GetHeroStatBonus(stat, squadStats.unitName, hero.HeroID, currentValue, hero.EnemyRace))
                     total += bonus.Value;
-                if (campaignSaveDataHolder.OnlySakuraUnits)
-                    foreach (var bonus in HeroBonusManager.GetFactionBonusForHero(stat, campaignSaveDataHolder.ActiveHeroID))
+                if (hero.OnlySakuraUnits)
+                    foreach (var bonus in HeroBonusManager.GetFactionBonusForHero(stat, hero.HeroID))
                         total += bonus.Value;
                 return total;
             }
@@ -389,11 +390,13 @@ public class SquadManager : MonoBehaviour
             chargeImpactDamage += (int)SumHeroBonus(UnitStat.ChargeImpactDamage, chargeImpactDamage);
             chargeCount = Mathf.Max(0, chargeCount + (int)SumHeroBonus(UnitStat.ChargeCount, chargeCount));
             // Must equal the count the squad was recruited with (HeroBonusManager.GetPlayerBaseUnitCount),
-            // or the health bar max disagrees with the models ArmySpawnManager spawned.
-            initialSquadSize = HeroBonusManager.GetPlayerBaseUnitCount(squadStats.unitName, campaignSaveDataHolder.ActiveHeroID);
+            // or the health bar max disagrees with the models ArmySpawnManager spawned. Enemy armies are
+            // never resized at recruit time, so a warlord's count rules do not apply.
+            if (_enemyData.Team == Team.Player)
+                initialSquadSize = HeroBonusManager.GetPlayerBaseUnitCount(squadStats.unitName, hero.HeroID);
 
             // Merge hero-granted attributes into the local stats so every tag check below sees them.
-            foreach (var attributeBonus in HeroBonusManager.GetHeroAttributeBonus(squadStats.unitName, campaignSaveDataHolder.ActiveHeroID))
+            foreach (var attributeBonus in HeroBonusManager.GetHeroAttributeBonus(squadStats.unitName, hero.HeroID, hero.EnemyRace))
             {
                 TabletopTavernConstants.SetAttribute(ref squadStats.SquadAttributes, attributeBonus.UnitAttribute);
             }
@@ -923,11 +926,24 @@ public class SquadManager : MonoBehaviour
                     };
                 }
 
-                //overwrite player army with current formation
+                // Reorder only within the slots the deployed squads already hold; writing to 0..n-1 left a second copy behind any gap.
+                int[] deployedSlots = new int[orderOfSquadsInBattle.Length];
                 for(int j = 0; j < orderOfSquadsInBattle.Length; j++)
                 {
-                    saveData.playerArmy[j] = orderOfSquadsInBattle[j];
-                    saveData.playerArmy[j].UnitIndex = j;
+                    string uniqueID = orderOfSquadsInBattle[j].UniqueID;
+                    deployedSlots[j] = Array.FindIndex(saveData.playerArmy, s => s.UnitIndex != -1 && s.UniqueID == uniqueID);
+                    if (deployedSlots[j] < 0)
+                    {
+                        Debug.LogError($"SaveFormation: squad {uniqueID} is not in the saved army. Formation not saved.");
+                        return;
+                    }
+                }
+                Array.Sort(deployedSlots);
+
+                for(int j = 0; j < orderOfSquadsInBattle.Length; j++)
+                {
+                    saveData.playerArmy[deployedSlots[j]] = orderOfSquadsInBattle[j];
+                    saveData.playerArmy[deployedSlots[j]].UnitIndex = deployedSlots[j];
                 }
 
                 saveData.playerSquadBattlePositions = battlePositions;
@@ -959,20 +975,6 @@ public class SquadManager : MonoBehaviour
         }
         string formationSavedLocalized = LocalizationManager.Instance.GetText("formationSaved");
         NotificationManager.Instance.DisplayNotification(formationSavedLocalized);
-    }
-    [ContextMenu("Clear Squad Data")]
-    public void ClearSquadData()
-    {
-        SquadSaveData squadSaveData = Memori.Utilities.JSONFileHandler.GetSaveData<SquadSaveData>("squadSaveData.json");
-        squadSaveData.squads = new List<SquadSpawnData>();
-        Memori.Utilities.JSONFileHandler.SaveToJSON(squadSaveData, "squadSaveData.json");
-    }
-    [ContextMenu("Clear Enemy Data")]
-    public void ClearEnemyData()
-    {
-        SquadSaveData squadSaveData = Memori.Utilities.JSONFileHandler.GetSaveData<SquadSaveData>("squadSaveData.json");
-        squadSaveData.enemies = new List<SquadSpawnData>();
-        Memori.Utilities.JSONFileHandler.SaveToJSON(squadSaveData, "squadSaveData.json");
     }
     [ContextMenu("Open Save Folder")]
     public void OpenSaveFolder()
@@ -1186,6 +1188,13 @@ public class SquadManager : MonoBehaviour
         playerSquads.Dispose();
     }
     #endregion
+    // The hero whose rules apply to this team's squads in the current battle; none before the battle's holder exists.
+    public BattleHeroContext HeroFor(Team team)
+    {
+        EntityManager entityManager = World.DefaultGameObjectInjectionWorld.EntityManager;
+        using EntityQuery query = entityManager.CreateEntityQuery(ComponentType.ReadOnly<CampaignSaveDataHolder>());
+        return query.TryGetSingleton(out CampaignSaveDataHolder holder) ? BattleHeroContext.For(holder, team) : default;
+    }
     public SquadSFXManager SetUpSquadFlag(SquadEntity _squadEntity, Team _team, int _squadId, MoraleComponent _moraleComponent)
     {
         Material GetFlagMaterial(Team team, SquadStats _squadStats, int ActiveHeroID, bool isCustomBattle, Material raceFlagBaseMaterial)
@@ -1230,14 +1239,15 @@ public class SquadManager : MonoBehaviour
         // (3 charges, +1 per prestige level) that the same discrepancy would be a third of the bar.
         if (TabletopTavernConstants.Casts(squadStats.unitType))
             ammunition += TabletopTavernConstants.PRESTIGE_AMMO_BONUS_MAGE * GetSquadPrestige(_squadId);
-        // Hero-granted ammunition bonuses (e.g. Bertha/14 Supply Lines) now come from
-        // HeroBonusManager's rule data, same source as EntityWatcher's real Ammunition value.
-        if (HeroBonusManager.Instance.ActiveHeroID != -1)
+        // Hero-granted ammunition bonuses (e.g. Bertha/14 Supply Lines), from this team's own hero
+        // only; same source as EntityWatcher's real Ammunition value.
+        BattleHeroContext hero = HeroFor(_team);
+        if (hero.HasHero)
         {
-            foreach (var bonus in HeroBonusManager.GetHeroStatBonus(UnitStat.Ammunition, _squadEntity.UnitName, HeroBonusManager.Instance.ActiveHeroID, ammunition))
+            foreach (var bonus in HeroBonusManager.GetHeroStatBonus(UnitStat.Ammunition, _squadEntity.UnitName, hero.HeroID, ammunition, hero.EnemyRace))
                 ammunition += (int)bonus.Value;
-            if (BattleManager.Instance.OnlySakuraUnits)
-                foreach (var bonus in HeroBonusManager.GetFactionBonusForHero(UnitStat.Ammunition, HeroBonusManager.Instance.ActiveHeroID))
+            if (_team == Team.Player ? BattleManager.Instance.OnlySakuraUnits : hero.OnlySakuraUnits)
+                foreach (var bonus in HeroBonusManager.GetFactionBonusForHero(UnitStat.Ammunition, hero.HeroID))
                     ammunition += (int)bonus.Value;
         }
         SquadFlagGameObject flag = flagInstance.GetComponent<SquadFlagGameObject>();

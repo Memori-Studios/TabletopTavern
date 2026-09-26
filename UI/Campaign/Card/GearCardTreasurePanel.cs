@@ -46,10 +46,10 @@ public class GearCardTreasurePanel : MonoBehaviour, IPointerEnterHandler, IPoint
             string gearNameLocalized = LocalizationManager.Instance.GetText(_gearID+"Name");
             string gearDescLocalized = LocalizationManager.Instance.GetText(_gearID+"Desc");
             gearDescLocalized = string.Format(gearDescLocalized, _gear.GearModifierValue);
-            ColorData.XMLTagColorApplicator(ref gearDescLocalized);
             gearImage.sprite = SpriteData.GetSprite(_gear.GearName);
-            _gearNameText.text = gearNameLocalized;
-            _gearDescriptionText.text = gearDescLocalized;
+            // The row has one description line, so the rarity word sits beside the name.
+            _gearNameText.text = $"{gearNameLocalized} <size=70%>{ColorData.GearRarityLabel(_gear.GearRarity)}</size>";
+            KeywordText.Apply(_gearDescriptionText, gearDescLocalized);
             mouseOverHighlight1.color = new Color(mouseOverHighlight1.color.r, mouseOverHighlight1.color.g, mouseOverHighlight1.color.b, 0f);
             mouseOverHighlight1.enabled = false;
             animator.SetBool("Normal", true);
@@ -67,10 +67,9 @@ public class GearCardTreasurePanel : MonoBehaviour, IPointerEnterHandler, IPoint
 
             string nameLocalized = LocalizationManager.Instance.GetText(consumableEnum + "Name");
             string descLocalized = CampaignManager.Instance.ConsumableManager.GetConsumableDescription(consumableEnum);
-            ColorData.XMLTagColorApplicator(ref descLocalized);
             gearImage.sprite = SpriteData.GetSprite(consumableEnum.ToString());
             _gearNameText.text = nameLocalized;
-            _gearDescriptionText.text = descLocalized;
+            KeywordText.Apply(_gearDescriptionText, descLocalized);
             mouseOverHighlight1.color = new Color(mouseOverHighlight1.color.r, mouseOverHighlight1.color.g, mouseOverHighlight1.color.b, 0f);
             mouseOverHighlight1.enabled = false;
             animator.SetBool("Normal", true);

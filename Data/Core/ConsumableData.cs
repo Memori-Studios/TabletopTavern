@@ -221,7 +221,9 @@ namespace TJ
                     ConsumableEnum.LambSauce        => 5f,  // Legendary
                     _ => 5f,
                 };
-                case 3: return _consumable switch
+                // Endless acts keep the act 3 weights.
+                case 3:
+                default: return _consumable switch
                 {
                     ConsumableEnum.MinorHealth      => 15f, // Common
                     ConsumableEnum.Rewind           => 5f,  // Common
@@ -236,26 +238,6 @@ namespace TJ
                     ConsumableEnum.TrialofGrasses   => 14f, // Rare
                     ConsumableEnum.LambSauce        => 10f, // Legendary
                     _ => 5f,
-                };
-                default: 
-                {
-                    Debug.LogError($"Invalid act number {actNumber} for consumable drop chance calculation. Defaulting to act 3 weights.");
-                    return _consumable switch
-                    {
-                        ConsumableEnum.MinorHealth      => 15f, // Common
-                        ConsumableEnum.Rewind           => 5f,  // Common
-                        ConsumableEnum.Alchemist        => 8f,  // Common
-                        ConsumableEnum.MajorHealth      => 18f, // Uncommon
-                        ConsumableEnum.FateshineElixir  => 15f, // Uncommon
-                        ConsumableEnum.ManaDraught      => 15f, // Uncommon
-                        ConsumableEnum.NewUnit          => 15f, // Uncommon
-                        ConsumableEnum.Prestige         => 16f, // Rare
-                        ConsumableEnum.RunewellNectar   => 14f, // Rare
-                        ConsumableEnum.Duplicate        => 14f, // Rare
-                        ConsumableEnum.TrialofGrasses   => 14f, // Rare
-                        ConsumableEnum.LambSauce        => 10f, // Legendary
-                        _ => 5f,
-                    };
                 };
             }
         }

@@ -13,6 +13,8 @@ public class SettingsToggle : MonoBehaviour, IPointerEnterHandler, IPointerExitH
     [SerializeField] private Toggle toggle;
     [SerializeField] private TMP_Text lableText;
     [SerializeField] private Button button;
+    // Off for the graphics toggles: GraphicsPanel persists those on Apply, not on click.
+    [SerializeField] private bool saveOnClick = true;
     private void Awake()
     {
         toggle.isOn = PlayerPrefs.GetInt(settingName, 0) == 1;
@@ -21,7 +23,8 @@ public class SettingsToggle : MonoBehaviour, IPointerEnterHandler, IPointerExitH
     public void UpdateSetting()
     {
         toggle.isOn = !toggle.isOn;
-        PlayerPrefs.SetInt(settingName, toggle.isOn ? 1 : 0);
+        if (saveOnClick)
+            PlayerPrefs.SetInt(settingName, toggle.isOn ? 1 : 0);
     }
     public void OnPointerEnter(PointerEventData eventData)
     {

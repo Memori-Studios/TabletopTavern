@@ -6,6 +6,8 @@ using Memori.Audio;
 using Memori.Input;
 using System.Collections;
 using Memori.Localization;
+using Memori.SaveData;
+using TabletopTavern.Analytics;
 namespace TJ.Map
 {
     public class MapSceneManager : MonoBehaviour
@@ -370,9 +372,10 @@ namespace TJ.Map
             }
         }
 #region Complete Layer
-        public void CompleteLayer()
+        public void CompleteLayer(bool claimVictory = false)
         {
             Debug.Log($"[Map] Completing layer {activeChapterIndex}");
+            int squadsLost = CountZeroHealthSquads();
             CampaignManager.Instance.CampaignSaveManager.RemoveZeroHealthSquads();
             CampaignManager.Instance.CampaignSaveManager.HandleSpecialSquadsOnChapterEnd();
 
@@ -380,11 +383,13 @@ namespace TJ.Map
             // before the battle started. Only call RecordSelectedNode if it wasn't pre-recorded,
             // otherwise nodePath ends up with the same index twice.
             if (CampaignManager.Instance.CampaignSaveManager.SaveData.GetSelectedNodeIndex() != selectedNode.Value.index)
-                CampaignManager.Instance.CampaignSaveManager.RecordSelectedNode(selectedNode.Value.index);
+                CampaignManager.Instance.CampaignSaveManager.RecordSelectedNode(selectedNode.Value.index, selectedNode.Value.type);
             UpdateNodePath();
             CampaignManager.Instance.CampaignSaveManager.CompleteChapter();
+            CampaignManager.Instance.CampaignSaveManager.CheckForFourFactions();
             activeChapterIndex = CampaignManager.Instance.CampaignSaveManager.SaveData.activeMapLayer;
             int bookNumber = CampaignManager.Instance.CampaignSaveManager.SaveData.bookNumber;
+            AnalyticsNodeReport nodeReport = GameEventTracker.TryBuild("nodeCompleted", () => BuildNodeReport(squadsLost));
 
             //interest tutorial step trigger on layer 3 book 1
             if(activeChapterIndex == 3 && bookNumber == 1)
@@ -396,10 +401,19 @@ namespace TJ.Map
             // if (activeChapterIndex == 0) // for quick completion check
             if (activeChapterIndex == mapLayers.Count - 1)
             {
-                if(bookNumber == 3)
+                ReportNodeCompleted(nodeReport, 0);
+
+                // The last story act banks the win either way; only Claim Victory ends the run, and
+                // below Overlord there is no March On, so the win ends it as before.
+                if (bookNumber >= TabletopTavernConstants.FINAL_STORY_ACT)
                 {
-                    DisplayGameOver();
-                    return;
+                    BankVictory();
+                    bool endlessAllowed = DifficultyRules.EndlessAllowed(CampaignManager.Instance.CampaignSaveManager.SaveData.difficultyLevel);
+                    if (claimVictory || !endlessAllowed)
+                    {
+                        DisplayGameOver();
+                        return;
+                    }
                 }
 
                 CampaignManager.Instance.CampaignSaveManager.CompleteBook();
@@ -423,57 +437,127 @@ namespace TJ.Map
 #endif
 
             IAudioRequester.Instance.PlaySFX(SFXData.CompleteLayer);
+            int goldBeforeInterest = CampaignManager.Instance.CampaignSaveManager.SaveData.goldAmount;
             CampaignManager.Instance.GoldManager.CollectInterest();
-            
-            //DifficultyMod 12 LoseGoldOnTurnEnd
-            if(CampaignManager.Instance.CampaignSaveManager.SaveData.difficultyLevel >= TT_Difficulty.King)
-            {
-                string difficultyLocalized = LocalizationManager.Instance.GetText("difficultyName6");
-                string difficultyTitleLocalized = LocalizationManager.Instance.GetText("Difficulty");
-                string localizedString = $"{difficultyTitleLocalized}: {difficultyLocalized}";
-                CampaignManager.Instance.GoldManager.ModifyGold(-1, localizedString);
-            }
+            ReportNodeCompleted(nodeReport, CampaignManager.Instance.CampaignSaveManager.SaveData.goldAmount - goldBeforeInterest);
 
             SelectNextLayer();
             SetMapInput(true);
+            mapSceneUIManager.HUDPanel.ShowFreeCameraTip();
             CampaignManager.Instance.CampaignSaveManager.SaveCampaign();
             CampaignManager.Instance.CampaignSaveManager.SaveCampaignSnapshot();
-            CampaignManager.Instance.CampaignSaveManager.CheckForFourFactions();
+        }
+        // Locks the win in when the last story act falls: achievements, difficulty unlock, hero
+        // completion, Godking time and the analytics win. Marching on afterwards cannot undo any of it.
+        private void BankVictory()
+        {
+            CampaignSaveManager campaignSaveManager = CampaignManager.Instance.CampaignSaveManager;
+            if (campaignSaveManager.SaveData.victoryBanked) return;
+
+            campaignSaveManager.CheckPostRunAchievements();
+            SaveDataHandler.RecordVictoryUnlocks();
+            GameEventTracker.RunEnded(campaignSaveManager.SaveData, RunResult.Win, "win");
+            campaignSaveManager.SaveCampaign();
+            campaignSaveManager.SaveCampaignSnapshot();
         }
         private void DisplayGameOver()
         {
-            CampaignManager.Instance.CampaignSaveManager.CheckPostRunAchievements();
+            BankVictory();
 
             mapSceneUIManager.GameOverPanel.RecordGameOver(true);
             mapSceneUIManager.GameOverPanel.DisplayGameOver(true);
             mapSceneUIManager.HUDPanel.LegendGO.SetActive(false);
         }
+        // Squads RemoveZeroHealthSquads is about to erase.
+        private int CountZeroHealthSquads()
+        {
+            SquadToLoad[] army = CampaignManager.Instance.CampaignSaveManager.SaveData.playerArmy;
+            if (army == null) return 0;
+            int lost = 0;
+            foreach (SquadToLoad squad in army)
+                if (squad.UnitIndex != -1 && !squad.isEmptySquad && squad.SquadCurrentHealth == 0) lost++;
+            return lost;
+        }
+        // Read after CompleteChapter, so activeMapLayer is the layer this node sat on.
+        private AnalyticsNodeReport BuildNodeReport(int squadsLost)
+        {
+            CampaignSaveData save = CampaignManager.Instance.CampaignSaveManager.SaveData;
+            var report = new AnalyticsNodeReport
+            {
+                Layer = save.activeMapLayer,
+                NodeIndex = selectedNode.Value.index,
+                NodeType = selectedNode.Value.type.ToString(),
+                GoldAfter = save.goldAmount,
+                SquadsLost = squadsLost,
+            };
+            foreach (SquadToLoad squad in save.playerArmy)
+            {
+                if (squad.UnitIndex == -1 || squad.isEmptySquad) continue;
+                report.ArmySize++;
+                if (squad.UnitIndex < 10) report.DeployedSquads++;
+                report.ArmyValue += TabletopTavernData.Instance.GetUnitCost(squad.UnitName);
+                if (squad.HitPointsPerUnit > 0) report.UnitsAlive += squad.SquadCurrentHealth / squad.HitPointsPerUnit;
+                report.UnitsMax += squad.maxUnitCount;
+                report.HealthNow += squad.SquadCurrentHealth;
+                report.HealthMax += squad.SquadMaxHealth;
+            }
+            return report;
+        }
+        // Sends the node once and forgets the pick, so a later node cannot inherit it.
+        private void ReportNodeCompleted(AnalyticsNodeReport report, int interest)
+        {
+            CampaignSaveData save = CampaignManager.Instance.CampaignSaveManager.SaveData;
+            if (report != null) report.Interest = interest;
+            GameEventTracker.NodeCompleted(save, report);
+            save.nodeVisit = default;
+        }
+        // What was on offer when the player picked, kept on the save until nodeCompleted sends it.
+        private void RecordNodeVisit(MapNode picked)
+        {
+            CampaignSaveData save = CampaignManager.Instance.CampaignSaveManager.SaveData;
+            List<OfferedNode> offered = new();
+            int layer = activeChapterIndex + 1;
+            if (layer >= 0 && layer < mapLayers.Count)
+            {
+                foreach (MapNodeData node in mapLayers[layer].LayerNodes)
+                {
+                    if (node.mapNodeGameObject == null || !node.mapNodeGameObject.Selectable) continue;
+                    offered.Add(new OfferedNode { index = node.index, type = node.type, hidden = node.mapNodeGameObject.Surprise });
+                }
+            }
+            save.nodeVisit = new NodeVisit
+            {
+                recorded = true,
+                nodeIndex = picked.Value.index,
+                hidden = picked.Surprise,
+                goldOnEntry = save.goldAmount,
+                offered = offered,
+            };
+        }
 #endregion
+        // The act 3 final pays rewards like every other final now that the run may march on; the run
+        // only ends from the Act Complete screen. The demo still stops cold at its last battle.
         public bool WillCompleteLayerEndInGameOver()
         {
+#if DEMO
             int bookNumber = CampaignManager.Instance.CampaignSaveManager.SaveData.bookNumber;
             int nextLayerIndex = activeChapterIndex + 1;
-
-            if (nextLayerIndex == mapLayers.Count - 1 && bookNumber == 3)
-                return true;
-
-#if DEMO
             if (nextLayerIndex == 1 && bookNumber == 2)
                 return true;
 #endif
-
             return false;
         }
         public void OverrideSelectedNodeBeforeBattle()
         {
             Debug.Log($"Overriding selected node {selectedNode.Value.index}");
-            CampaignManager.Instance.CampaignSaveManager.RecordSelectedNode(selectedNode.Value.index);
+            CampaignManager.Instance.CampaignSaveManager.RecordSelectedNode(selectedNode.Value.index, selectedNode.Value.type);
         }
         private bool hoppingArrived = false;
         private const float ArrivalWatchdogBuffer = 2f;
         public void SelectNode(MapNode _selectedNode)
         {
             Debug.Log($"Selecting node {_selectedNode.Value.index}");
+            GameEventTracker.TryRun("node visit", () => RecordNodeVisit(_selectedNode));
             selectedNode = _selectedNode;
             hoppingArrived = false;
             SetMapInput(false);
@@ -576,6 +660,7 @@ namespace TJ.Map
                     mapSceneUIManager.MapIntroDisplay2.DisplayTitle(raceData, bookNumber);
                     break;
                 case 3:
+                default:
                     mapSceneUIManager.MapIntroDisplay3.DisplayTitle(raceData, bookNumber);
                     break;
             }
@@ -601,6 +686,7 @@ namespace TJ.Map
                     mapSceneUIManager.MapIntroDisplay2.HideTitle();
                     break;
                 case 3:
+                default:
                     mapSceneUIManager.MapIntroDisplay3.HideTitle();
                     break;
             }

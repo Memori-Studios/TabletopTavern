@@ -111,7 +111,7 @@ namespace TJ.MainMenu
             string date = run.EndedAtUtc.ToLocalTime().ToString("D", CultureInfo.CurrentCulture);
 
             detailTitleText.text = $"{loc.GetText(hero.HeroName)}  <color={ColorData.Secondary}>|</color>  " +
-                                   $"{loc.GetText("Level")} {(int)run.difficulty}: {loc.GetText(difficultyData.difficultyName)}  " +
+                                   $"{loc.GetText(difficultyData.difficultyName)}  " +
                                    $"<color={ColorData.Secondary}>|</color>  {RunHistoryCard.FormatOutcome(run.outcome, loc)}";
 
             detailStatsText.text = string.Join("    ",
@@ -198,7 +198,7 @@ namespace TJ.MainMenu
                     tile.SetState(SpellBrowseState.Available);
                     tile.gameObject.AddComponent<MemoriTooltipTrigger>().SetUpToolTip(
                         loc.GetText(spellData.Spell.ToString()),
-                        spellData.GetLocalizedSpellDescription());
+                        KeywordText.ForTooltip(spellData.GetLocalizedSpellDescription()));
                     _spawnedDetail.Add(tile.gameObject);
                     shown++;
                 }

@@ -8,6 +8,7 @@ using Unity.Mathematics;
 using Shapes;
 using System.Collections.Generic;
 using TJ.Shapes;
+using Memori.Utilities;
 
 public class BattlefieldBonusGameObject : MonoBehaviour
 {
@@ -40,22 +41,10 @@ public class BattlefieldBonusGameObject : MonoBehaviour
     }
     private void SetDisplayOfBonus(BattlefieldBonus _battlefieldBonus)
     {
-        Color color = _battlefieldBonus.Team switch
-        {
-            Team.Player => playerColor,
-            Team.Enemy => enemyColor,
-            Team.Neutral => neutralColor,
-            _ => Color.white
-        };
-        disc1.GetComponent<ShapesBloom>().Bloom(color);
-        color = _battlefieldBonus.Team switch
-        {
-            Team.Player => playerInnerColor,
-            Team.Enemy => enemyInnerColor,
-            Team.Neutral => neutralInnerColor,
-            _ => Color.white
-        };
-        disc2.ColorOuter = color;
+        _bonusTeam = _battlefieldBonus.Team;
+        ApplyBonusColors();
+        ColorVision.Changed -= ApplyBonusColors;
+        ColorVision.Changed += ApplyBonusColors;
         disc1.Radius = battlefieldBonus.Range;
         disc2.Radius = battlefieldBonus.Range;
         if(colliderTransform != null)
@@ -67,8 +56,30 @@ public class BattlefieldBonusGameObject : MonoBehaviour
             meshCollider.enabled = false;
         }
     }
+    private Team _bonusTeam;
+
+    private void ApplyBonusColors()
+    {
+        Color color = _bonusTeam switch
+        {
+            Team.Player => ColorVision.Good(playerColor),
+            Team.Enemy => ColorVision.Bad(enemyColor),
+            Team.Neutral => neutralColor,
+            _ => Color.white
+        };
+        disc1.GetComponent<ShapesBloom>().Bloom(color);
+        color = _bonusTeam switch
+        {
+            Team.Player => ColorVision.Good(playerInnerColor),
+            Team.Enemy => ColorVision.Bad(enemyInnerColor),
+            Team.Neutral => neutralInnerColor,
+            _ => Color.white
+        };
+        disc2.ColorOuter = color;
+    }
     public void OnDestroy()
     {
+        ColorVision.Changed -= ApplyBonusColors;
         if (entity == Entity.Null) return;
         World world = World.DefaultGameObjectInjectionWorld;
         if (world == null || !world.IsCreated) return;

@@ -10,6 +10,7 @@ using Memori.Audio;
 using Memori.Notifications;
 using TJ.Morale;
 using Memori.Localization;
+using Memori.Utilities;
 
 namespace TJ
 {
@@ -107,6 +108,9 @@ namespace TJ
             flagMeshRenderer.material = _flagMaterial;
             squadId = _squadId;
             unitSize = _unitSize;
+            ApplyMarkerScale(BattlefieldMarkerScale.Current);
+            BattlefieldMarkerScale.Changed -= ApplyMarkerScale;
+            BattlefieldMarkerScale.Changed += ApplyMarkerScale;
 
             bool isLegendary = TabletopTavernData.Instance.GetSquadStats(unitName).RarityTier == UnitRarity.Legendary;
             normalRarityFlagPostGO.SetActive(!isLegendary);
@@ -135,7 +139,6 @@ namespace TJ
 
             animator = GetComponent<Animator>();
             outline.enabled = false;
-            outline.OutlineColor = squadId < 0 ? (Color)ColorData.HexToRgba(ColorData.EnemyTeamOutline) : (Color)ColorData.HexToRgba(ColorData.PlayerTeamOutline);
 
             this.gameObject.SetActive(true);
             Team team = _squadId < 0 ? Team.Enemy : Team.Player;
@@ -149,7 +152,7 @@ namespace TJ
             moraleBar.value = morale.MaxMorale;
             moraleBar.minValue = morale.MoraleThreshold;
 
-            healthBarGO.SetPrestige(squadManager.GetSquadPrestige(squadId), ammunition > 0);
+            healthBarGO.SetPrestige(squadManager.GetSquadPrestige(squadId), ammunition > 0, isMage);
 
             battleManager.OnSquadBrokenEvent += OnSquadBroken;
             battleManager.OnGamePhaseChanged += OnGamePhaseChanged;
@@ -161,7 +164,9 @@ namespace TJ
             unitSelectionManager.OnHoverSquadsChanged += OnHoverSquadsChanged;
 
             GetComponent<BattlefieldBiomeDetector>().SetSquadEntityId(squadId, squadEntity);
-            minimapImage.color = ColorData.GetTeamMinimapColor(team == Team.Player);
+            ApplyTeamColors();
+            ColorVision.Changed -= ApplyTeamColors;
+            ColorVision.Changed += ApplyTeamColors;
             squadSFXManager.SetBaseVolume(IAudioRequester.Instance.effectsVolume.GetValue());
             IAudioRequester.Instance.effectsVolume.OnValueChanged += squadSFXManager.SetBaseVolume;
 
@@ -797,8 +802,51 @@ namespace TJ
         }
         #endregion
 
+        // The banner and the anchor the health bar rides scale together, so the bar stays above the banner top.
+        private Vector3 _healthBarBasePosition;
+        private bool _markerBaseCached;
+        private void ApplyMarkerScale(float scale)
+        {
+            if (!_markerBaseCached) { _healthBarBasePosition = healthBarTransform.localPosition; _markerBaseCached = true; }
+            flagTransform.localScale = Vector3.one * scale;
+            healthBarTransform.localPosition = _healthBarBasePosition * scale;
+        }
+        #region Colorblind Mode
+
+        private Sprite _minimapDotSprite;
+        private Quaternion _minimapDotRotation;
+        private Vector3 _minimapDotScale;
+        private bool _minimapDotCached;
+
+        // Enemy dots turn into diamonds so the minimap does not rely on colour alone.
+        private void ApplyTeamColors()
+        {
+            bool isPlayer = squadId > 0;
+            outline.OutlineColor = (Color)ColorData.HexToRgba(isPlayer ? ColorData.PlayerTeamOutline : ColorData.EnemyTeamOutline);
+
+            Color dot = ColorData.GetTeamMinimapColor(isPlayer);
+            if (broken) dot.a = 0.5f;
+            minimapImage.color = dot;
+
+            if (!_minimapDotCached)
+            {
+                _minimapDotCached = true;
+                _minimapDotSprite = minimapImage.sprite;
+                _minimapDotRotation = minimapImage.rectTransform.localRotation;
+                _minimapDotScale = minimapImage.rectTransform.localScale;
+            }
+            bool diamond = !isPlayer && ColorVision.IsOn;
+            minimapImage.sprite = diamond ? null : _minimapDotSprite;
+            minimapImage.rectTransform.localRotation = diamond ? _minimapDotRotation * Quaternion.Euler(0f, 0f, 45f) : _minimapDotRotation;
+            minimapImage.rectTransform.localScale = diamond ? _minimapDotScale * 0.8f : _minimapDotScale;
+        }
+
+        #endregion
+
         public void OnDestroy()
         {
+            BattlefieldMarkerScale.Changed -= ApplyMarkerScale;
+            ColorVision.Changed -= ApplyTeamColors;
             if (flagMeshRenderer != null)
                 Destroy(flagMeshRenderer.material);
 

@@ -14,10 +14,12 @@ using UnityEngine.Rendering.Universal;
 namespace TJ.Benchmark
 {
     /// <summary>
-    /// Headless-ish benchmark: launch the player with -benchmark, it boots the saved custom battle,
-    /// parks the camera, records deployment then the fight, writes CSV + marker tables, and quits.
-    /// Args: -benchmark -benchmark-out &lt;dir&gt; -benchmark-label &lt;text&gt; -benchmark-scale &lt;renderScale&gt;
-    ///       -benchmark-deploy &lt;seconds&gt; -benchmark-battle &lt;seconds&gt;
+    /// Headless-ish benchmark: launch the player with -benchmark, it runs one mode, records it, writes CSV + marker
+    /// tables, and quits. Modes: battle (saved custom battle, deployment then the fight), menu (main menu at rest),
+    /// map (continues the saved campaign, times the load, records the default view and a closer one).
+    /// Args: -benchmark -benchmark-saveroot &lt;dir&gt; -benchmark-mode battle|menu|map -benchmark-out &lt;dir&gt;
+    ///       -benchmark-label &lt;text&gt; -benchmark-scale &lt;renderScale&gt; -benchmark-deploy &lt;seconds&gt;
+    ///       -benchmark-battle &lt;seconds&gt; -benchmark-record &lt;seconds&gt; -benchmark-settle &lt;seconds&gt;
     /// </summary>
     public class BenchmarkRunner : MonoBehaviour
     {
@@ -29,6 +31,15 @@ namespace TJ.Benchmark
             var go = new GameObject("BenchmarkRunner");
             DontDestroyOnLoad(go);
             go.AddComponent<BenchmarkRunner>();
+        }
+
+        // Runs before any scene loads, so a benchmark never reads or writes the player's real saves.
+        [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
+        private static void RedirectSaves()
+        {
+            if (!HasArg("-benchmark")) return;
+            string root = ArgValue("-benchmark-saveroot", "");
+            if (!string.IsNullOrEmpty(root)) SaveDataHandler.SetSaveRoot(root);
         }
 
         private static bool HasArg(string name)
@@ -47,8 +58,11 @@ namespace TJ.Benchmark
         }
         #endregion
 
-        private string _outDir, _label;
-        private float _deploySeconds, _battleSeconds, _renderScale;
+        // How far the map camera moves along its view for the close-up phase, in metres.
+        private const float MapZoomDistance = 0.35f;
+
+        private string _outDir, _label, _mode;
+        private float _deploySeconds, _battleSeconds, _renderScale, _recordSeconds, _settleSeconds;
         private bool _hover;
         // Seconds of binary profiler log (.raw) to write mid-battle; 0 = off. Load it in the Editor Profiler.
         private float _profileSeconds;
@@ -83,17 +97,35 @@ namespace TJ.Benchmark
 #endif
         }
 
+        // Same cursor spot in every run, so whatever it hovers is hovered in every build.
+        private static void ParkCursor()
+        {
+#if UNITY_STANDALONE_WIN
+            SetCursorPos(Screen.width / 2, Screen.height / 2);
+#endif
+        }
+
         private void Start()
         {
             _label = ArgValue("-benchmark-label", "run");
             _outDir = ArgValue("-benchmark-out", Path.Combine(Application.persistentDataPath, "Benchmarks"));
+            _mode = ArgValue("-benchmark-mode", "battle");
             _deploySeconds = float.Parse(ArgValue("-benchmark-deploy", "10"), System.Globalization.CultureInfo.InvariantCulture);
             _battleSeconds = float.Parse(ArgValue("-benchmark-battle", "45"), System.Globalization.CultureInfo.InvariantCulture);
+            _recordSeconds = float.Parse(ArgValue("-benchmark-record", "45"), System.Globalization.CultureInfo.InvariantCulture);
+            _settleSeconds = float.Parse(ArgValue("-benchmark-settle", "10"), System.Globalization.CultureInfo.InvariantCulture);
             _renderScale = float.Parse(ArgValue("-benchmark-scale", "0"), System.Globalization.CultureInfo.InvariantCulture);
             _hover = HasArg("-benchmark-hover");
             _profileSeconds = float.Parse(ArgValue("-benchmark-profile", "0"), System.Globalization.CultureInfo.InvariantCulture);
             Directory.CreateDirectory(_outDir);
-            Log($"benchmark start label={_label} out={_outDir} deploy={_deploySeconds}s battle={_battleSeconds}s scale={_renderScale} hover={_hover}");
+            Log($"benchmark start label={_label} mode={_mode} out={_outDir} saveRoot={SaveDataHandler.SaveRoot} deploy={_deploySeconds}s battle={_battleSeconds}s record={_recordSeconds}s settle={_settleSeconds}s scale={_renderScale} hover={_hover}");
+            if (string.IsNullOrEmpty(ArgValue("-benchmark-saveroot", "")))
+            {
+                // Every mode writes playerSaveData, so without a redirect it would overwrite the player's own saves.
+                Log("refusing to run: pass -benchmark-saveroot <folder with a copy of the saves>");
+                Finish();
+                return;
+            }
             StartCoroutine(Run());
         }
 
@@ -103,17 +135,39 @@ namespace TJ.Benchmark
             _log.AppendLine(line);
         }
 
+        private void Finish()
+        {
+            File.WriteAllText(Path.Combine(_outDir, _label + "_log.txt"), _log.ToString());
+            Application.Quit();
+        }
+
         private IEnumerator Run()
         {
-            // Let the menu finish booting before we replace it with the battle.
+            // Let the menu finish booting before a mode replaces it.
             while (!SceneHandler.HasInstance || SceneHandler.Instance.CurrentGameState != GameStateEnum.MainMenu)
                 yield return null;
+
+            switch (_mode)
+            {
+                case "menu": yield return RunMenu(); break;
+                case "map": yield return RunMap(); break;
+                default: yield return RunBattle(); break;
+            }
+
+            yield return null;
+            Finish();
+        }
+
+        #region Modes
+        private IEnumerator RunBattle()
+        {
             yield return new WaitForSecondsRealtime(4f);
 
             // Same path as the Custom Battle button on the main menu.
             PlayerSaveData saveData = SaveDataHandler.LoadPlayerSaveData();
             saveData.customBattle = true;
             SaveDataHandler.SavePlayerSaveData(saveData);
+            double battleLoadStart = Time.realtimeSinceStartupAsDouble;
             SceneHandler.Instance.SwitchGameState(GameStateEnum.Battle);
             Log("switched to battle");
 
@@ -125,11 +179,14 @@ namespace TJ.Benchmark
                 bm = FindFirstObjectByType<BattleManager>();
                 yield return null;
             }
+            Log($"battle loaded in {Time.realtimeSinceStartupAsDouble - battleLoadStart:F2}s");
             yield return new WaitForSecondsRealtime(2f);
 
             // Same path as the Load Formation button: pulls both armies from customBattleSaveData.json.
+            double armyLoadStart = Time.realtimeSinceStartupAsDouble;
             var load = bm.ArmySpawnManager.LoadBothArmies();
             while (!load.IsCompleted) yield return null;
+            Log($"army load task finished in {Time.realtimeSinceStartupAsDouble - armyLoadStart:F2}s");
             if (load.IsFaulted) Log("LoadBothArmies faulted: " + load.Exception);
             int units = -1, stable = 0;
             while (stable < 120)
@@ -141,11 +198,7 @@ namespace TJ.Benchmark
             }
             Log($"armies loaded: units={units} entities={CountAll()}");
 
-            QualitySettings.vSyncCount = 0;
-            Application.targetFrameRate = -1;
-            var urp = GraphicsSettings.currentRenderPipeline as UniversalRenderPipelineAsset;
-            if (_renderScale > 0f && urp != null) urp.renderScale = _renderScale;
-            Log($"settings: res={Screen.width}x{Screen.height} renderScale={(urp != null ? urp.renderScale : -1f)} msaa={(urp != null ? urp.msaaSampleCount : -1)} shadowDist={(urp != null ? urp.shadowDistance : -1f)} cascades={(urp != null ? urp.shadowCascadeCount : -1)} shadowRes={(urp != null ? urp.mainLightShadowmapResolution : -1)} opaqueTex={(urp != null && urp.supportsCameraOpaqueTexture)} gpu={SystemInfo.graphicsDeviceName} cpu={SystemInfo.processorType}");
+            ApplyFrameSettings();
 
             // Fixed camera pose: look at the battlefield centre, let the lerp settle, then freeze the camera script.
             bm.BattleCameraScript.FocusOnPosition(Vector3.zero);
@@ -160,10 +213,89 @@ namespace TJ.Benchmark
             yield return Record("battle", _battleSeconds, bm);
 
             Log($"end: units={CountUnits()} phase={bm.GamePhase}");
-            File.WriteAllText(Path.Combine(_outDir, _label + "_log.txt"), _log.ToString());
-            yield return null;
-            Application.Quit();
         }
+
+        private IEnumerator RunMenu()
+        {
+            yield return WaitForSetUp(GameStateEnum.MainMenu);
+            Log($"menu ready {Time.realtimeSinceStartup:F2}s after startup");
+            yield return new WaitForSecondsRealtime(_settleSeconds);
+            ApplyFrameSettings();
+            ParkCursor();
+            LogScene("menu");
+            yield return Record("menu", _recordSeconds, null);
+        }
+
+        private IEnumerator RunMap()
+        {
+            yield return WaitForSetUp(GameStateEnum.MainMenu);
+            Log($"menu ready {Time.realtimeSinceStartup:F2}s after startup");
+            yield return new WaitForSecondsRealtime(2f);
+
+            // Same path as the Continue button, which only exists while a campaign is in progress.
+            var menu = FindFirstObjectByType<TJ.MainMenu.MainMenu>();
+            if (!SaveDataHandler.CampaignSaveExists() || menu == null)
+            {
+                Log($"map: cannot continue (campaign save={SaveDataHandler.CampaignSaveExists()}, menu found={menu != null})");
+                yield break;
+            }
+            double loadStart = Time.realtimeSinceStartupAsDouble;
+            menu.LoadMapScene();
+            yield return WaitForSetUp(GameStateEnum.Map);
+            Log($"map loaded in {Time.realtimeSinceStartupAsDouble - loadStart:F2}s");
+
+            // Covers the four-second intro fly-in; afterwards the camera only moves on player input.
+            yield return new WaitForSecondsRealtime(_settleSeconds);
+            ApplyFrameSettings();
+            ParkCursor();
+            LogScene("map");
+            yield return Record("map", _recordSeconds, null);
+
+            var mapCamera = FindFirstObjectByType<TJ.Map.MapCamera>();
+            if (mapCamera == null || mapCamera.target == null)
+            {
+                Log("mapzoom: no map camera target");
+                yield break;
+            }
+            mapCamera.target.position += mapCamera.target.forward * MapZoomDistance;
+            yield return new WaitForSecondsRealtime(3f);
+            LogScene("mapzoom");
+            yield return Record("mapzoom", _recordSeconds, null);
+        }
+
+        // The state flips before its scene exists, so wait for the set-up flag as well.
+        private static IEnumerator WaitForSetUp(GameStateEnum state)
+        {
+            while (!SceneHandler.HasInstance || SceneHandler.Instance.CurrentGameState != state || !SceneHandler.Instance.SceneSetUpComplete)
+                yield return null;
+        }
+
+        private void ApplyFrameSettings()
+        {
+            QualitySettings.vSyncCount = 0;
+            Application.targetFrameRate = -1;
+            var urp = GraphicsSettings.currentRenderPipeline as UniversalRenderPipelineAsset;
+            if (_renderScale > 0f && urp != null) urp.renderScale = _renderScale;
+            var ao = new StringBuilder();
+            if (urp != null)
+                foreach (ScriptableRendererData data in urp.rendererDataList)
+                    if (data != null)
+                        foreach (var feature in data.rendererFeatures)
+                            if (feature is ScreenSpaceAmbientOcclusion) ao.Append(data.name).Append('=').Append(feature.isActive).Append(' ');
+            Log($"settings: res={Screen.width}x{Screen.height} renderScale={(urp != null ? urp.renderScale : -1f)} msaa={(urp != null ? urp.msaaSampleCount : -1)} shadowDist={(urp != null ? urp.shadowDistance : -1f)} cascades={(urp != null ? urp.shadowCascadeCount : -1)} shadowRes={(urp != null ? urp.mainLightShadowmapResolution : -1)} opaqueTex={(urp != null && urp.supportsCameraOpaqueTexture)} ao=[{ao.ToString().Trim()}] gpu={SystemInfo.graphicsDeviceName} cpu={SystemInfo.processorType}");
+        }
+
+        private void LogScene(string phase)
+        {
+            var cameras = new StringBuilder();
+            foreach (var cam in FindObjectsByType<Camera>(FindObjectsSortMode.None))
+                if (cam.isActiveAndEnabled) cameras.Append(cam.name).Append(cam.targetTexture != null ? "(RT)" : "").Append(' ');
+            int renderers = 0;
+            foreach (var r in FindObjectsByType<Renderer>(FindObjectsSortMode.None))
+                if (r.enabled && r.gameObject.activeInHierarchy) renderers++;
+            Log($"{phase}: cameras=[{cameras.ToString().Trim()}] liveRenderers={renderers}");
+        }
+        #endregion
 
         private static int CountUnits()
         {

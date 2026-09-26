@@ -30,16 +30,14 @@ namespace TJ.MainMenu
         bool isCollected, acknowledged;
         [SerializeField] private GameObject collectionUnacknowledgedIndicator;
         CollectionPanel collectionPanel;
-        StartingArmyManager startingGear;
 
-        public void LoadGearCard(GearID _gear, bool _isCollected, bool _acknowledged, CollectionPanel _collectionPanel = null, StartingArmyManager _startingGear = null)
+        public void LoadGearCard(GearID _gear, bool _isCollected, bool _acknowledged, CollectionPanel _collectionPanel = null)
         {
             gearID = _gear;
             gear = GearData.GetGear(gearID);
             isCollected = _isCollected;
             acknowledged = _acknowledged;
             collectionPanel = _collectionPanel;
-            startingGear = _startingGear;
 
             Color rarityColor = ColorData.GetGearRarityColor(gear.GearRarity);
             gearImage.sprite = SpriteData.GetSprite(gear.GearName);
@@ -49,7 +47,7 @@ namespace TJ.MainMenu
             gearDescLocalized = string.Format(gearDescLocalized, gear.GearModifierValue);
             string gearFlavorLocalized = LocalizationManager.Instance.GetText(gearID+"Flavor");
 
-            ColorData.XMLTagColorApplicator(ref gearDescLocalized);
+            gearDescLocalized = KeywordText.ForTooltip(gearDescLocalized);
 
             string title = isCollected ? gearNameLocalized : LocalizationManager.Instance.GetText("Gear Not Discoverd");
             string desc = isCollected ? gearDescLocalized: LocalizationManager.Instance.GetText("Obtain in Campaign");
@@ -103,14 +101,6 @@ namespace TJ.MainMenu
         public void OnPointerClick(PointerEventData eventData)
         {
             IAudioRequester.Instance.PlaySFX(SFXData.ButtonClick);
-            if(startingGear == null) return;
-
-            if(!isCollected) {
-                NotificationManager.Instance.ErrorNotification(LocalizationManager.Instance.GetText("Gear Not Discoverd"));
-                return;
-            }
-
-            startingGear.SelectGearCard(gearID);
         }
     }
 }

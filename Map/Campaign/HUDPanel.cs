@@ -18,11 +18,14 @@ using Memori.Input;
 using Memori.Localization;
 using UnityEngine.InputSystem;
 using Memori.Steamworks;
+using TJ.Spells;
 
 namespace TJ.Map
 {
     public class HUDPanel : MonoBehaviour
     {
+        [Header("Legend")]
+        [SerializeField] private MemoriCanvasGroup legendSection;
         [SerializeField] private Button showSettingsButton;
         [SerializeField] private MemoriTooltipTrigger settingsTooltipTrigger;
         [SerializeField] private Button freeCameraButton;
@@ -78,6 +81,10 @@ namespace TJ.Map
 
         [Header("Gear")]
         [SerializeField] private GearDisplay[] gearDisplays;
+
+        [Header("Spells")]
+        // Display only: the run's loadout on the map's copy of the hotbar. Buttons are disabled, tooltips stay on.
+        [SerializeField] private SpellCastButton[] spellCastButtons;
 
         [Header("Consumables")]
         [SerializeField] private ConsumableUI[] consumableUI;
@@ -163,6 +170,7 @@ namespace TJ.Map
 
             ReloadGear();
             ReloadConsumables();
+            ReloadSpells();
             ArmyStructureChanged();
             DeselectAllCards();
 
@@ -182,10 +190,7 @@ namespace TJ.Map
             chapterTooltipTrigger.SetUpToolTip(_title: GetChapterTooltipTitle(campaignSaveManager.SaveData.bookNumber, campaignSaveManager.SaveData.activeMapLayer));
 
             settingsTooltipTrigger.SetUpToolTip(_title: LocalizationManager.Instance.GetText("Settings"));
-            string freeCamKey = InputControlPath.ToHumanReadableString(
-                InputHandler.Instance.GameControls.Battle.ToggleFreeCameraMode.bindings[0].effectivePath,
-                InputControlPath.HumanReadableStringOptions.OmitDevice
-            );
+            string freeCamKey = FreeCameraKey();
             freeCameraTooltipTrigger.SetUpToolTip(_title: $"{LocalizationManager.Instance.GetText("FreeCameraMode")} [{freeCamKey}]");
             returnFromFreeCameraTooltipTrigger.SetUpToolTip(_title: $"{LocalizationManager.Instance.GetText("exitButton")} {LocalizationManager.Instance.GetText("FreeCameraMode")} [{freeCamKey}]");
             returnFromFreeCameraKeyText.text = $"{LocalizationManager.Instance.GetText("exitButton")} {LocalizationManager.Instance.GetText("FreeCameraMode")} - [{freeCamKey}]";
@@ -208,7 +213,7 @@ namespace TJ.Map
             // emperorIcon.SetActive(false);
 
             string additionalModifiersDesc = "";
-            List<string> allPreviousModifiers = DifficultyData.GetAllDifficultyModifiersBeforeLevel(difficulty+1);
+            List<string> allPreviousModifiers = DifficultyData.GetAllDifficultyModifiersUpToLevel(difficulty);
 
             foreach (string modifier in allPreviousModifiers)
             {
@@ -228,10 +233,7 @@ namespace TJ.Map
 
             string heroBonusText1string = HeroBonusText.Get(hero, 0);
             string heroBonusText2string = HeroBonusText.Get(hero, 1);
-            string raceBonusTextstring = LocalizationManager.Instance.GetText(hero.Race+ "BonusDescription");
-            ColorData.XMLTagColorApplicator(ref heroBonusText1string);
-            ColorData.XMLTagColorApplicator(ref heroBonusText2string);
-            ColorData.XMLTagColorApplicator(ref raceBonusTextstring);
+            string raceBonusTextstring = KeywordText.ForTooltip(LocalizationManager.Instance.GetText(hero.Race+ "BonusDescription"));
             heroBonusText1string += "\n" + heroBonusText2string;
             if (campaignSaveManager.SaveData.heroID == CampaignSaveManager.SKRIX_HERO_ID)
             {
@@ -239,7 +241,7 @@ namespace TJ.Map
                     campaignSaveManager.CountKoboldUnits(), CampaignSaveManager.SKRIX_KOBOLD_THRESHOLD);
                 heroBonusText1string += "\n" + koboldProgress;
             }
-            heroNameTooltipTrigger.SetUpToolTip(_title: heroNameLocalized, _description: heroBonusText1string);
+            heroNameTooltipTrigger.SetUpToolTip(_title: heroNameLocalized, _description: KeywordText.ForTooltip(heroBonusText1string));
             heroRaceTooltipTrigger.SetUpToolTip(_title: heroRaceLocalized, _description: raceBonusTextstring);
         }
         public void ArmyStructureChanged()
@@ -428,6 +430,9 @@ namespace TJ.Map
                 else
                     c.SetOptionsVisibility(false, false);
             }
+            // Optional tip: never cut into a step chain the player is working through, like reorder and disband.
+            if (isSingle && !TutorialManager.Instance.IsShowingStep)
+                TutorialManager.Instance.LoadStepsFromRandomSpot(new TutorialStep[1] { TutorialData.RenameSquad });
         }
         public void UpdateChapterText(int _chapter)
         {
@@ -439,7 +444,11 @@ namespace TJ.Map
         {
             string actLocalized = LocalizationManager.Instance.GetText("Act");
             string chapterLocalized = LocalizationManager.Instance.GetText("Chapter");
-            return $"{actLocalized} {bookNumber} - {chapterLocalized} {chapter + 1}";
+            string title = $"{actLocalized} {bookNumber} - {chapterLocalized} {chapter + 1}";
+            int endlessActs = TabletopTavernConstants.EndlessActs(bookNumber);
+            if (endlessActs > 0)
+                title += "\n" + string.Format(LocalizationManager.Instance.GetText("EndlessActBonus"), endlessActs);
+            return title;
         }
         private void ReloadGear()
         {
@@ -459,6 +468,20 @@ namespace TJ.Map
             }
 
             CampaignManager.Instance.ArmyJuiceManager.GearReloaded(gearDisplays);
+        }
+        private void ReloadSpells()
+        {
+            if (spellCastButtons == null) return;
+            SpellData[] spells = SaveDataHandler.GetCampaignSpells();
+            for (int i = 0; i < spellCastButtons.Length; i++)
+            {
+                if (spellCastButtons[i] == null) continue;
+                SpellData spellData = spells != null && i < spells.Length ? spells[i] : null;
+                // Hotkey 0 renders no digit: there is nothing to press on the map.
+                spellCastButtons[i].LoadSpellUI(spellData, null, 0);
+                spellCastButtons[i].SetLocked(SpellLoadout.IsSlotLocked(i));
+                spellCastButtons[i].SetReadOnly();
+            }
         }
         private void ReloadConsumables()
         {
@@ -625,6 +648,8 @@ namespace TJ.Map
         {
             LockCards(true);
             ShowConsumablesBlocker();
+            // The node legend has nothing to explain once the run is over, and it covers the game-over buttons on small screens.
+            if (legendSection != null) legendSection.CGDisable();
         }
         public void PrestigeUnit(string _guID)
         {
@@ -773,9 +798,21 @@ namespace TJ.Map
             else EnterFreeCameraMode();
         }
 
+        private static string FreeCameraKey() => InputControlPath.ToHumanReadableString(
+            InputHandler.Instance.GameControls.Battle.ToggleFreeCameraMode.bindings[0].effectivePath,
+            InputControlPath.HumanReadableStringOptions.OmitDevice);
+
+        public void ShowFreeCameraTip()
+        {
+            TutorialManager.Instance.LoadTooltip(TutorialData.FreeCamera, freeCameraButton.transform, CalloutSide.TowardCenter, FreeCameraKey());
+        }
+
         private void EnterFreeCameraMode()
         {
             if (hudCanvas == null) return;
+
+            // The callout lives on the Tutorial Canvas, which the HUD hide below does not reach.
+            TutorialManager.Instance.CloseTooltip();
 
             hudChildCanvases.Clear();
             foreach (Canvas c in hudCanvas.GetComponentsInChildren<Canvas>(true))
@@ -813,6 +850,9 @@ namespace TJ.Map
                 InputHandler.Instance.SecondaryActionPressed -= CloseAllPopUps;
                 InputHandler.Instance.OnToggleFreeCameraMode -= ToggleFreeCameraMode;
             }
+            // The free camera callout sits on the persistent Tutorial Canvas and would follow the player into battle.
+            if (TutorialManager.HasInstance)
+                TutorialManager.Instance.CloseTooltip();
 
             if (campaignSaveManager == null) return;
             campaignSaveManager.OnChapterCompleted -= UpdateChapterText;

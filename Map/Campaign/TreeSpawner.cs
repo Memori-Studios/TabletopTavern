@@ -1,4 +1,5 @@
 using UnityEngine;
+using UnityEngine.Rendering;
 using System.Collections.Generic;
 using System.Linq;
 using Memori.Utilities;
@@ -13,6 +14,7 @@ namespace TJ.Map
     public int failsAllowed;
     public float pointsRadius;
 }
+    [ExecuteAlways]
     public class TreeSpawner : MonoBehaviour
     {
         [SerializeField] private Mesh[] treePrefabs;
@@ -23,24 +25,51 @@ namespace TJ.Map
         [SerializeField] private int TableTopLayer;
         [SerializeField] private Transform terrainDetailsParent;
         [SerializeField] private Transform treeParent;
-        [SerializeField] private List<Transform> trees;
         [SerializeField] private Vector2 treeRegionSize;
+
+        // Trees are GPU-instanced rather than a GameObject each: one draw per mesh and material pair.
+        private readonly List<SpawnedTree> trees = new();
+        private readonly List<TreeBatch> batches = new();
+        private Mesh baseMesh;
+        private Material baseMaterial;
+        private ShadowCastingMode baseShadowCasting;
+        private bool baseReceiveShadows;
+        private int baseLayer;
+        private bool missingInstancingReported;
+
+        private const int MaxInstancesPerDraw = 1023;
+
+        private struct SpawnedTree
+        {
+            public Vector3 position;
+            public Mesh mesh;
+            public Material material;
+            public Matrix4x4 treeMatrix;
+            public Matrix4x4 baseMatrix;
+            public bool hasBase;
+        }
+
+        private class TreeBatch
+        {
+            public Mesh mesh;
+            public RenderParams renderParams;
+            public readonly List<Matrix4x4> building = new();
+            public Matrix4x4[] matrices;
+        }
 
         public void ClearTrees()
         {
             void CleanUpTrees()
             {
-                if (trees != null && trees.Count > 0)
+                trees.Clear();
+                RebuildBatches();
+
+                // Maps generated before instancing saved a GameObject per tree under the tree parent.
+                if (treeParent != null)
                 {
-                    for (int i = trees.Count - 1; i >= 0; i--)
-                    {
-                        if (trees[i] != null)
-                            DestroyImmediate(trees[i].gameObject);
-                        else
-                            trees.RemoveAt(i);
-                    }
+                    for (int i = treeParent.childCount - 1; i >= 0; i--)
+                        DestroyImmediate(treeParent.GetChild(i).gameObject);
                 }
-                trees = new();
             }
 
             void DestroyAdditionalGameObjects()
@@ -143,52 +172,169 @@ namespace TJ.Map
                 }
             }
 
+            bool hasBase = SetUpTreeBase(mapRegion);
+            Quaternion baseRotation = hasBase ? mapRegion.TreeBase.transform.localRotation : Quaternion.identity;
+            Matrix4x4 parentMatrix = treeParent.localToWorldMatrix;
+            Quaternion parentRotationInverse = Quaternion.Inverse(treeParent.rotation);
+
             for (int i = 0; i < newPoints3D.Count; i++)
             {
-                GameObject tree = new();
-                tree.transform.parent = treeParent;
-                tree.name = "Tree " + i;
-                tree.transform.position = newPoints3D[i];
-                tree.AddComponent<MeshFilter>().sharedMesh = treePrefabs[SeededRandom.Range(0, treePrefabs.Length)];
-                tree.AddComponent<MeshRenderer>().sharedMaterial = mapRegion.treeMaterials[SeededRandom.Range(0, mapRegion.treeMaterials.Count)];
-                tree.transform.rotation = Quaternion.Euler(0, SeededRandom.Range(0, 360), 0);
-                tree.transform.localScale = new Vector3(0.6f, 0.6f, 0.6f);
-                tree.transform.localScale *= SeededRandom.Range(0.80f, 1.20f);
-                trees.Add(tree.transform);
-                if (mapRegion.TreeBase == null)
+                // Same seeded draws in the same order as the old GameObject trees, so saved maps do not change.
+                Mesh mesh = treePrefabs[SeededRandom.Range(0, treePrefabs.Length)];
+                Material material = mapRegion.treeMaterials[SeededRandom.Range(0, mapRegion.treeMaterials.Count)];
+                Quaternion rotation = Quaternion.Euler(0, SeededRandom.Range(0, 360), 0);
+                Vector3 localScale = new Vector3(0.6f, 0.6f, 0.6f) * SeededRandom.Range(0.80f, 1.20f);
+
+                // Composed like a child Transform: world position and rotation, local scale under the tree parent.
+                Matrix4x4 treeMatrix = parentMatrix * Matrix4x4.TRS(treeParent.InverseTransformPoint(newPoints3D[i]), parentRotationInverse * rotation, localScale);
+                trees.Add(new SpawnedTree
                 {
-                    Debug.LogWarning($"[TreeSpawner] mapRegion.TreeBase is null for region {mapRegion}; skipping tree base.");
-                    continue;
-                }
-                GameObject treeBaseInstance = Instantiate(mapRegion.TreeBase, tree.transform);
-                treeBaseInstance.transform.localPosition = new Vector3(0, 0, 0);
-                treeBaseInstance.transform.localScale = new Vector3(0.5f, 0.15f, 0.5f);
+                    position = newPoints3D[i],
+                    mesh = mesh,
+                    material = material,
+                    treeMatrix = treeMatrix,
+                    baseMatrix = treeMatrix * Matrix4x4.TRS(Vector3.zero, baseRotation, new Vector3(0.5f, 0.15f, 0.5f)),
+                    hasBase = hasBase,
+                });
             }
+            RebuildBatches();
 
             return;
         }
         public Task PruneTrees()
         {
-            if(trees==null || trees.Count == 0) return Task.CompletedTask;
+            if (trees.Count == 0) return Task.CompletedTask;
 
             //remove all trees that are blocking paths
-            for (int i = 0; i < trees.Count; i++)
+            for (int i = trees.Count - 1; i >= 0; i--)
             {
-                Vector3 castPoint = new (trees[i].position.x, trees[i].position.y+0.5f, trees[i].position.z);
+                Vector3 position = trees[i].position;
+                Vector3 castPoint = new(position.x, position.y + 0.5f, position.z);
 
-                if (Physics.Raycast(castPoint, Vector3.down, out RaycastHit hit, 1)) {
-                    if (hit.collider.gameObject.layer != TableTopLayer) {
-                        if(Application.isPlaying) {
-                            Destroy(trees[i].gameObject);
-                        } else {
-                            DestroyImmediate(trees[i].gameObject);
-                        }
-                        trees.RemoveAt(i);
-                        i--;
-                    }
-                }
+                if (Physics.Raycast(castPoint, Vector3.down, out RaycastHit hit, 1) && hit.collider.gameObject.layer != TableTopLayer)
+                    trees.RemoveAt(i);
             }
+            RebuildBatches();
             return Task.CompletedTask;
         }
+
+        private bool SetUpTreeBase(MapRegion mapRegion)
+        {
+            baseMesh = null;
+            baseMaterial = null;
+            if (mapRegion.TreeBase == null)
+            {
+                Debug.LogWarning($"[TreeSpawner] mapRegion.TreeBase is null for region {mapRegion}; skipping tree bases.");
+                return false;
+            }
+
+            MeshFilter filter = mapRegion.TreeBase.GetComponentInChildren<MeshFilter>(true);
+            MeshRenderer renderer = mapRegion.TreeBase.GetComponentInChildren<MeshRenderer>(true);
+            if (filter == null || renderer == null || filter.sharedMesh == null || renderer.sharedMaterial == null)
+            {
+                Debug.LogError($"[TreeSpawner] Tree base {mapRegion.TreeBase.name} needs a MeshFilter with a mesh and a MeshRenderer with a material.");
+                return false;
+            }
+
+            baseMesh = filter.sharedMesh;
+            baseMaterial = renderer.sharedMaterial;
+            baseShadowCasting = renderer.shadowCastingMode;
+            baseReceiveShadows = renderer.receiveShadows;
+            baseLayer = mapRegion.TreeBase.layer;
+            return true;
+        }
+
+        #region Instanced rendering
+        private void OnEnable()
+        {
+            RenderPipelineManager.beginCameraRendering -= DrawTrees;
+            RenderPipelineManager.beginCameraRendering += DrawTrees;
+        }
+
+        private void OnDisable()
+        {
+            RenderPipelineManager.beginCameraRendering -= DrawTrees;
+        }
+
+        // Drawn per camera so the trees also show in the Scene view when a map is generated outside Play Mode.
+        private void DrawTrees(ScriptableRenderContext context, Camera camera)
+        {
+            if (camera.cameraType == CameraType.Preview) return;
+
+            foreach (TreeBatch batch in batches)
+            {
+                RenderParams renderParams = batch.renderParams;
+                renderParams.camera = camera;
+                for (int start = 0; start < batch.matrices.Length; start += MaxInstancesPerDraw)
+                {
+                    int count = Mathf.Min(MaxInstancesPerDraw, batch.matrices.Length - start);
+                    Graphics.RenderMeshInstanced(renderParams, batch.mesh, 0, batch.matrices, count, start);
+                }
+            }
+        }
+
+        private void RebuildBatches()
+        {
+            batches.Clear();
+            var byMeshAndMaterial = new Dictionary<(Mesh, Material), TreeBatch>();
+            foreach (SpawnedTree tree in trees)
+            {
+                AddInstance(byMeshAndMaterial, tree.mesh, tree.material, 0, ShadowCastingMode.On, true, tree.treeMatrix);
+                if (tree.hasBase)
+                    AddInstance(byMeshAndMaterial, baseMesh, baseMaterial, baseLayer, baseShadowCasting, baseReceiveShadows, tree.baseMatrix);
+            }
+
+            foreach (TreeBatch batch in byMeshAndMaterial.Values)
+            {
+                batch.matrices = batch.building.ToArray();
+                batch.renderParams.worldBounds = InstanceBounds(batch.mesh, batch.matrices);
+                batches.Add(batch);
+            }
+        }
+
+        private void AddInstance(Dictionary<(Mesh, Material), TreeBatch> byMeshAndMaterial, Mesh mesh, Material material, int layer, ShadowCastingMode shadowCasting, bool receiveShadows, Matrix4x4 matrix)
+        {
+            if (mesh == null || material == null) return;
+            if (!material.enableInstancing)
+            {
+                if (!missingInstancingReported)
+                    Debug.LogError($"[TreeSpawner] Material {material.name} needs Enable GPU Instancing ticked; trees using it are not drawn.");
+                missingInstancingReported = true;
+                return;
+            }
+
+            if (!byMeshAndMaterial.TryGetValue((mesh, material), out TreeBatch batch))
+            {
+                batch = new TreeBatch
+                {
+                    mesh = mesh,
+                    renderParams = new RenderParams(material)
+                    {
+                        layer = layer,
+                        shadowCastingMode = shadowCasting,
+                        receiveShadows = receiveShadows,
+                        lightProbeUsage = LightProbeUsage.BlendProbes,
+                        reflectionProbeUsage = ReflectionProbeUsage.BlendProbes,
+                    },
+                };
+                byMeshAndMaterial.Add((mesh, material), batch);
+            }
+            batch.building.Add(matrix);
+        }
+
+        // A batch is culled as one box, so the box must hold every instance in it.
+        private static Bounds InstanceBounds(Mesh mesh, Matrix4x4[] matrices)
+        {
+            Bounds local = mesh.bounds;
+            Bounds bounds = new(matrices[0].MultiplyPoint3x4(local.center), Vector3.zero);
+            foreach (Matrix4x4 matrix in matrices)
+            {
+                Vector3 scale = matrix.lossyScale;
+                float radius = local.extents.magnitude * Mathf.Max(scale.x, Mathf.Max(scale.y, scale.z));
+                bounds.Encapsulate(new Bounds(matrix.MultiplyPoint3x4(local.center), Vector3.one * (2f * radius)));
+            }
+            return bounds;
+        }
+        #endregion
     }
 }

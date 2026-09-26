@@ -226,14 +226,14 @@ namespace TJ.Engagement
             heavensongTooltip.SetUpToolTip(LocalizationManager.Instance.GetText("Campaign Bonus"), LocalizationManager.Instance.GetText("TaelindorForestBonusDescription"));
 
             //DifficultyMod 20
-            if (campaignSaveManager.SaveData.difficultyLevel == TT_Difficulty.Godking)
+            if (DifficultyRules.AutoResolveDisabled(campaignSaveManager.SaveData.difficultyLevel))
             {
                 autoResolveButton.interactable = false;
                 autoResolveButton.gameObject.SetActive(false);
             }
 
             //DifficultyMod 3
-            if (campaignSaveManager.SaveData.difficultyLevel < TT_Difficulty.Squire)
+            if (!DifficultyRules.AutoResolvePreviewHidden(campaignSaveManager.SaveData.difficultyLevel))
             {
                 autoResolvePreview.SetUp(this);
             }
@@ -313,7 +313,7 @@ namespace TJ.Engagement
             continueButton.gameObject.SetActive(false);
             engagementPanelCanvasGroup.CGEnable();
             enemyArmyCanvasGroup.CGEnable();
-            engagementPanelCanvasGroup.canvasGroup.interactable = false;
+            engagementPanelCanvasGroup.interactable = false;
             openMMFPlayer.PlayFeedbacks();
             await Task.Delay(500);
             if (runId != _engagementRunId) return; // superseded by a watchdog retry while we waited
@@ -383,6 +383,8 @@ namespace TJ.Engagement
                         enemyArmy = enemyArmy.Take(enemyArmy.Length - 1).ToArray();
                     }
 
+                    campaignSaveManager.SaveData.enemyWarlordHeroID = EnemyWarlord.ResolveHeroID(
+                        campaignSaveManager.SaveData, engagementType == EngagementType.Horde, garrisonFight);
                     campaignSaveManager.SaveEnemyArmy(enemyArmy);
                     await LoadEnemyCompany(true, runId);
                     autoResolveBattleManager.Load(garrisonFight);
@@ -412,8 +414,7 @@ namespace TJ.Engagement
                     string tooltipMessage = weather == Weather.ClearSkies ? "" : localizedDescription;
                     battlefieldWeatherTooltip.SetUpToolTip(localizedWeather, tooltipMessage);
 
-                    if (weather == Weather.Rain)
-                        TutorialManager.Instance.LoadStepsFromRandomSpot(new TutorialStep[1] { TutorialData.RainWeather });
+                    LoadWeatherTip(weather);
 
                     // Display only - the preset still stores Biome.Plains. A garrison is a walled fight
                     // rather than one of the four biomes, and calling it Plains told the player nothing.
@@ -450,7 +451,7 @@ namespace TJ.Engagement
             }
             if(campaignSaveManager.SaveData != null)
             {
-                if (campaignSaveManager.SaveData.difficultyLevel < TT_Difficulty.Squire)
+                if (!DifficultyRules.AutoResolvePreviewHidden(campaignSaveManager.SaveData.difficultyLevel))
                 {
                     autoResolvePreview.CheckIfMouseOverTooltip();
                 }
@@ -463,7 +464,7 @@ namespace TJ.Engagement
             startBattleTooltipTrigger.CheckIfMouseOverTooltip();
             autoResolveTooltipTrigger.CheckIfMouseOverTooltip();
 
-            engagementPanelCanvasGroup.canvasGroup.interactable = true;
+            engagementPanelCanvasGroup.interactable = true;
 
             TutorialManager.Instance.LoadStepsFromRandomSpot(new TutorialStep[1] { TutorialData.Autoresolve});
 
@@ -502,7 +503,7 @@ namespace TJ.Engagement
                 Debug.LogError("[EngagementPanel] LoadEngagement still stuck after max retries - force-unlocking panel so the player isn't stranded.");
                 _engagementRunId++; // invalidate the stuck attempt permanently
                 isLoadingEnemyCompany = false; // don't leave OnArmyStructureChanged permanently blocked
-                engagementPanelCanvasGroup.canvasGroup.interactable = true;
+                engagementPanelCanvasGroup.interactable = true;
                 continueButton.gameObject.SetActive(true);
                 continueButton.enabled = true;
             }
@@ -517,8 +518,8 @@ namespace TJ.Engagement
 
             // Won runs put the action buttons on endBattleCanvasGroup; lost runs put them on runLostCanvasGroup.
             MemoriCanvasGroup group = _engagementResultWon ? endBattleCanvasGroup : runLostCanvasGroup;
-            if (group == null || group.canvasGroup == null) return;
-            if (group.canvasGroup.alpha > 0f) return;
+            if (group == null) return;
+            if (group.alpha > 0f) return;
 
             Debug.LogError($"[EngagementPanel] Engagement result is on screen but {group.name} is at alpha 0 - forcing it visible so the player isn't stranded.");
             group.CGEnable();
@@ -544,6 +545,14 @@ namespace TJ.Engagement
                 {
                     if (TabletopTavernData.Instance.GetUnitTypeFromUnitName(squad.UnitName) != UnitType.Artillery) continue;
                     TutorialManager.Instance.LoadStepsFromRandomSpot(new TutorialStep[1] { TutorialData.EnemyArtillery });
+                    break;
+                }
+
+                // First enemy Outriders: they skip deployment and arrive behind the player's army.
+                foreach (SquadToLoad squad in campaignSaveManager.SaveData.enemyArmy)
+                {
+                    if (!TabletopTavernData.Instance.GetSquadStats(squad.UnitName).SquadAttributes.Outrider) continue;
+                    TutorialManager.Instance.LoadStepsFromRandomSpot(new TutorialStep[1] { TutorialData.EnemyOutriders });
                     break;
                 }
             }
@@ -693,13 +702,24 @@ namespace TJ.Engagement
             mapSceneUIManager.HUDPanel.ShowWeatherHover(finalWeather, finalWeather != Weather.ClearSkies);
             IAudioRequester.Instance.PlaySFX(SFXData.TinyClick);
 
-            if (finalWeather == Weather.Rain)
-                TutorialManager.Instance.LoadStepsFromRandomSpot(new TutorialStep[1] { TutorialData.RainWeather });
+            LoadWeatherTip(finalWeather);
+        }
+        private static void LoadWeatherTip(Weather weather)
+        {
+            TutorialStep? tip = weather switch
+            {
+                Weather.Rain => TutorialData.RainWeather,
+                Weather.Fog => TutorialData.FogWeather,
+                Weather.Snow => TutorialData.SnowWeather,
+                _ => null,
+            };
+            if (tip.HasValue)
+                TutorialManager.Instance.LoadStepsFromRandomSpot(new TutorialStep[1] { tip.Value });
         }
 
         public void AlertOfBattleResults(bool playerWon)
         {
-            if (campaignSaveManager.SaveData.difficultyLevel == TT_Difficulty.Godking) return;
+            if (DifficultyRules.AutoResolveDisabled(campaignSaveManager.SaveData.difficultyLevel)) return;
 
             string autoResolveResultLocalized = LocalizationManager.Instance.GetText("Autoresolve Result") + $": <color={(playerWon ? ColorData.Green : ColorData.Error)}>" + (playerWon ? LocalizationManager.Instance.GetText("Victory") : LocalizationManager.Instance.GetText("Defeat")) + "</color>";
             autoresolveResultText.text = autoResolveResultLocalized;
@@ -707,6 +727,12 @@ namespace TJ.Engagement
         #endregion
 
         #region Post Battle
+        // Endless acts add a little pay on top of the battles-fought bands, which reset every act.
+        private int EndlessGoldBonus()
+        {
+            return Mathf.Min(TabletopTavernConstants.ENDLESS_GOLD_CAP,
+                TabletopTavernConstants.EndlessActs(campaignSaveManager.SaveData.bookNumber) * TabletopTavernConstants.ENDLESS_GOLD_PER_ACT);
+        }
         public void GenerateBattleRewards()
         {
             //gold
@@ -728,6 +754,7 @@ namespace TJ.Engagement
             {
                 goldRewardAmount += 6;
             }
+            goldRewardAmount += EndlessGoldBonus();
 
             //consumable
             // Both the drop roll and the pick come off the campaign seed, so re-opening the results panel
@@ -773,15 +800,10 @@ namespace TJ.Engagement
             {
                 ransomAmount += 6;
             }
+            ransomAmount += EndlessGoldBonus();
 
             if(SaveDataHandler.IsMetaprogressionNodeUnlocked(_postBattleGoldMetaprogressionModel)) {
                 ransomAmount += _postBattleGoldMetaprogressionModel.NodeValue;
-            }
-
-            //DifficultyMod 15
-            if (campaignSaveManager.SaveData.difficultyLevel >= TT_Difficulty.Imperator)
-            {
-                ransomAmount -= 1;
             }
 
             //The Skull Harvest: +2 Gold from battle rewards
@@ -858,7 +880,6 @@ namespace TJ.Engagement
             Color color = ColorData.GetRarityTierColor(recruitsRarity);
             recruitUnitIcon.color = color;
             string text = LocalizationManager.Instance.GetText("Recruit") + LocalizationManager.Instance.GetText(recruitsRarity.ToString()) +  LocalizationManager.Instance.GetText("Unit");
-            ColorData.XMLTagColorApplicator(ref text);
             recruitUnitText.text = text;
 
             recruitUnitTooltip.SetUpToolTip(
@@ -907,18 +928,11 @@ namespace TJ.Engagement
             battleOptionsCanvasGroup.CGDisable();
             campaignSaveManager.CorrectHealthOfWithdrawnSquads();
 
-            bool halfHealthHealing = false;
-            //DifficultyMod 17
-            if (campaignSaveManager.SaveData.difficultyLevel >= TT_Difficulty.Overlord)
-            {
-                halfHealthHealing = true;
-            }
-
             ShowUnitsSlain();
             
             if(!garrisonFight)
             {
-                campaignSaveManager.HealTroopsInReserve(halfHealthHealing);
+                campaignSaveManager.HealTroopsInReserve();
             }          
             else
             {
@@ -1298,6 +1312,7 @@ namespace TJ.Engagement
             postBattleTotalCanvasGroup.FadeInAsync(0.25f);
             conscriptSurvivorsButton.gameObject.SetActive(true);
             conscriptSurvivorsButtonScript.enabled = true;
+            TutorialManager.Instance.LoadStepsFromRandomSpot(new TutorialStep[1] { TutorialData.PostBattleChoices });
 
             if(HeroBonusManager.Instance.ActiveHeroID == 10) {
                 ShowRaiseDeadButton();
@@ -1347,7 +1362,7 @@ namespace TJ.Engagement
 
                 lootBattlefieldText.text = gearNameLocalized;
                 lootBattlefieldImage.sprite = SpriteData.GetSprite(gear.GearName);
-                lootBattlefieldTooltip.SetUpToolTip(gearNameLocalized, gearDescLocalized, gearFlavorLocalized);
+                lootBattlefieldTooltip.SetUpToolTip(gearNameLocalized, KeywordText.ForTooltip(gearDescLocalized), gearFlavorLocalized);
                 lootBattlefieldGearFull.SetActive(!campaignSaveManager.CanAquireGear());
 
                 ShowLootBattlefieldButton();

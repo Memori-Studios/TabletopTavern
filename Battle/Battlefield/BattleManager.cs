@@ -176,8 +176,11 @@ public class BattleManager : Singleton<BattleManager>
         uIManager.MarkSquadAsBroken(_squadEntity.SquadId, true);
         OnSquadBrokenEvent?.Invoke(_squadEntity.SquadId);
     }
+    // Lets the battle report tell a concession from a battle lost on the field.
+    public bool Conceded { get; private set; }
     public void ConcedeDefeat()
     {
+        Conceded = true;
         EntityManager entityManager = World.DefaultGameObjectInjectionWorld.EntityManager;
         var ecb = new EntityCommandBuffer(Allocator.Temp);
         EntityQuery query = entityManager.CreateEntityQuery(ComponentType.ReadOnly<BattlePhase>());
@@ -205,6 +208,7 @@ public class BattleManager : Singleton<BattleManager>
     public void StartDeployment()
     {
         _breachedGateIndices.Clear();
+        Conceded = false;
         // Garrison and custom battles skip the dice roll, so Deployment fires here.
         // Normal campaign battles set Deployment from BattleDiceRollPanel when Continue is clicked.
         if (battleSaveManager.IsGarrisonBattle || battleSaveManager.IsCustomBattle)
@@ -268,7 +272,6 @@ public class BattleManager : Singleton<BattleManager>
 
         // if (findTargets) entityManager.CreateEntity(typeof(FindTargets));
 
-        TutorialManager.Instance.CompleteStepCheck(TutorialStepEnum.ChangeBattleSpeed);
         TutorialManager.Instance.CompleteStepCheck(TutorialStepEnum.StartBattle);
 
         var squadQuery = entityManager.CreateEntityQuery(typeof(SquadEntity), typeof(EntityReferenceBufferElement));

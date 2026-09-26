@@ -31,6 +31,8 @@ public class ShopConsumable : MonoBehaviour
     private Transform consumableGameObjectTransform;
     Outline outline;
     ShopPanel shopPanel;
+    // The price the shop passed in: the base cost minus any Renown discount, before difficulty and gear.
+    int basePrice;
 
     public void SetUp(ConsumableEnum _consumableType, int _consumablePrice, ShopPanel _shopPanel)
     {
@@ -43,14 +45,8 @@ public class ShopConsumable : MonoBehaviour
             }
         }
         consumableType = _consumableType;
-        consumablePrice = _consumablePrice;
-        consumablePrice += CampaignManager.Instance.CampaignSaveManager.SaveData.difficultyLevel >= TT_Difficulty.Duke ? 2 : 0;
-        
-        // Check for CookieAndFowlCard
-        if (CampaignManager.Instance.GearManager.CheckForGear(GearID.CookieAndFowlCard))
-        {
-            consumablePrice = 0;
-        }
+        basePrice = _consumablePrice;
+        consumablePrice = CurrentPrice();
         shopPanel = _shopPanel;
         spawnInFeedback.PlayFeedbacks();
         CreateConsumableGameObject();
@@ -135,13 +131,15 @@ public class ShopConsumable : MonoBehaviour
         Destroy(gameObject);
         shopPanel.RenableShopPanel();
     }
+    // The first price and every refresh use one rule, so a purchase can never change the other item's price.
+    private int CurrentPrice()
+    {
+        if (CampaignManager.Instance.GearManager.CheckForGear(GearID.CookieAndFowlCard)) return 0;
+        return basePrice;
+    }
     public void RefreshPrices()
     {
-        Consumable consumableData = ConsumableData.GetConsumable(consumableType);
-        consumablePrice = ConsumableData.ConsumableCost(consumableData.ConsumableRarity);
-        
-        //DifficultyMod 4
-        consumablePrice += CampaignManager.Instance.CampaignSaveManager.SaveData.difficultyLevel >= TT_Difficulty.Squire ? 2 : 0;
+        consumablePrice = CurrentPrice();
         if(shopPriceCanvas != null)
             shopPriceCanvas.SetUp(consumablePrice.ToString());
     }

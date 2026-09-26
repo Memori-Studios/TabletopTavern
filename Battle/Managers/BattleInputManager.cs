@@ -100,6 +100,8 @@ public class BattleInputManager : MonoBehaviour
         BattleManager.Instance.OnCursorModeChanged += OnCursorModeChanged;
         InputHandler.Instance.OnAddUnitsToSelection += AddUnitsToSelection;
         InputHandler.Instance.OnAddUnitsToSelectionCanceled += CancelAddingUnitsToSelection;
+        // InputHandler lives in Core, so a key tapped on in the last battle would still be on.
+        InputHandler.Instance.ReleaseTappedKeys();
         unitSelectionManager = UnitSelectionManager.Instance;
         initialMouseWorldPositionDebug.gameObject.SetActive(debug);
         currentMouseWorldPositionDebug.gameObject.SetActive(debug);
@@ -299,6 +301,8 @@ public class BattleInputManager : MonoBehaviour
             RotatingSelectedUnits(false);
             positionDrawer.TurnOff();
             repositionCancelled = true;
+            // A tapped Alt would otherwise keep box-select off after the cancel.
+            InputHandler.Instance.ReleaseRepositionTap();
             BattleManager.Instance.SetCursorMode(CursorMode.Free);
             // Debug.Log($"reposition canceled");
             // return;
@@ -418,6 +422,12 @@ public class BattleInputManager : MonoBehaviour
             UnitSize unitSize = TabletopTavernData.Instance.GetUnitSizeFromUnitName(BattleManager.Instance.SpawnManager.UnitName);
             float spread = TabletopTavernConstants.GetSpread(unitSize);
             positionDrawer.PreviewSpawnFormation(MouseWorldPosition.Instance.GetWorldPosition(), selectedUnitsCount, spread);
+        }
+        else if (cursorMode == CursorMode.CastSpell)
+        {
+            // A box started before the spell was armed never sees its release in cast mode.
+            selectionAreaStarted = false;
+            unitSelectionManager.ClearSelectionAreaHover();
         }
         // else if (cursorMode == CursorMode.CastSpell)
         // {
@@ -708,7 +718,8 @@ public class BattleInputManager : MonoBehaviour
 
         if (LeftClickHeldDown)
         {
-            if (IsMultipleSelection())
+            // Only a real box drag highlights; a held spell-cast click would box from the last selection click.
+            if (selectionAreaStarted && IsMultipleSelection())
             {
                 EntityManager entityManager2 = World.DefaultGameObjectInjectionWorld.EntityManager;
                 EntityQuery entityQuery2 = new EntityQueryBuilder(Allocator.Temp).WithAll<LocalTransform, Unit>().WithPresent<Selected>().WithAbsent<BrokenSquadTag>().Build(entityManager2);

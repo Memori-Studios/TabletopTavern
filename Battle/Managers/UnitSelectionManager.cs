@@ -120,6 +120,10 @@ public class UnitSelectionManager : MonoBehaviour
             return;
         }
 
+        // A tapped Alt with nothing to reposition would block box-select until tapped again.
+        if (InputHandler.Instance.RepositioningSelectedUnits && (!unitsAreSelected || EnemySquadsSelected))
+            InputHandler.Instance.ReleaseRepositionTap();
+
         if (battleInputManager.RepositioningSelectedUnits)
         {
             HoverSquad(0, true);

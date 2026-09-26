@@ -109,6 +109,20 @@ namespace TJ
             }
 
             int activeHeroID = customBattle ? -1 : SaveDataHandler.GetActiveHeroID();
+            int warlordHeroID = -1;
+            bool enemyOnlySakuraUnits = false;
+            if (!customBattle && !battleSaveManager.IsGarrisonBattle)
+            {
+                CampaignSaveData run = SaveDataHandler.Load();
+                if (run.enemyWarlordHeroID > 0)
+                {
+                    warlordHeroID = run.enemyWarlordHeroID;
+                    enemyOnlySakuraUnits = run.enemyArmy != null && run.enemyArmy.Length > 0;
+                    if (enemyOnlySakuraUnits)
+                        foreach (var s in run.enemyArmy)
+                            if (TabletopTavernData.Instance.GetRaceFromUnitName(s.UnitName) != Race.SakuraDynasty) { enemyOnlySakuraUnits = false; break; }
+                }
+            }
             entityManager.SetComponentData(entity, new CampaignSaveDataHolder
             {
                 IsCustomBattle = customBattle,
@@ -119,7 +133,10 @@ namespace TJ
                 // same pattern as EnemyRace below.
                 PlayerHeroRace = activeHeroID == -1 ? Race.Special : HeroData.GetRaceFromHero(activeHeroID),
                 EnemyRace = SaveDataHandler.GetEnemyRace(),
-                OnlySakuraUnits = onlySakuraUnits
+                OnlySakuraUnits = onlySakuraUnits,
+                EnemyWarlordHeroID = warlordHeroID,
+                EnemyWarlordRace = warlordHeroID == -1 ? Race.Special : HeroData.GetRaceFromHero(warlordHeroID),
+                EnemyOnlySakuraUnits = enemyOnlySakuraUnits
             });
 
 

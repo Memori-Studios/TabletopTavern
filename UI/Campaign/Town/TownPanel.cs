@@ -22,42 +22,9 @@ namespace TJ.Town
     public class TownPanel : MapPanel
     {
         [Header("Town Config")]
-        [SerializeField] MemoriCanvasGroup townOptionsCanvasGroup;
-        [SerializeField] TMP_Text townNameText, townDescriptionText;
-        [SerializeField] private Image villageImage, castleImage, cityImage;
-        [SerializeField] MemoriCanvasGroup garrisonCanvasGroup;
-        [SerializeField] Transform garrisonTroopTransform;
-        public Transform GarrisonTroopTransform => garrisonTroopTransform;
+        [SerializeField] private TownPanelView view;
         [SerializeField] private SquadDisplayCardMenu squadDisplayCardMenuPrefab;
-
-        [Header("Sack Town")]
-        [SerializeField] MemoriCanvasGroup sackTownCanvasGroup;
-        [SerializeField] TMP_Text bountyAmountText;
-        [SerializeField] Button sackTownButton, lootGoldButton, lootGearButton;
-        [SerializeField] Button continueAfterSackTownButton;
-
-        [Header("Enter Town")]
-        [SerializeField] MemoriCanvasGroup enterTownCanvasGroup;
-        [SerializeField] Button enterTownButton, recruitUnitsButton;//, shopButton;
-        [SerializeField] Button continueAfterEnterTownButton;
-        [SerializeField] MemoriTooltipTrigger enterTownTooltipTrigger, sackTownTooltipTrigger, recruitUnitsTooltipTrigger, recruitmentDetailsNumberTooltip;
-        [SerializeField] TMP_Text recruitUnitsCostText;
-        [SerializeField] MemoriCanvasGroup recruitmentButtonCanvasGroup;
-        [SerializeField] GameObject recruitmentAvailableObject, recruitmentUnavailableObject;
-
-        [Header("Battlefield")]
-        [SerializeField] TMP_Text weatherText;
-        [SerializeField] MemoriTooltipTrigger weatherTooltipTrigger;
-        [SerializeField] TMP_Text biomeText;
-
-        [Header("Faction Effects")]
-        [SerializeField] TMP_Text imperialEdictText;
-        [SerializeField] GameObject sackAndSlaughterText;
-        [SerializeField] MemoriTooltipTrigger sackAndSlaughterTooltipTrigger;
-        [SerializeField] TMP_Text sackAndSlaughterUnit1Text;
-
-        [Header("Sack Town")]
-        [SerializeField] Button conscriptUnitsButton;
+        public Transform GarrisonTroopTransform => view.GarrisonGrid;
 
         CampaignSaveManager campaignSaveManager;
         MapSceneUIManager mapSceneUIManager;
@@ -76,17 +43,16 @@ namespace TJ.Town
         {
             townPanelCanvasGroup = GetComponent<MemoriCanvasGroup>();
 
-            sackTownButton.onClick.AddListener(OnSackTown);
-            lootGearButton.onClick.AddListener(OnLootGearButtonClicked);
-            lootGoldButton.onClick.AddListener(OnLootGoldButtonClicked);
+            view.FightButton.onClick.AddListener(OnSackTown);
+            view.GearRow.Button.onClick.AddListener(OnLootGearButtonClicked);
+            view.GoldRow.Button.onClick.AddListener(OnLootGoldButtonClicked);
 
-            enterTownButton.onClick.AddListener(OnEnterTown);
-            recruitUnitsButton.onClick.AddListener(OnRecruitUnitsButtonClicked);
-            conscriptUnitsButton.onClick.AddListener(OnConscriptUnitsButtonClicked);
+            view.EnterButton.onClick.AddListener(OnEnterTown);
+            view.RecruitButton.onClick.AddListener(OnRecruitUnitsButtonClicked);
+            view.ConscriptRow.Button.onClick.AddListener(OnConscriptUnitsButtonClicked);
 
-            continueAfterSackTownButton.onClick.AddListener(CompleteTown);
-            continueAfterEnterTownButton.onClick.AddListener(CompleteTown);
-
+            view.FightContinueButton.onClick.AddListener(CompleteTown);
+            view.EnterContinueButton.onClick.AddListener(CompleteTown);
         }
         public void SetUp(CampaignSaveManager _campaignSaveManager, MapSceneUIManager _mapSceneUIManager)
         {
@@ -96,7 +62,6 @@ namespace TJ.Town
             shopPanel = mapSceneUIManager.ShopPanel;
             treasurePanel = mapSceneUIManager.TreasurePanel;
 
-            lootGoldButton.gameObject.SetActive(false);
             goldManager = CampaignManager.Instance.GoldManager;
         }
         public void LoadTownPanel(int _selectedNodeIndex, int level)
@@ -118,6 +83,7 @@ namespace TJ.Town
                     DisplayTownOptions();
                     break;
                 case TownInteractionStatus.Entered:
+                    LoadEnemyCompany();
                     OnEnterTown();
                     break;
                 case TownInteractionStatus.Sacked:
@@ -131,9 +97,11 @@ namespace TJ.Town
                     break;
             }
 
-            townPanelCanvasGroup.FadeInAsync(0.25f);
+            // A garrison fight hands the screen to the engagement panel, which brings this panel back after the battle.
+            if (townSaveData.townInteractionStatus == TownInteractionStatus.None || townSaveData.townInteractionStatus == TownInteractionStatus.Entered)
+                townPanelCanvasGroup.FadeInAsync(0.25f);
             TutorialManager.Instance.LoadStepsFromRandomSpot(new TutorialStep[1] { TutorialData.TownExplanation });
-            
+
         }
         private void SetUpTownInfo()
         {
@@ -141,55 +109,26 @@ namespace TJ.Town
             // Debug.Log($"Setting up town info: {townSaveData.hasLootedGear} bountyAmount: {townSaveData.bountyAmount} gear IDs: {string.Join(", ", townSaveData.townLootGearIDs)}");
             recruitmentCost = TownSaveData.GetTownRecruitCost(townSaveData.townSize);
             string townSizeLocalized = LocalizationManager.Instance.GetText(townSaveData.townSize.ToString());
-            townNameText.text = LocalizationManager.Instance.GetText(townSaveData.townName);
             string raceLocalized = LocalizationManager.Instance.GetText(townSaveData.townRace.ToString());
-            townDescriptionText.text = raceLocalized + " " + townSizeLocalized;
-            recruitmentButtonCanvasGroup.CGEnable();
+            view.SetHeader(LocalizationManager.Instance.GetText(townSaveData.townName), raceLocalized + " " + townSizeLocalized,
+                ColorData.GetRaceDisplayColor(townSaveData.townRace), townSaveData.townSize);
+            view.SetTownInfo(LocalizationManager.Instance.GetText("Town Info"), TownInfoDescription());
             hasRecruitedMaxUnits = false;
+            imperialEdictActive = false;
             SetRecruitmentAvailable(true);
 
-            if (townSaveData.townSize == TownSize.Village)
-            {
-                villageImage.enabled = true;
-                castleImage.enabled = false;
-                cityImage.enabled = false;
-            }
-            else if (townSaveData.townSize == TownSize.Castle)
-            {
-                villageImage.enabled = true;
-                castleImage.enabled = true;
-                cityImage.enabled = false;
-            }
-            else if (townSaveData.townSize == TownSize.City)
-            {
-                villageImage.enabled = true;
-                castleImage.enabled = true;
-                cityImage.enabled = true;
-            }
-
-            string enterTownTitleLocalized = LocalizationManager.Instance.GetText("EnterTown");
-            string enterTownDescriptionLocalized = LocalizationManager.Instance.GetText("enterTownDesc");
-            if (TownIsSameRace())
-            {
-                string unlimitedRecruits = LocalizationManager.Instance.GetText("UncappedRecruitment");
-                enterTownDescriptionLocalized += $"\n<color={ColorData.Positive}>" + unlimitedRecruits + "</color>";
-            }
-            string sackTownTitleLocalized = LocalizationManager.Instance.GetText("FightGarrison");
-            string enterTownFlavorLocalized = LocalizationManager.Instance.GetText("enterTownFlavor");
-            string sackTownDescriptionLocalized = $"<color={ColorData.Positive}>" + LocalizationManager.Instance.GetText("sackTownDesc") + "</color>"
-                + $"\n<color={ColorData.Negative}>" + LocalizationManager.Instance.GetText("sackTownNoHeal") + "</color>";
-            string sackTownFlavorLocalized = LocalizationManager.Instance.GetText("sackTownFlavor");
-            string recruitmentButtonTooltipTitleLocalized = LocalizationManager.Instance.GetText("Recruit Units");
-            string recruitmentButtonTooltipDescLocalized = LocalizationManager.Instance.GetText("townRecruitmentDesc");
-
-            enterTownTooltipTrigger.SetUpToolTip(enterTownTitleLocalized, enterTownDescriptionLocalized, enterTownFlavorLocalized);
-            sackTownTooltipTrigger.SetUpToolTip(sackTownTitleLocalized, sackTownDescriptionLocalized, sackTownFlavorLocalized);
-            recruitmentDetailsNumberTooltip.SetUpToolTip(recruitmentButtonTooltipTitleLocalized, recruitmentButtonTooltipDescLocalized);
+            view.SetEnterStrip(LocalizationManager.Instance.GetText("townHeal"), HealPercentText(), RecruitRarityText());
+            view.SetEnterLines(string.Format(LocalizationManager.Instance.GetText("townHealLine"), HealPercentText()),
+                LocalizationManager.Instance.GetText("townRecruitLine"), RecruitLimitNote());
+            UpdateAffordability(campaignSaveManager.SaveData.goldAmount);
+            view.SetFightSubtitle(LocalizationManager.Instance.GetText("sackTownFlavor"));
+            view.SetBounty(BountyRangeText());
+            view.SetEliteRavagers(null, null, null);
 
             SetUpBattlefieldInfo();
         }
         // Mirrors the engagement panel's weather/biome pair so the garrison fight is legible before the
-        // player commits. Like there, these write only the value - the labels are static scene text.
+        // player commits.
         private void SetUpBattlefieldInfo()
         {
             SetUpWeatherInfo();
@@ -199,8 +138,6 @@ namespace TJ.Town
         // EngagementPanel.GenerateBattlefield read.
         private void SetUpWeatherInfo()
         {
-            if (weatherText == null) return;
-
             MapRegion mapRegion = MapThemeManager.Instance.GetMapRegion(mapSceneUIManager.MapSceneManager.MapRace);
             Weather weather = CampaignSaveManager.GenerateNodeWeather(
                 selectedNodeIndex,
@@ -209,38 +146,68 @@ namespace TJ.Town
                 mapRegion);
 
             string weatherNameLocalized = LocalizationManager.Instance.GetText(weather.ToString());
-            weatherText.text = weatherNameLocalized;
-
-            if (weatherTooltipTrigger == null) return;
             string weatherDescriptionLocalized = LocalizationManager.Instance.GetText(weather.ToString() + "Desc");
-            weatherTooltipTrigger.SetUpToolTip(weatherNameLocalized, weatherDescriptionLocalized);
+            view.SetWeather(weather, weatherNameLocalized, weatherDescriptionLocalized);
         }
         // Deliberately not the node's biome roll. Sacking a town is always a garrison fight, and both
         // EngagementPanel.GenerateBattlefield and GreyCompanyBattlefield force Biome.Plains for one, so
         // what the player actually gets is the walled garrison rather than any of the four biomes.
         private void SetUpBiomeInfo()
         {
-            if (biomeText == null) return;
-
-            biomeText.text = LocalizationManager.Instance.GetText("Garrison");
+            view.SetBattlefield(LocalizationManager.Instance.GetText("Garrison"));
+        }
+        // Shown the way HealTroopsOnTownEntry applies it, hero healing bonus included.
+        private string HealPercentText()
+        {
+            float heal = Mathf.Min(1f, CampaignSaveManager.ApplyHealingBonus(campaignSaveManager.TownEntryHealAmount()));
+            return $"{Mathf.RoundToInt(heal * 100f)}%";
+        }
+        private string RecruitRarityText()
+        {
+            switch (townSaveData.townSize)
+            {
+                case TownSize.Castle:
+                    return string.Format(LocalizationManager.Instance.GetText("townRecruitUpTo"), $"<color={ColorData.Tier2}>{LocalizationManager.Instance.GetText("Uncommon")}</color>");
+                case TownSize.City:
+                    return string.Format(LocalizationManager.Instance.GetText("townRecruitUpTo"), $"<color={ColorData.Tier3}>{LocalizationManager.Instance.GetText("Rare")}</color>");
+                default:
+                    return $"<color={ColorData.Tier1}>{LocalizationManager.Instance.GetText("Common")}</color>";
+            }
+        }
+        private string RecruitLimitNote()
+        {
+            string note = TownIsSameRace()
+                ? $"<color={ColorData.Positive}>{LocalizationManager.Instance.GetText("UncappedRecruitment")}</color>"
+                : LocalizationManager.Instance.GetText("townRecruitLimit");
+            if (HeroBonusManager.Instance.ActiveHeroID == 1 || HeroBonusManager.Instance.ActiveHeroID == 2)
+                note += $"\n<color={ColorData.Gold}>{LocalizationManager.Instance.GetText("IronLegionBonusDescription")}</color>";
+            return note;
+        }
+        private int ActBonus() => 5 * (campaignSaveManager.SaveData.bookNumber - 1); //add 5 gold per book number to the bounty amount
+        private string BountyRangeText()
+        {
+            (int min, int max) = TownSaveData.GetEffectiveBountyRange(townSaveData.townSize);
+            int bonus = ActBonus();
+            return $"{min + bonus}-{Mathf.Max(min, max - 1) + bonus}<sprite name=GoldSprite>";
         }
         private void DisplayTownOptions()
         {
-            townOptionsCanvasGroup.CGEnable();
+            view.ShowRoad(TownPanelView.Road.Undecided, false);
             LoadEnemyCompany();
         }
         public async void LoadEnemyCompany()
         {
-            garrisonCanvasGroup.CGEnable();
             // Rebuild from scratch. Nothing guarantees HideEnemyCompany ran first, so without this a second
             // DisplayTownOptions appends a whole extra set of garrison cards on top of the existing ones.
-            foreach (Transform child in garrisonTroopTransform) {
+            foreach (Transform child in view.GarrisonGrid) {
                 Destroy(child.gameObject);
             }
+            SquadToLoad[] garrison = campaignSaveManager.SaveData.townData.townGarrisonUnits;
+            view.SetGarrisonCount(garrison.Length, string.Format(LocalizationManager.Instance.GetText("townSquadCount"), garrison.Length));
             List<SquadDisplayCardMenu> enemySquadsCards = new ();
-            foreach (SquadToLoad squad in campaignSaveManager.SaveData.townData.townGarrisonUnits)
+            foreach (SquadToLoad squad in garrison)
             {
-                SquadDisplayCardMenu squadDisplayCardMenu = Instantiate(squadDisplayCardMenuPrefab, garrisonTroopTransform);
+                SquadDisplayCardMenu squadDisplayCardMenu = Instantiate(squadDisplayCardMenuPrefab, view.GarrisonGrid);
                 enemySquadsCards.Add(squadDisplayCardMenu);
                 squadDisplayCardMenu.SetUp(squad, false, mapSceneUIManager.HUDPanel, true);
                 squadDisplayCardMenu.SpawnInJuice(false);
@@ -254,10 +221,9 @@ namespace TJ.Town
         }
         public void HideEnemyCompany()
         {
-            foreach (Transform child in garrisonTroopTransform) {
+            foreach (Transform child in view.GarrisonGrid) {
                 Destroy(child.gameObject);
             }
-            garrisonCanvasGroup.CGDisable();
         }
         public void ReloadTownPanel()
         {
@@ -266,7 +232,7 @@ namespace TJ.Town
         private void OnSackTown()
         {
             CampaignManager.Instance.MapSceneUIManager.EngagementPanel.LoadEngagementPanelFromTown();
-            townOptionsCanvasGroup.FadeOutAsync(0.25f);
+            townPanelCanvasGroup.FadeOutAsync(0.25f);
             HideEnemyCompany();
         }
         //Patch me
@@ -274,31 +240,32 @@ namespace TJ.Town
         {
             campaignSaveManager.SetTownData(townSaveData);
             SetUpTownInfo();
+            view.ShowRoad(TownPanelView.Road.Sacked, false);
+            view.SetFightSubtitle($"{LocalizationManager.Instance.GetText("townGarrisonDefeated")} <color={ColorData.Negative}>{LocalizationManager.Instance.GetText("townReservesDidNotHeal")}</color>");
             townPanelCanvasGroup.FadeInAsync(0.25f);
             LootTown();
 
             if (HeroBonusManager.Instance.ActiveHeroID == 5 || HeroBonusManager.Instance.ActiveHeroID == 6)
             {
-                sackAndSlaughterText.SetActive(true);
                 string[] unitNames = CampaignManager.Instance.CampaignSaveManager.PrestigeRandomUnits2();
+                string displayText;
                 if (unitNames != null)
                 {
                     IAudioRequester.Instance.PlaySFX(SFXData.PrestigeUnit);
-                    string displayText = LocalizationManager.Instance.GetText(unitNames[0]);
+                    displayText = LocalizationManager.Instance.GetText(unitNames[0]);
                     if (unitNames[1] != null)
-                        displayText += "\n" + LocalizationManager.Instance.GetText(unitNames[1]);
-                    sackAndSlaughterUnit1Text.text = displayText;
-                    sackAndSlaughterTooltipTrigger.SetUpToolTip(LocalizationManager.Instance.GetText("Campaign Bonus"), LocalizationManager.Instance.GetText("RavenHostBonusDescription"));
+                        displayText += ", " + LocalizationManager.Instance.GetText(unitNames[1]);
                 }
                 else
                 {
-                    string noneLocalized = LocalizationManager.Instance.GetText("None");
-                    sackAndSlaughterUnit1Text.text = noneLocalized;
+                    displayText = LocalizationManager.Instance.GetText("None");
                 }
+                view.SetEliteRavagers($"<color={ColorData.Gold}>{LocalizationManager.Instance.GetText("Elite Ravagers")}:</color> {displayText}",
+                    LocalizationManager.Instance.GetText("Campaign Bonus"), LocalizationManager.Instance.GetText("RavenHostBonusDescription"));
             }
             else
             {
-                sackAndSlaughterText.SetActive(false);
+                view.SetEliteRavagers(null, null, null);
             }
         }
         public void LootTown()
@@ -307,22 +274,24 @@ namespace TJ.Town
             IAudioRequester.Instance.PlaySFX(SFXData.SackTown);
             campaignSaveManager.RemoveZeroHealthSquads();
 
-            if (townSaveData.bountyAmount > 0) lootGoldButton.gameObject.SetActive(true);
-
-            lootGearButton.gameObject.SetActive(!townSaveData.hasLootedGear);
-            conscriptUnitsButton.gameObject.SetActive(true);
-            int actBonus = 5 * (campaignSaveManager.SaveData.bookNumber - 1); //add 5 gold per book number to the bounty amount
+            int actBonus = ActBonus();
+            string goldDetail;
             if (actBonus > 0)
             {
-                string ActLocalized = LocalizationManager.Instance.GetText("Act");
                 string actInRomanNumerals = MemoriUI.ConvertNumberToRomanNumeral(campaignSaveManager.SaveData.bookNumber);
-                bountyAmountText.text = $"{townSaveData.bountyAmount} <color={ColorData.Green}>+{actBonus} {ActLocalized} {actInRomanNumerals}</color>";
+                goldDetail = string.Format(LocalizationManager.Instance.GetText("townSpoilGoldAct"), townSaveData.bountyAmount, actBonus, actInRomanNumerals);
             }
             else
             {
-                bountyAmountText.text = $"{townSaveData.bountyAmount}";
+                goldDetail = LocalizationManager.Instance.GetText("townSpoilGold");
             }
-            sackTownCanvasGroup.FadeInAsync(0.25f);
+            view.GoldRow.Set(LocalizationManager.Instance.GetText("Loot Gold"), goldDetail, $"{townSaveData.bountyAmount + actBonus}<sprite name=GoldSprite>");
+            view.GoldRow.SetTaken(townSaveData.bountyAmount <= 0);
+            view.GearRow.Set(LocalizationManager.Instance.GetText("Loot Gear"), LocalizationManager.Instance.GetText("townSpoilGear"), LocalizationManager.Instance.GetText("townSpoilGearValue"));
+            view.GearRow.SetTaken(townSaveData.hasLootedGear);
+            view.ConscriptRow.Set(LocalizationManager.Instance.GetText("Recruit Units"), LocalizationManager.Instance.GetText("townRecruitLine"),
+                $"<color={ColorData.Positive}>{LocalizationManager.Instance.GetText("townSpoilFree")}</color>");
+            view.ConscriptRow.SetTaken(false);
 
             SteamAchievements.Unlock(AchievementId.SackCity);
             SteamAchievements.AddStat(SteamStatId.CitiesSacked, 1);
@@ -342,45 +311,23 @@ namespace TJ.Town
                 campaignSaveManager.ModifyTroopHealth(1);
             }
         }
-        private async void OnEnterTown()
+        private void OnEnterTown()
         {
             townSaveData.townInteractionStatus = TownInteractionStatus.Entered;
             IAudioRequester.Instance.PlaySFX(SFXData.EnterTown);
 
             campaignSaveManager.HealTroopsOnTownEntry();
             campaignSaveManager.SetTownData(townSaveData);
-            await townOptionsCanvasGroup.FadeOut(0.25f);
 
-            string townSizeLocalized = LocalizationManager.Instance.GetText(townSaveData.townSize.ToString());
-            string recruitTownTitleLocalized = LocalizationManager.Instance.GetText("RecruitUnitsFromTownTitle");
-            string recruitTownDescriptionLocalized = LocalizationManager.Instance.GetText("RecruitUnitsFromTownDesc") + $" {LocalizationManager.Instance.GetText(townSaveData.townRace.ToString())}";
+            view.ShowRoad(TownPanelView.Road.Entered, true);
+            view.SetEnterStrip(LocalizationManager.Instance.GetText("townHealed"), HealPercentText(), RecruitRarityText());
+            view.SetEnterLines($"<color={ColorData.Positive}>{string.Format(LocalizationManager.Instance.GetText("townHealedLine"), HealPercentText())}</color>",
+                LocalizationManager.Instance.GetText("townRecruitLine"), RecruitLimitNote());
 
-            recruitTownTitleLocalized += $" {townSizeLocalized}: <color={ColorData.Tier1}>[{LocalizationManager.Instance.GetText("Tier I")}]</color>"; 
-            if(townSaveData.townSize == TownSize.Castle || townSaveData.townSize == TownSize.City) {
-                recruitTownTitleLocalized += $" + <color={ColorData.Tier2}>[{LocalizationManager.Instance.GetText("Tier II")}]</color>"; 
-            }
-            if(townSaveData.townSize == TownSize.City) {
-                recruitTownTitleLocalized += $" + <color={ColorData.Tier3}>[{LocalizationManager.Instance.GetText("Tier III")}]</color>"; 
-            }
-
-            recruitUnitsTooltipTrigger.SetUpToolTip(recruitTownTitleLocalized, recruitTownDescriptionLocalized);
-
-            if (HeroBonusManager.Instance.ActiveHeroID == 1 || HeroBonusManager.Instance.ActiveHeroID == 2)
-            {
-                imperialEdictActive = true;
-                imperialEdictText.enabled = true;
-                recruitUnitsCostText.text = $"<color={ColorData.Positive}>{0}</color><sprite name=GoldSprite>";
-            }
-            else
-            {
-                imperialEdictActive = false;
-                imperialEdictText.enabled = false;
-                UpdateAffordability(campaignSaveManager.SaveData.goldAmount);
-            }
+            imperialEdictActive = HeroBonusManager.Instance.ActiveHeroID == 1 || HeroBonusManager.Instance.ActiveHeroID == 2;
+            UpdateAffordability(campaignSaveManager.SaveData.goldAmount);
 
             TutorialManager.Instance.CompleteStepCheck(TutorialStepEnum.TownExplanation);
-            enterTownCanvasGroup.FadeInAsync(0.25f);
-            HideEnemyCompany();
         }
         public void OnLootGearButtonClicked()
         {
@@ -390,7 +337,7 @@ namespace TJ.Town
                 return;
             }
             treasurePanel.LoadTreasurePanelFromShop(townSaveData.townLootGearIDs[0]);
-            lootGearButton.gameObject.SetActive(false);
+            view.GearRow.SetTaken(true, true);
             townSaveData.hasLootedGear = true;
         }
         public void OnLootGearCardSelected()
@@ -398,19 +345,18 @@ namespace TJ.Town
             townSaveData.hasLootedGear = true;
             campaignSaveManager.SetTownData(townSaveData);
 
-            lootGearButton.OnPointerExit(null);
-            lootGearButton.gameObject.SetActive(false);
+            view.GearRow.Button.OnPointerExit(null);
+            view.GearRow.SetTaken(true);
         }
         public void OnLootGoldButtonClicked()
         {
             string localizedString = LocalizationManager.Instance.GetText("Loot Gold");
-            int actBonus = 5 * (campaignSaveManager.SaveData.bookNumber - 1); //add 5 gold per book number to the bounty amount
-            goldManager.ModifyGold(townSaveData.bountyAmount + actBonus, localizedString);
+            goldManager.ModifyGold(townSaveData.bountyAmount + ActBonus(), localizedString);
             townSaveData.bountyAmount = 0;
             campaignSaveManager.SetTownData(townSaveData);
-            lootGoldButton.OnPointerExit(null);
+            view.GoldRow.Button.OnPointerExit(null);
 
-            lootGoldButton.gameObject.SetActive(false);
+            view.GoldRow.SetTaken(true, true);
         }
         public void OnRecruitUnitsButtonClicked()
         {
@@ -421,7 +367,7 @@ namespace TJ.Town
                 return;
             }
             int modifiedRecruitmentCost = recruitmentCost;
-            if (CampaignManager.Instance.CampaignSaveManager.SaveData.difficultyLevel >= TT_Difficulty.Duke) modifiedRecruitmentCost += 2;
+            if (DifficultyRules.RecruitCostIncreased(CampaignManager.Instance.CampaignSaveManager.SaveData.difficultyLevel)) modifiedRecruitmentCost += 2;
             if (CampaignManager.Instance.GearManager.CheckForGear(GearID.JailersKey))
             {
                 modifiedRecruitmentCost -= townSaveData.townSize switch
@@ -462,7 +408,8 @@ namespace TJ.Town
             townPanelCanvasGroup.FadeOutAsync(0.25f);
             IAudioRequester.Instance.PlaySFX(SFXData.FocusNode);
             recruitPanel.LoadRecruitPanelFromTown(townSaveData.townRace, townSaveData.townSize);
-            conscriptUnitsButton.gameObject.SetActive(false);
+            view.ConscriptRow.Button.OnPointerExit(null);
+            view.ConscriptRow.SetTaken(true, true);
         }
         public void CompleteTown()
         {
@@ -473,25 +420,15 @@ namespace TJ.Town
             Debug.Log("[Map] Closing TownPanel");
             goldManager.OnGoldAmountChanged -= UpdateAffordability;
             StartCoroutine(CampaignManager.Instance.MapCamera.LerpFocusedOnNodeVolume(0f, 0.25f));
-            lootGearButton.gameObject.SetActive(false);
-            lootGoldButton.gameObject.SetActive(false);
             HideEnemyCompany();
 
             townPanelCanvasGroup.FadeOutAsync(0.25f);
-            sackTownCanvasGroup.CGDisable();
-            enterTownCanvasGroup.CGDisable();
-            townOptionsCanvasGroup.CGDisable();
         }
         public void DisableTownCanvasesOnLoss()
         {
             goldManager.OnGoldAmountChanged -= UpdateAffordability;
-            lootGearButton.gameObject.SetActive(false);
-            lootGoldButton.gameObject.SetActive(false);
             HideEnemyCompany();
 
-            sackTownCanvasGroup.CGDisable();
-            enterTownCanvasGroup.CGDisable();
-            townOptionsCanvasGroup.CGDisable();
             townPanelCanvasGroup.CGDisable();
         }
         public void CloseRecruitPanel()
@@ -512,7 +449,7 @@ namespace TJ.Town
             }
 
             //DifficultyMod 9
-            if(CampaignManager.Instance.CampaignSaveManager.SaveData.difficultyLevel >= TT_Difficulty.Duke) {
+            if(DifficultyRules.RecruitCostIncreased(CampaignManager.Instance.CampaignSaveManager.SaveData.difficultyLevel)) {
                 modifiedRecruitmentCost += 2;
             }
 
@@ -522,15 +459,10 @@ namespace TJ.Town
             if (imperialEdictActive)
             {
                 modifiedRecruitmentCost = 0;
-                imperialEdictText.enabled = true;
                 colorString = ColorData.Positive;
             }
-            else
-            {
-                imperialEdictText.enabled = false;
-            }
 
-            recruitUnitsCostText.text = $"<color={colorString}>{modifiedRecruitmentCost}</color><sprite name=GoldSprite>";
+            view.SetCost($"<color={colorString}>{modifiedRecruitmentCost}</color><sprite name=GoldSprite>");
         }
         public void OnDestroy()
         {
@@ -540,13 +472,48 @@ namespace TJ.Town
         }
         private void SetRecruitmentAvailable(bool available)
         {
-            if (recruitmentAvailableObject != null) recruitmentAvailableObject.SetActive(available);
-            if (recruitmentUnavailableObject != null) recruitmentUnavailableObject.SetActive(!available);
-            recruitmentButtonCanvasGroup.canvasGroup.alpha = available ? 1f : 0.25f;
+            view.SetRecruitAvailable(available);
         }
         private bool TownIsSameRace()
         {
             return townSaveData.townRace == HeroData.GetRaceFromHero(CampaignManager.Instance.CampaignSaveManager.GetHeroID());
+        }
+        // Built when the town loads because garrison sizes depend on the current act and difficulty.
+        private string TownInfoDescription()
+        {
+            string villageLocalized = LocalizationManager.Instance.GetText("Village");
+            string castleLocalized = LocalizationManager.Instance.GetText("Castle");
+            string cityLocalized = LocalizationManager.Instance.GetText("City");
+            string garrisonUnitsLocalized = LocalizationManager.Instance.GetText("Garrison Units");
+
+            string description = LocalizationManager.Instance.GetText("townDescription");
+            description += $"\n\n{LocalizationManager.Instance.GetText("Garrison")}:";
+            description += $"\n<color={ColorData.Tier1}>{villageLocalized}: {GarrisonSize(TownSize.Village)} {garrisonUnitsLocalized}</color>";
+            description += $"\n<color={ColorData.Tier2}>{castleLocalized}: {GarrisonSize(TownSize.Castle)} {garrisonUnitsLocalized}</color>";
+            description += $"\n<color={ColorData.Tier3}>{cityLocalized}: {GarrisonSize(TownSize.City)} {garrisonUnitsLocalized}</color>";
+
+            description += $"\n\n{LocalizationManager.Instance.GetText("Bounty For Sacking")}:";
+            description += $"\n<color={ColorData.Tier1}>{villageLocalized}: {BountyRange(TownSize.Village)}</color><sprite name=GoldSprite>";
+            description += $"\n<color={ColorData.Tier2}>{castleLocalized}: {BountyRange(TownSize.Castle)}</color><sprite name=GoldSprite>";
+            description += $"\n<color={ColorData.Tier3}>{cityLocalized}: {BountyRange(TownSize.City)}</color><sprite name=GoldSprite>";
+            return description;
+        }
+        private string BountyRange(TownSize townSize)
+        {
+            (int min, int max) = TownSaveData.GetEffectiveBountyRange(townSize);
+            int bonus = ActBonus();
+            return $"{min + bonus}-{Mathf.Max(min, max - 1) + bonus}";
+        }
+        private int GarrisonSize(TownSize townSize)
+        {
+            CampaignSaveData saveData = campaignSaveManager.SaveData;
+            bool strongerGarrisons = DifficultyRules.StrongerGarrisons(saveData.difficultyLevel);
+            int count = 0;
+            foreach (TierCount entry in ArmyGenerationRuleData.ResolveTownGarrisonTierCounts(townSize, saveData.bookNumber, strongerGarrisons))
+                count += entry.Count;
+            // Must match the squad CampaignSaveManager.GenerateTown drops for Aura Farming.
+            if (CampaignManager.Instance.GearManager.CheckForGear(GearID.AuraFarming)) count--;
+            return Mathf.Max(count, 0);
         }
     }
 }

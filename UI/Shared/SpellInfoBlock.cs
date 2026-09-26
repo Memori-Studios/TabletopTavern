@@ -52,8 +52,8 @@ namespace TJ
             if (!gameObject.activeSelf) gameObject.SetActive(true);
 
             SpellName = LocalizationManager.Instance.GetText(spell.Spell.ToString());
-            // Already run through ColorData.XMLTagColorApplicator - do not apply it a second time.
-            string description = spell.GetLocalizedSpellDescription();
+            // The block has its own spell tooltip, which lists the keywords, so the text is not hoverable.
+            string description = KeywordText.Render(spell.GetLocalizedSpellDescription(), false);
 
             if (titleText != null)
                 titleText.text = $"{LocalizationManager.Instance.GetText("Spell")} - {SpellName}";
@@ -75,7 +75,7 @@ namespace TJ
                 raceGradientImage.color = ColorData.GetRaceDisplayTint(spell.Race);
 
             if (tooltipTrigger != null)
-                tooltipTrigger.SetUpToolTip(_title: SpellName, _description: description);
+                tooltipTrigger.SetContentProvider(() => Spells.SpellTooltip.Build(spell));
 
             return true;
         }

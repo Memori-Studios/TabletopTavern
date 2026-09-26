@@ -17,18 +17,19 @@ namespace TJ.Spells
     public static class SpellLoadout
     {
         /// <summary>
-        /// The size of a loadout ARRAY, and of the battle hotbar. Always 4, regardless of how many
+        /// The size of a loadout ARRAY, and of the battle hotbar. Always 3, regardless of how many
         /// slots the player has actually unlocked - locked slots are Spell.None entries rather than a
         /// shorter array. Keeping this fixed is what lets CampaignSaveData.selectedSpells stay
-        /// save-compatible, and lets the hotbar keep four buttons and four hotkeys.
+        /// save-compatible, and lets the hotbar keep three buttons and three hotkeys. Sanitize drops
+        /// anything past this index, so a save written when the array was four long still loads.
         /// </summary>
-        public const int SlotCount = 4;
-        /// <summary>Slots available before any Renown upgrade: the signature plus one free pick.</summary>
-        public const int BaseSlotCount = 2;
+        public const int SlotCount = 3;
+        /// <summary>Slots available before any Renown upgrade: the signature only.</summary>
+        public const int BaseSlotCount = 1;
         public const int SignatureSlotIndex = 0;
 
         /// <summary>
-        /// Available from a fresh save, so slots 1-3 are never dead on a first run. No hero's signature
+        /// Available from a fresh save, so an unlocked free slot is never dead on a first run. No hero's signature
         /// is currently in this list, but GetSelectableSpells still skips the active signature by value
         /// rather than assuming no overlap - LesserMoraleSpell was Edric's signature until Rally the
         /// Banners was authored, and nothing stops a future hero from claiming one of these again.
@@ -83,7 +84,7 @@ namespace TJ.Spells
         }
 
         /// <summary>
-        /// How many of the four slots the player may actually fill: <see cref="BaseSlotCount"/> plus
+        /// How many of the three slots the player may actually fill: <see cref="BaseSlotCount"/> plus
         /// one per unlocked slot node, capped at <see cref="SlotCount"/>. Everything above this is
         /// rendered locked and held at Spell.None.
         /// </summary>
@@ -203,10 +204,10 @@ namespace TJ.Spells
         }
 
         /// <summary>
-        /// Every spell the player may actually place in slots 1-3, in registry order. The active
+        /// Every spell the player may actually place in slots 1-2, in registry order. The active
         /// hero's own signature is excluded here because it already occupies slot 0 and may not be
         /// duplicated - skipped by value rather than merely left out of a hero loop, so that a
-        /// signature which is also an always-available spell cannot slip back into slots 1-3.
+        /// signature which is also an always-available spell cannot slip back into slots 1-2.
         /// </summary>
         public static List<Spell> GetSelectableSpells(int activeHeroID)
         {
@@ -254,7 +255,7 @@ namespace TJ.Spells
         /// <b>Every UNLOCKED slot always holds a spell.</b> Slots can be replaced but never emptied,
         /// so back-filling here is what guarantees an unlocked slot is never dead however the loadout
         /// was produced - an old save, a mod, or a hero whose signature changed. Locked slots are the
-        /// opposite: they are held at Spell.None and never filled, and the array stays four long
+        /// opposite: they are held at Spell.None and never filled, and the array stays three long
         /// either way so existing saves keep loading.
         /// </summary>
         public static Spell[] Sanitize(Spell[] chosen, int heroID)

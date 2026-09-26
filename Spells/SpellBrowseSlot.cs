@@ -21,36 +21,31 @@ namespace TJ.Spells
     }
 
     /// <summary>
-    /// One selectable spell in the pre-battle <see cref="SpellBrowseMenu"/>.
+    /// One selectable spell in the pre-battle <see cref="SpellBrowseMenu"/>, styled like the battle
+    /// hotbar tile (<see cref="SpellCastButton"/>): a dark rounded square whose icon and resting border
+    /// carry the faction's display colour.
     ///
-    /// The row is built in six layers and they split cleanly in two:
-    ///
-    ///   INTERIOR is chromatic and answers "what is this spell" - the wash, the rail and the icon all
-    ///   carry the faction's display colour and never change with state.
-    ///   FRAME is achromatic and answers "what is its status" - border brightness plus the slot numeral
-    ///   and corner brackets.
-    ///
-    /// That split is not a style preference. Nine factions consume the entire hue wheel, so no hue is
-    /// left to mean "equipped" - green is Gruntkin, gold is Taelindor. State has to read on brightness
-    /// and geometry. This is why <see cref="spellIcon"/>.color is now faction-only: writing state into it
-    /// (as SetEquipped and SetSelected used to) is exactly the collision the system exists to remove.
+    /// State reads on brightness and geometry, never a new hue. Nine factions consume the entire hue
+    /// wheel, so no hue is left to mean "equipped" - green is Gruntkin, gold is Taelindor. Hover lightens
+    /// the border, the spell in the slot being swapped gets a white border and a faction-coloured glow,
+    /// and a spell equipped elsewhere dims and shows its slot numeral.
     ///
     /// Hovering reports the spell up to the menu, which renders its name and description in one fixed
     /// info panel. Used by BOTH the in-battle picker (SpellBrowseMenu) and the run-setup grimoire
     /// (WarbandPanel), which is what keeps a spell reading identically in the two places.
     /// </summary>
-    public class SpellBrowseSlot : MonoBehaviour, IPointerEnterHandler
+    public class SpellBrowseSlot : MonoBehaviour, IPointerEnterHandler, IPointerExitHandler
     {
-        [Header("Interior (faction)")]
+        [Header("Icon")]
         [SerializeField] private Image spellIcon;
-        [SerializeField] private Image backgroundImage;
-        [SerializeField] private Image raceRailImage;
 
         [Header("Frame (state)")]
+        // The tile border: faction colour at rest, brightness for state.
         [SerializeField] private Image frameImage;
+        // Optional. Lit behind the tile for the spell in the slot being swapped.
+        [SerializeField] private Image selectedGlow;
         [SerializeField] private GameObject slotChip;
         [SerializeField] private TMP_Text slotChipText;
-        [SerializeField] private GameObject targetBrackets;
         [SerializeField] private GameObject unavailableOverlay;
 
         [Header("Input")]
@@ -63,12 +58,11 @@ namespace TJ.Spells
         private const float REJECT_FLASH_DURATION = 0.45f;
         private const float REJECT_FLASH_MAX_STEP = 0.05f;
 
-        // Interior dimming for a row that is already spoken for. The faction colour is retained at
-        // reduced strength rather than swapped out, so identity survives every state.
+        // Dimming for a row that is already spoken for. The faction colour is retained at reduced
+        // strength rather than swapped out, so identity survives every state.
         private const float EQUIPPED_ICON_ALPHA = 0.34f;
         private const float UNAVAILABLE_ICON_ALPHA = 0.26f;
-        private const float EQUIPPED_INTERIOR_SCALE = 0.47f;
-        private const float RAIL_ALPHA = 0.9f;
+        private const float EQUIPPED_BORDER_ALPHA = 0.35f;
 
         private SpellData spellData;
         private Action onClicked;
@@ -77,6 +71,7 @@ namespace TJ.Spells
         private Color factionColor;
         private SpellBrowseState state;
         private int equippedSlotIndex = -1;
+        private bool hovered;
         private Coroutine rejectFlash;
         public SpellData SpellData => spellData;
 
@@ -117,18 +112,21 @@ namespace TJ.Spells
             }
         }
 
-        /// <summary>
-        /// Paints the three interior layers. The hue never varies - a spell is the same colour in the
-        /// picker, in its slot and on the battle hotbar. Only its strength moves, so a row that is
-        /// already spoken for recedes without losing its identity.
-        /// </summary>
-        private void ApplyFactionColour(float iconAlpha, float interiorScale)
+        // The hue never varies - a spell is the same colour in the picker, in its slot and on the battle
+        // hotbar. Only brightness and strength move.
+        private void RefreshFrame()
         {
-            spellIcon.color = ColorData.WithAlpha255(factionColor, iconAlpha * 255f);
-            backgroundImage.color = ColorData.WithAlpha255(factionColor,
-                ColorData.RACE_DISPLAY_WASH_ALPHA * interiorScale);
-            raceRailImage.color = ColorData.WithAlpha255(factionColor,
-                RAIL_ALPHA * 255f * interiorScale);
+            bool armed = state == SpellBrowseState.InArmedSlot;
+            frameImage.color = armed                                           ? ColorData.SpellFrameActive
+                             : state == SpellBrowseState.Unavailable           ? ColorData.SpellFrameRest
+                             : hovered && state == SpellBrowseState.Available ? ColorData.SpellFrameHover
+                             : state == SpellBrowseState.Equipped              ? ColorData.WithAlpha255(factionColor, EQUIPPED_BORDER_ALPHA * 255f)
+                                                                               : factionColor;
+            if(selectedGlow != null)
+            {
+                selectedGlow.enabled = armed;
+                selectedGlow.color = factionColor;
+            }
         }
 
         /// <summary>
@@ -147,24 +145,17 @@ namespace TJ.Spells
 
             bool isEquipped = state == SpellBrowseState.Equipped;
             bool isUnavailable = state == SpellBrowseState.Unavailable;
-            bool dimInterior = isEquipped || isUnavailable;
 
             // Equipped rows stay clickable so the click can be rejected with feedback (see OnClicked).
             selectButton.interactable = state != SpellBrowseState.Unavailable;
 
-            frameImage.color = state switch
-            {
-                SpellBrowseState.InArmedSlot => ColorData.SpellFrameActive,
-                SpellBrowseState.Equipped    => ColorData.SpellFrameEquipped,
-                _                            => ColorData.SpellFrameIdle,
-            };
+            RefreshFrame();
 
             float iconAlpha = isUnavailable ? UNAVAILABLE_ICON_ALPHA
                             : isEquipped    ? EQUIPPED_ICON_ALPHA
                                             : 1f;
-            ApplyFactionColour(iconAlpha, dimInterior ? EQUIPPED_INTERIOR_SCALE : 1f);
+            spellIcon.color = ColorData.WithAlpha255(factionColor, iconAlpha * 255f);
 
-            targetBrackets.SetActive(state == SpellBrowseState.InArmedSlot);
             unavailableOverlay.SetActive(isUnavailable);
 
             // Answers "equipped where?", which is the question actually being asked mid-swap. The row in
@@ -226,6 +217,17 @@ namespace TJ.Spells
         /// the panel keeps showing the last hovered spell until the menu closes, so the description
         /// stays readable while the pointer travels between rows instead of blinking out.
         /// </summary>
-        public void OnPointerEnter(PointerEventData eventData) => onHovered?.Invoke(spellData);
+        public void OnPointerEnter(PointerEventData eventData)
+        {
+            hovered = true;
+            if(rejectFlash == null) RefreshFrame();
+            onHovered?.Invoke(spellData);
+        }
+
+        public void OnPointerExit(PointerEventData eventData)
+        {
+            hovered = false;
+            if(rejectFlash == null) RefreshFrame();
+        }
     }
 }

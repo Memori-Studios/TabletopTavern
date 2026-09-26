@@ -6,12 +6,10 @@ using TJ.Map;
 using Memori.Scenes;
 using System.Linq;
 using Memori.Localization;
-using UnityEngine.EventSystems;
-using System.Collections;
 
 namespace TJ
 {
-    public class UnitAttributesUIContainer : MonoBehaviour, IPointerEnterHandler, IPointerExitHandler
+    public class UnitAttributesUIContainer : MonoBehaviour
     {
         [Header("Unit Attributes")]
         [SerializeField] private UnitAttributesUI unitAttributePrefab;
@@ -45,7 +43,6 @@ namespace TJ
         public IReadOnlyList<UnitBonusUI> DisplayedBonusUIs => _displayedBonusUIs;
         readonly List<UnitBonusUI> _displayedBonusUIs = new ();
         GearManager gearManager;
-        Coroutine scaleCoroutine;
         bool overriden;
         List<UnitAttributesUI> _unitAttributeUIs = new ();
         private void Start()
@@ -139,13 +136,14 @@ namespace TJ
                 }
             }
 
-            //if more bonuses than the ones already loaded add them
-            if(unitAttributes.Count > unitBonusUIs.Count) {
-                for(int i = unitBonusUIs.Count; i < unitAttributes.Count; i++) {
+            // The description stack exists only where a screen keeps it open; elsewhere each chip explains itself.
+            int stackCount = overriden ? unitAttributes.Count : 0;
+            if(stackCount > unitBonusUIs.Count) {
+                for(int i = unitBonusUIs.Count; i < stackCount; i++) {
                     unitBonusUIs.Add(Instantiate(unitBonusUIPrefab, unitBonusesParent));
                 }
-            } else if(unitAttributes.Count < unitBonusUIs.Count) {
-                for(int i = unitBonusUIs.Count - 1; i >= unitAttributes.Count; i--) {
+            } else if(stackCount < unitBonusUIs.Count) {
+                for(int i = unitBonusUIs.Count - 1; i >= stackCount; i--) {
                     Destroy(unitBonusUIs[i].gameObject);
                     unitBonusUIs.RemoveAt(i);
                 }
@@ -154,27 +152,17 @@ namespace TJ
             _displayedBonusUIs.Clear();
             for (int i = 0; i < unitAttributes.Count; i++)
             {
+                _unitAttributeUIs[i].Load(unitAttributes[i]);
+                _unitAttributeUIs[i].SetUpTooltip();
+                if (i >= stackCount) continue;
+
                 string unitAttributesLocalised = LocalizationManager.Instance.GetText(unitAttributes[i].ToString());
                 string localizedDescription = LocalizationManager.Instance.GetText(unitAttributes[i].ToString() + "Desc");
+                unitBonusUIs[i].LoadUnitBonusUI(unitAttributesLocalised, localizedDescription);
 
-                string unitBonusText = unitAttributesLocalised;
-                _unitAttributeUIs[i].Load(unitAttributes[i]);
-                unitBonusUIs[i].LoadUnitBonusUI(unitBonusText, localizedDescription);
-
-                if (unitBonusText == "Large") Destroy(unitBonusUIs[i].gameObject);
+                if (unitAttributes[i] == UnitAttribute.Large) Destroy(unitBonusUIs[i].gameObject);
                 else _displayedBonusUIs.Add(unitBonusUIs[i]);
             }
-            if (scaleCoroutine != null)
-            {
-                StopCoroutine(scaleCoroutine);
-            }
-    }
-    public void EnableHoverBonuses()
-    {
-        for (int i = 0; i < _unitAttributeUIs.Count; i++)
-        {
-            _unitAttributeUIs[i].SetUpTooltip();
-        }
     }
         public void Refresh()
         {
@@ -185,42 +173,6 @@ namespace TJ
         {
             row.gameObject.SetActive(false);
             Destroy(row.gameObject);
-        }
-        public void OnPointerEnter(PointerEventData eventData)
-        {
-            if (scaleCoroutine != null)
-            {
-                StopCoroutine(scaleCoroutine);
-                unitBonusesParent.transform.localScale = Vector3.zero;
-            }
-            //scale the gameObject to 1f over .1 seconds
-            StartCoroutine(ScaleOverTime(unitBonusesParent.transform, Vector3.one, 0.1f));
-        }
-
-        public void OnPointerExit(PointerEventData eventData)
-        {
-            if (scaleCoroutine != null)
-            {
-                StopCoroutine(scaleCoroutine);
-                unitBonusesParent.transform.localScale = Vector3.one;
-            }
-            //scale the gameObject back to 0
-            StartCoroutine(ScaleOverTime(unitBonusesParent.transform, Vector3.zero, 0.1f));
-        }
-        private IEnumerator ScaleOverTime(Transform target, Vector3 toScale, float duration)
-        {
-            Vector3 currentScale = target.localScale;
-            Vector3 initialScale = currentScale;
-            float timer = 0f;
-
-            while (timer < duration)
-            {
-                timer += Time.unscaledDeltaTime;
-                float t = timer / duration;
-                target.localScale = Vector3.Lerp(initialScale, toScale, t);
-                yield return null;
-            }
-            target.localScale = toScale;
         }
     }
 }

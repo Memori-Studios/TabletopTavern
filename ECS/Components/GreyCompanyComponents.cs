@@ -14,7 +14,7 @@ public struct ArmyLossesTriggeredPlayer : IComponentData { }
 public struct ArmyLossesTriggeredEnemy : IComponentData { }
 public struct ArmyLossesPenaltyTag: IComponentData, IEnableableComponent { }
 
-public struct CampaignSaveDataHolder : IComponentData { public bool IsCustomBattle; public GearIDsSerialized Gear; public int ActiveHeroID; public Race PlayerHeroRace; public Race EnemyRace; public bool OnlySakuraUnits; }
+public struct CampaignSaveDataHolder : IComponentData { public bool IsCustomBattle; public GearIDsSerialized Gear; public int ActiveHeroID; public Race PlayerHeroRace; public Race EnemyRace; public bool OnlySakuraUnits; public int EnemyWarlordHeroID; public Race EnemyWarlordRace; public bool EnemyOnlySakuraUnits; }
 public struct MainCamera : IComponentData { }
 public struct NeedsToBeProcessed : IComponentData { public float Delay; }
 

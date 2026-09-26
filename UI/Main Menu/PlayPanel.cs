@@ -17,6 +17,8 @@ using Memori.Scenes;
 using Memori.Utilities;
 using System.Threading.Tasks;
 using TJ.Spells;
+using VolumetricLights;
+using TabletopTavern.Analytics;
 
 namespace TJ.MainMenu
 {
@@ -24,7 +26,7 @@ namespace TJ.MainMenu
     /// Run setup, split across two screens.
     ///
     /// <b>Commander</b> - hero roster, 3D stage, dossier (hero effects, faction effects, signature
-    /// unit, treasury) and the ten-rung difficulty ladder. Nothing here spends gold.
+    /// unit, treasury) and the difficulty ladder. Nothing here spends gold.
     /// <b>Warband</b> - army, gear and spells under one persistent purse, driven by
     /// <see cref="WarbandPanel"/>.
     ///
@@ -102,9 +104,6 @@ namespace TJ.MainMenu
         [SerializeField] private Camera _mainMenuCamera;
         [SerializeField] private Camera heroCamera;
         [SerializeField] private Transform cameraSceneParent;
-        [SerializeField] private Vector3 commanderCameraRotation = Vector3.zero;
-        [SerializeField] private Vector3 warbandCameraRotation = new Vector3(0f, -12.75f, 5f);
-        [SerializeField] private float cameraTurnDuration = 0.35f;
 
         public StartingArmyManager StartingArmySection => startingArmySection;
         public event Action<Hero> OnActiveHeroChanged;
@@ -112,6 +111,7 @@ namespace TJ.MainMenu
         public Hero hero;
         public SquadToLoad uniqueSquad;
         public GearID StartingGearID => startingGearID;
+        public bool StartingGearLocked => startingGearLocked;
         public TT_Difficulty SelectedDifficulty => _difficultySelected;
         public bool HeroIsUnlocked => heroIsUnlocked;
         public UnlockCondition ActiveUnlockCondition => _unlockCondition;
@@ -122,12 +122,14 @@ namespace TJ.MainMenu
         string _loadedHeroPrefabKey;
         bool heroIsUnlocked;
         bool startingArmyLockedForHero;
+        bool startingGearLocked;
         bool warbandScreenShown;
         string startingArmyGateReason = string.Empty;
         int _heroPrefabLoadVersion;
         int _maxDifficultyCompletedOverall = 0;
         UnlockCondition _unlockCondition;
-        Coroutine cameraTurnRoutine;
+        // Found at runtime: the light lives in the persistent Tavern scene, which a serialized field cannot reach.
+        VolumetricLight fireplaceLight;
         // Added once to the signature-unit card, not once per hero hover.
         
         TroopHoverPlayPanel signatureUnitHover;
@@ -188,14 +190,8 @@ namespace TJ.MainMenu
             }
             if (rosterCount > 0) EventSystem.current.SetSelectedGameObject(heroSelectionButtons[openingIndex].gameObject);
 
+            startingGearLocked = !SaveDataHandler.IsMetaprogressionNodeUnlocked(_startingArmyUnlockMetaprogressionModel);
             LoadHeroes(openingHero);
-
-            bool startingGearLocked = !SaveDataHandler.IsMetaprogressionNodeUnlocked(_startingArmyUnlockMetaprogressionModel);
-            startingGearLockedNotice.SetActive(startingGearLocked);
-
-            // Closing the panel can leave the camera mid-turn, so start from the commander pose
-            // rather than swinging into it as the panel opens.
-            SnapHeroCameraTo(commanderCameraRotation);
             ShowCommanderScreen();
         }
 
@@ -204,6 +200,7 @@ namespace TJ.MainMenu
             SceneHandler.Instance.TranstionCameras(heroCamera, _mainMenuCamera);
             await Task.Delay(500);
             UnloadHeroes();
+            SetFireplaceShadowsLive(false);
             cameraSceneParent.gameObject.SetActive(false);
             base.ClosePanel();
             totalPanel.SetActive(false);
@@ -213,11 +210,11 @@ namespace TJ.MainMenu
         public void ShowCommanderScreen()
         {
             warbandScreenShown = false;
-            RefreshStartingArmyBlocker();
+            RefreshWarbandBlockers();
 
             commanderScreen.CGEnable();
             warbandScreen.CGDisable();
-            TurnHeroCameraTo(commanderCameraRotation);
+            SetFireplaceShadowsLive(true);
             IAudioRequester.Instance.PlaySFX(SFXData.ButtonHover);
         }
 
@@ -237,11 +234,10 @@ namespace TJ.MainMenu
             warbandPanel.LoadForHero(hero);
 
             warbandScreenShown = true;
-            RefreshStartingArmyBlocker();
+            RefreshWarbandBlockers();
 
             warbandScreen.CGEnable();
             commanderScreen.CGDisable();
-            TurnHeroCameraTo(warbandCameraRotation);
             IAudioRequester.Instance.PlaySFX(SFXData.ButtonHover);
         }
 
@@ -258,73 +254,39 @@ namespace TJ.MainMenu
         }
 
         /// <summary>
-        /// The blocker is a full-column overlay parented under the warband screen, and
-        /// <c>LoadHeroes</c> raises it on every hero switch - which happens while the COMMANDER
-        /// screen is up. That only looked safe because the warband screen is hidden by
-        /// <c>CGDisable()</c>, which fades the CanvasGroup and never deactivates it. The scene
-        /// instance carries its own Canvas, so the fade does not reach it and the blocker paints
-        /// over the commander screen while the player is still picking a hero.
-        ///
-        /// So its visibility is gated on the warband screen actually being shown rather than on
-        /// the fade. That holds whatever that Canvas is doing and needs no change to the
-        /// authored hierarchy. It costs nothing on the gate itself: the army source list can
-        /// only be reached from the warband screen, and <c>RemoveTroop</c> re-checks
-        /// <c>StartingArmyLockedForHero</c> independently for the loadout side.
+        /// Both locked blockers sit under the warband screen with their own override-sorting Canvas,
+        /// where uGUI stops honouring the parent CanvasGroup's blocksRaycasts, so <c>CGDisable()</c>
+        /// leaves them catching clicks over the commander screen's hero roster. They are gated on the
+        /// screen being shown instead; both lists are only reachable from the warband screen, and
+        /// <c>RemoveTroop</c> re-checks <c>StartingArmyLockedForHero</c> for the loadout side.
         /// </summary>
-        private void RefreshStartingArmyBlocker()
+        private void RefreshWarbandBlockers()
         {
             startingArmyLockedBlocker.SetLockedState(
                 warbandScreenShown && startingArmyLockedForHero, startingArmyGateReason);
+            startingGearLockedNotice.SetActive(warbandScreenShown && startingGearLocked);
         }
         #endregion
 
-        #region Hero camera
+        #region Fireplace shadows
         /// <summary>
-        /// Turns the hero camera between the two run-setup screens. Rotation only - the camera never
-        /// moves, so there is no position term to interpolate alongside it.
-        ///
-        /// <b>localRotation, not rotation.</b> The camera is parented and the parent carries its
-        /// world placement, so local is both what the Transform inspector shows and what the
-        /// authored values mean.
+        /// Live shadows let the staged hero shade the fireplace light shaft; everywhere else the shadow stays baked.
         /// </summary>
-        private void TurnHeroCameraTo(Vector3 targetEuler)
+        private void SetFireplaceShadowsLive(bool live)
         {
-            if (cameraTurnRoutine != null) StopCoroutine(cameraTurnRoutine);
-            cameraTurnRoutine = StartCoroutine(TurnHeroCameraRoutine(Quaternion.Euler(targetEuler)));
-        }
-
-        private IEnumerator TurnHeroCameraRoutine(Quaternion target)
-        {
-            Quaternion start = heroCamera.transform.localRotation;
-            float elapsed = 0f;
-
-            while (elapsed < cameraTurnDuration)
+            if (fireplaceLight == null)
             {
-                // Unscaled: Time.timeScale is owned by the battle scene, and the main menu must not
-                // inherit whatever it was left at.
-                elapsed += Time.unscaledDeltaTime;
-                heroCamera.transform.localRotation =
-                    Quaternion.Slerp(start, target, Mathf.Clamp01(elapsed / cameraTurnDuration));
-                yield return null;
+                if (!live) return;
+                foreach (VolumetricLight light in FindObjectsByType<VolumetricLight>(FindObjectsSortMode.None))
+                {
+                    if (light.gameObject.scene.buildIndex == (int)SceneIndexes.Tavern) fireplaceLight = light;
+                }
+                if (fireplaceLight == null) return;
             }
 
-            heroCamera.transform.localRotation = target;
-            cameraTurnRoutine = null;
-        }
-
-        /// <summary>
-        /// Jumps straight to a pose with no turn. Used when opening the panel: the camera can be
-        /// left mid-turn by a close, and entering run setup should not replay the swing.
-        /// </summary>
-        private void SnapHeroCameraTo(Vector3 targetEuler)
-        {
-            if (cameraTurnRoutine != null)
-            {
-                StopCoroutine(cameraTurnRoutine);
-                cameraTurnRoutine = null;
-            }
-
-            heroCamera.transform.localRotation = Quaternion.Euler(targetEuler);
+            fireplaceLight.shadowBakeInterval = live ? ShadowBakeInterval.EveryFrame : ShadowBakeInterval.OnStart;
+            // One fresh capture on the way out, so the baked shadow never keeps a hero who has left the stage.
+            if (!live) fireplaceLight.ScheduleShadowCapture();
         }
         #endregion
 
@@ -379,7 +341,7 @@ namespace TJ.MainMenu
                 ? armyGateReason
                 : LocalizationManager.Instance.GetText("ArmyCustomisationUnlocked");
             startingArmyGateReason = armyGateReason;
-            RefreshStartingArmyBlocker();
+            RefreshWarbandBlockers();
 
             if (_unlockCondition == UnlockCondition.DiscordExclusive && !heroIsUnlocked)
             {
@@ -467,10 +429,8 @@ namespace TJ.MainMenu
 
             string heroBonusText1string = HeroBonusText.Get(_hero, 0);
             string heroBonusText2string = HeroBonusText.Get(_hero, 1);
-            ColorData.XMLTagColorApplicator(ref heroBonusText1string);
-            ColorData.XMLTagColorApplicator(ref heroBonusText2string);
-            heroBonusText1.text = ApplyPrimaryColorToLabel(heroBonusText1string);
-            heroBonusText2.text = ApplyPrimaryColorToLabel(heroBonusText2string);
+            KeywordText.Show(heroBonusText1, ApplyPrimaryColorToLabel(KeywordText.Render(heroBonusText1string)));
+            KeywordText.Show(heroBonusText2, ApplyPrimaryColorToLabel(KeywordText.Render(heroBonusText2string)));
 
             //faction
             string factionLocalized = LocalizationManager.Instance.GetText("Faction");
@@ -481,15 +441,13 @@ namespace TJ.MainMenu
 
             // Labelled by phase so it is unambiguous which effect fires on the map and which fires
             // in a battle - they read identically otherwise.
-            string campaignBonusLocalized = LocalizationManager.Instance.GetText(_hero.Race + "BonusDescription");
-            ColorData.XMLTagColorApplicator(ref campaignBonusLocalized);
-            raceCampaignBonusText.text = BuildFactionEffectLine(
-                LocalizationManager.Instance.GetText("CampaignEffectLabel"), campaignBonusLocalized);
+            string campaignBonusLocalized = KeywordText.Render(LocalizationManager.Instance.GetText(_hero.Race + "BonusDescription"));
+            KeywordText.Show(raceCampaignBonusText, BuildFactionEffectLine(
+                LocalizationManager.Instance.GetText("CampaignEffectLabel"), campaignBonusLocalized));
 
-            string battleBonusLocalized = $"{LocalizationManager.Instance.GetText(_hero.Race + "PassiveName")}: {RacePassiveInfo.GetDescription(_hero.Race)}";
-            ColorData.XMLTagColorApplicator(ref battleBonusLocalized);
-            raceBattleBonusText.text = BuildFactionEffectLine(
-                LocalizationManager.Instance.GetText("BattleEffectLabel"), battleBonusLocalized);
+            string battleBonusLocalized = KeywordText.Render($"{LocalizationManager.Instance.GetText(_hero.Race + "PassiveName")}: {RacePassiveInfo.GetDescription(_hero.Race)}");
+            KeywordText.Show(raceBattleBonusText, BuildFactionEffectLine(
+                LocalizationManager.Instance.GetText("BattleEffectLabel"), battleBonusLocalized));
 
             ShowTreasury(_hero);
 
@@ -594,21 +552,22 @@ namespace TJ.MainMenu
         #region Difficulty
         public void IncreaseDifficulty()
         {
-            if((int)_difficultySelected < (int)TT_Difficulty.Godking)
+            if(!DifficultyRules.IsHardest(_difficultySelected))
             {
-                LoadDifficulty(_difficultySelected + 1);
+                LoadDifficulty(DifficultyRules.Next(_difficultySelected));
             }
         }
         public void DecreaseDifficulty()
         {
-            if((int)_difficultySelected > 1)
+            if(DifficultyRules.Rank(_difficultySelected) > 0)
             {
-                LoadDifficulty(_difficultySelected - 1);
+                LoadDifficulty(DifficultyRules.Previous(_difficultySelected));
             }
         }
         public void LoadDifficulty(TT_Difficulty _selectedDifficulty)
         {
-            _difficultySelected = _selectedDifficulty;
+            // A saved last difficulty can come from the other ladder.
+            _difficultySelected = DifficultyRules.Normalize(_selectedDifficulty);
             IAudioRequester.Instance.PlaySFX(SFXData.ChangeDifficulty);
 
             //get selected difficulty data
@@ -616,56 +575,47 @@ namespace TJ.MainMenu
 
             //set title
             string difficultyTitleLocalized = LocalizationManager.Instance.GetText("Difficulty");
-            string levelLocalized = LocalizationManager.Instance.GetText("Level");
             string difficultyNamestring = LocalizationManager.Instance.GetText(difficultyData.difficultyName);
-            _difficultyTitle.text = $"{levelLocalized} {(int)_difficultySelected}: {difficultyNamestring}";
+            _difficultyTitle.text = difficultyNamestring;
 
-            //set description
-            if(_difficultySelected != TT_Difficulty.Peasant)
+            //set description, one line per modifier this level adds
+            List<string> levelModifierLines = new List<string>();
+            foreach (int modifier in difficultyData.modifiers)
             {
-                string difficultyDescriptionstring =
-                LocalizationManager.Instance.GetText(difficultyData.difficultyModifiers[0]) +
-                "\n" +
-                LocalizationManager.Instance.GetText(difficultyData.difficultyModifiers[1]);
+                levelModifierLines.Add(LocalizationManager.Instance.GetText(DifficultyData.ModifierKey(modifier)));
+            }
+            // Easy adds no modifiers, so it names itself the base difficulty instead of leaving the box empty.
+            difficultyDescriptionText.text = levelModifierLines.Count > 0
+                ? string.Join("\n", levelModifierLines)
+                : LocalizationManager.Instance.GetText("difficultyModifier0");
 
-                difficultyDescriptionText.text = difficultyDescriptionstring;
-            }
-            else
-            {
-                //special case for peasant difficulty
-                difficultyDescriptionText.text = "";
-            }
-            extraInfo.SetActive(_difficultySelected >= TT_Difficulty.Knight);
+            List<string> allPreviousModifiers = DifficultyData.GetAllDifficultyModifiersBeforeLevel(_difficultySelected);
+            extraInfo.SetActive(allPreviousModifiers.Count > 0);
 
             //set button text on right side
             if(difficultyButtonText != null)
             {
-                difficultyButtonText.text = $"<color {ColorData.Secondary}>{difficultyTitleLocalized}:</color> <color {ColorData.Tier4}>{levelLocalized} {(int)_difficultySelected} {difficultyNamestring}</color>";
+                difficultyButtonText.text = $"<color {ColorData.Secondary}>{difficultyTitleLocalized}:</color> <color {ColorData.Tier4}>{difficultyNamestring}</color>";
             }
 
             //disable/enable increase decrease buttons
-            increaseDifficultyButton.gameObject.SetActive(_difficultySelected != TT_Difficulty.Godking);
-            decreaseDifficultyButton.gameObject.SetActive(_difficultySelected != TT_Difficulty.Peasant);
+            increaseDifficultyButton.gameObject.SetActive(!DifficultyRules.IsHardest(_difficultySelected));
+            decreaseDifficultyButton.gameObject.SetActive(DifficultyRules.Rank(_difficultySelected) > 0);
 
             //set locked state
-            bool isLocked = (int)_difficultySelected > _maxDifficultyCompletedOverall +1;
-            if(_difficultySelected == TT_Difficulty.Peasant)
-            {
-                isLocked = false; //peasant is always unlocked
-            }
+            bool isLocked = DifficultyRules.IsLocked(_difficultySelected, _maxDifficultyCompletedOverall);
 
             lockedDifficultyStartButton.SetLockedState(isLocked, LocalizationManager.Instance.GetText("Difficulty Locked"));
 
             //display difficulty crests
             for (int i = 0; i < difficultyCrests.Length; i++)
             {
-                difficultyCrests[i].SetActive(i == ((int)_difficultySelected - 1));
+                difficultyCrests[i].SetActive(i == difficultyData.crestIndex);
             }
             crestSpawnFeedback.StopFeedbacks();
             crestSpawnFeedback.PlayFeedbacks();
 
             string additionalModifiersDesc = "";
-            List<string> allPreviousModifiers = DifficultyData.GetAllDifficultyModifiersBeforeLevel(_difficultySelected);
 
             foreach (string modifier in allPreviousModifiers)
             {
@@ -717,12 +667,41 @@ namespace TJ.MainMenu
             Guid runUUID = Guid.NewGuid();
             SaveDataHandler.CreateCampaign(hero, startingArmySection.SelectedArmy, SelectedDifficulty,
                                            startingGearID, runUUID, startingArmySection.remainingTreasury.Value,
-                                           warbandPanel.Loadout);
+                                           warbandPanel.Loadout, GameEventTracker.TryBuild("runStarted", () => BuildRunSetup()));
             PlayerSaveData saveData = SaveDataHandler.LoadPlayerSaveData();
             saveData.campaignsStarted++;
             SaveDataHandler.SavePlayerSaveData(saveData);
 
             mainMenu.LoadMapScene();
+        }
+        // What the setup screen offered and what the player changed, for runStarted.
+        private AnalyticsRunSetup BuildRunSetup()
+        {
+            var setup = new AnalyticsRunSetup
+            {
+                Source = "menu",
+                FromMenu = true,
+                ArmyLocked = startingArmyLockedForHero,
+                ArmyCustomized = !SameUnits(startingArmySection.SelectedArmy, hero.StartingArmyUnits),
+                TreasuryBase = startingArmySection.StartingGold - startingArmySection.StartingGoldBonusFromMetaprogression,
+                TreasuryRenownBonus = startingArmySection.StartingGoldBonusFromMetaprogression,
+                ArmySpend = startingArmySection.ArmyGoldSpend,
+                GearSpend = startingArmySection.GearGoldSpend,
+            };
+            foreach (UnitName unit in startingArmySection.OfferedUnits) setup.ArmyOptions.Add(unit.ToString());
+            return setup;
+        }
+        private static bool SameUnits(SquadToLoad[] army, UnitName[] defaults)
+        {
+            List<UnitName> chosen = new();
+            foreach (SquadToLoad squad in army) chosen.Add(squad.UnitName);
+            List<UnitName> original = new(defaults ?? Array.Empty<UnitName>());
+            if (chosen.Count != original.Count) return false;
+            chosen.Sort();
+            original.Sort();
+            for (int i = 0; i < chosen.Count; i++)
+                if (chosen[i] != original[i]) return false;
+            return true;
         }
         #endregion
 
@@ -732,6 +711,7 @@ namespace TJ.MainMenu
             {
                 startingArmySection.OnStartingArmyLengthChanged -= StartingArmyLengthChanged;
             }
+            SetFireplaceShadowsLive(false);
         }
 
         private string ApplyPrimaryColorToLabel(string text)

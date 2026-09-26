@@ -8,6 +8,7 @@ using Unity.VisualScripting;
 using TJ.Shapes;
 using Memori.Localization;
 using TJ.Battle;
+using Memori.Utilities;
 
 namespace TJ
 {
@@ -94,6 +95,10 @@ namespace TJ
             AddZoneWall(enemyDeploymentZoneLine, false);
             AddZoneWall(secondaryPlayerDeploymentZoneLine, false);
             AddZoneWall(secondaryEnemyDeploymentZoneLine, false);
+
+            CacheZoneColors();
+            ApplyZoneColors();
+            ColorVision.Changed += ApplyZoneColors;
 
             positionError1 = LocalizationManager.Instance.GetText("positionError");
             positionError2 = LocalizationManager.Instance.GetText("positionError2");
@@ -589,7 +594,7 @@ namespace TJ
                 // The point keeps its transform for the zone checks; the visual is a chevron instance drawn by UnitOutlineFeature.
                 unitPoints[i].SelectedShape.gameObject.SetActive(false);
             }
-            _previewColor = validColor;
+            _previewColor = ValidColor;
         }
         public void ConfirmValidityOfPositions(Team _team, bool _outrider)
         {
@@ -620,7 +625,7 @@ namespace TJ
                     {
                         if (validPositions)
                         {
-                            ColorPoints(invalidColor);
+                            ColorPoints(InvalidColor);
                             validPositions = false;
                             BattleManager.Instance.UIManager.ShowPositionError(true, positionError3);
                         }
@@ -630,7 +635,7 @@ namespace TJ
                     {
                         if (validPositions)
                         {
-                            ColorPoints(invalidColor);
+                            ColorPoints(InvalidColor);
                             validPositions = false;
                             BattleManager.Instance.UIManager.ShowPositionError(true, positionError2);
                         }
@@ -640,7 +645,7 @@ namespace TJ
 
                 if (!validPositions)
                 {
-                    ColorPoints(validColor);
+                    ColorPoints(ValidColor);
                     validPositions = true;
                     BattleManager.Instance.UIManager.ShowPositionError(false, "");
                 }
@@ -668,7 +673,7 @@ namespace TJ
                     {
                         if (validPositions)
                         {
-                            ColorPoints(invalidColor);
+                            ColorPoints(InvalidColor);
                             validPositions = false;
                             BattleManager.Instance.UIManager.ShowPositionError(true, PositionErrorMessage);
                             Debug.Log($"Order rejected - point {i} of {activePointCount} at {point.transform.position} is outside the allowed area during {BattleManager.Instance.GamePhase}");
@@ -681,7 +686,7 @@ namespace TJ
             if (!validPositions)
             {
                 // Debug.Log("Valid positions");
-                ColorPoints(validColor);
+                ColorPoints(ValidColor);
                 validPositions = true;
                 BattleManager.Instance.UIManager.ShowPositionError(false, "");
             }
@@ -772,8 +777,36 @@ namespace TJ
             }
             mousePosition = _position;
         }
-        private void OnDestroy() 
+        #region Colorblind Mode
+
+        private Polyline[] _zoneLines;
+        private Color[] _zoneOffColors;
+        private bool[] _zoneIsPlayer;
+
+        private Color ValidColor => ColorVision.Good(validColor);
+        private Color InvalidColor => ColorVision.Bad(invalidColor);
+
+        // The zone colours are authored on the scene's lines, so they are read once as the Off colours.
+        private void CacheZoneColors()
         {
+            _zoneLines = new[] { playerDeploymentZoneLine, secondaryPlayerDeploymentZoneLine, enemyDeploymentZoneLine, secondaryEnemyDeploymentZoneLine };
+            _zoneIsPlayer = new[] { true, true, false, false };
+            _zoneOffColors = new Color[_zoneLines.Length];
+            for (int i = 0; i < _zoneLines.Length; i++)
+                if (_zoneLines[i] != null) _zoneOffColors[i] = _zoneLines[i].Color;
+        }
+
+        private void ApplyZoneColors()
+        {
+            for (int i = 0; i < _zoneLines.Length; i++)
+                if (_zoneLines[i] != null) _zoneLines[i].Color = ColorVision.Team(_zoneIsPlayer[i], _zoneOffColors[i]);
+        }
+
+        #endregion
+
+        private void OnDestroy()
+        {
+            ColorVision.Changed -= ApplyZoneColors;
             if(BattleManager.HasInstance)
             {
                 BattleManager.Instance.OnCursorModeChanged -= OnCursorModeChanged;

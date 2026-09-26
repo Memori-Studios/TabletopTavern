@@ -6,6 +6,7 @@ using Unity.Entities;
 using Unity.Transforms;
 using TJ.Shapes;
 using Memori.Input;
+using Memori.Utilities;
 
 public class ArcherRangeDrawer : MonoBehaviour
 {
@@ -74,6 +75,7 @@ public class ArcherRangeDrawer : MonoBehaviour
     {
         if (InputHandler.HasInstance)
             InputHandler.Instance.OnShowUnitMovement -= ToggleRange;
+        ColorVision.Changed -= OnColorVisionChanged;
     }
 
     public void Update()
@@ -102,9 +104,29 @@ public class ArcherRangeDrawer : MonoBehaviour
         _isCaster = TabletopTavernConstants.Casts(TJ.TabletopTavernData.Instance.GetUnitTypeFromUnitName(_squadEntity.UnitName));
         _spread = TabletopTavernConstants.GetSpread(TJ.TabletopTavernData.Instance.GetUnitSizeFromUnitName(_squadEntity.UnitName));
 
-        Color teamColor = _isCaster
-            ? (squadId > 0 ? casterPlayerColor : casterEnemyColor)
-            : (squadId > 0 ? playerColor : enemyColor);
+        Recalculate();
+        ApplyTeamColors();
+
+        // Start invisible
+        leftLine.Color  = new Color(_lineTargetColor.r, _lineTargetColor.g, _lineTargetColor.b, 0f);
+        rightLine.Color = new Color(_lineTargetColor.r, _lineTargetColor.g, _lineTargetColor.b, 0f);
+        arc.Color       = new Color(_arcTargetColor.r,  _arcTargetColor.g,  _arcTargetColor.b,  0f);
+        arc2.ColorInner = new Color(_arc2TargetOuter.r, _arc2TargetOuter.g, _arc2TargetOuter.b, 0f);
+        arc2.ColorOuter = new Color(_arc2TargetOuter.r, _arc2TargetOuter.g, _arc2TargetOuter.b, 0f);
+        SetBandAlpha(0f);
+
+        isSetUp = true;
+        ColorVision.Changed -= OnColorVisionChanged;
+        ColorVision.Changed += OnColorVisionChanged;
+    }
+
+    // Sets the bloomed team colours and caches them as the fade targets.
+    private void ApplyTeamColors()
+    {
+        bool isPlayer = squadId > 0;
+        Color teamColor = ColorVision.Team(isPlayer, _isCaster
+            ? (isPlayer ? casterPlayerColor : casterEnemyColor)
+            : (isPlayer ? playerColor : enemyColor));
         leftLineBloom.SetColor(teamColor);
         rightLineBloom.SetColor(teamColor);
         arcBloom.SetColor(teamColor);
@@ -114,26 +136,27 @@ public class ArcherRangeDrawer : MonoBehaviour
             Mathf.Min(1f, teamColor.g + BandLift),
             Mathf.Min(1f, teamColor.b + BandLift), 1f));
 
-        Recalculate();
-
         leftLineBloom.Bloom();
         rightLineBloom.Bloom();
         arcBloom.Bloom();
         arc2Bloom.Bloom();
 
-        // Cache target colors after bloom sets them, then start invisible
         _lineTargetColor = leftLine.Color;
         _arcTargetColor  = arc.Color;
         _arc2TargetOuter = arc2.ColorOuter;
+    }
 
-        leftLine.Color  = new Color(_lineTargetColor.r, _lineTargetColor.g, _lineTargetColor.b, 0f);
-        rightLine.Color = new Color(_lineTargetColor.r, _lineTargetColor.g, _lineTargetColor.b, 0f);
-        arc.Color       = new Color(_arcTargetColor.r,  _arcTargetColor.g,  _arcTargetColor.b,  0f);
-        arc2.ColorInner = new Color(_arc2TargetOuter.r, _arc2TargetOuter.g, _arc2TargetOuter.b, 0f);
-        arc2.ColorOuter = new Color(_arc2TargetOuter.r, _arc2TargetOuter.g, _arc2TargetOuter.b, 0f);
-        SetBandAlpha(0f);
-
-        isSetUp = true;
+    // Keeps whatever the fade has reached; only the colour changes.
+    private void OnColorVisionChanged()
+    {
+        float lineA = leftLine.Color.a, arcA = arc.Color.a, innerA = arc2.ColorInner.a, outerA = arc2.ColorOuter.a, bandA = leftBand.ColorLeft.a;
+        ApplyTeamColors();
+        leftLine.Color  = new Color(_lineTargetColor.r, _lineTargetColor.g, _lineTargetColor.b, lineA);
+        rightLine.Color = new Color(_lineTargetColor.r, _lineTargetColor.g, _lineTargetColor.b, lineA);
+        arc.Color       = new Color(_arcTargetColor.r,  _arcTargetColor.g,  _arcTargetColor.b,  arcA);
+        arc2.ColorInner = new Color(_arc2TargetOuter.r, _arc2TargetOuter.g, _arc2TargetOuter.b, innerA);
+        arc2.ColorOuter = new Color(_arc2TargetOuter.r, _arc2TargetOuter.g, _arc2TargetOuter.b, outerA);
+        SetBandAlpha(bandA);
     }
 
     // The bands borrow arc2's bloomed colour instead of carrying a ShapesBloom of their own, so the

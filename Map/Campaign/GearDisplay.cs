@@ -54,7 +54,7 @@ namespace TJ
             gearDescLocalized = string.Format(gearDescLocalized, gear.GearModifierValue);
             string gearFlavorLocalized = LocalizationManager.Instance.GetText(gearID + "Flavor");
 
-            memoriTooltipTrigger.SetUpToolTip(gearNameLocalized, gearDescLocalized, gearFlavorLocalized, _delay: 0f);
+            memoriTooltipTrigger.SetUpToolTip(gearNameLocalized, KeywordText.ForTooltip(gearDescLocalized), gearFlavorLocalized, _delay: 0f);
             memoriTooltipTrigger.enabled = true;
             gearIcon.enabled = true;
             gearSellTag.SetActive(false);
@@ -179,9 +179,6 @@ namespace TJ
         }
         public int GetGearSellValue(GearID gearName)
         {
-            //DifficultyMod 13
-            if(CampaignManager.Instance.CampaignSaveManager.SaveData.difficultyLevel >= TT_Difficulty.Emperor) return 0;
-
             return GearData.GetSellValue(GearData.GetGear(gearName).GearRarity);
         }
     }

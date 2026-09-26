@@ -37,7 +37,7 @@ public class MapEscapePanel : MonoBehaviour
     // private void Update()
     // {
     //     if (InputHandler.Instance.SettingsButtonPressed) {
-    //         if(panelCanvasGroup.canvasGroup.alpha == 1) {
+    //         if(panelCanvasGroup.alpha == 1) {
     //             CancelExit();
     //         } else {
     //             panelCanvasGroup.CGEnable();

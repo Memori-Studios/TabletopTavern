@@ -94,6 +94,7 @@ namespace TJ
             {
                 CampaignSaveData elixirSaveData = SaveDataHandler.Load();
                 elixirSaveData.consumables.Remove(ConsumableEnum.FateshineElixir);
+                elixirSaveData.RunStats.consumableUsed = true;
                 SaveDataHandler.SaveCampaign(elixirSaveData);
                 IAudioRequester.Instance.PlaySFX(SFXData.Drink);
             }
@@ -110,7 +111,7 @@ namespace TJ
                     _ => SFXData.DiceRoll
                 };
                 IAudioRequester.Instance.PlaySFX(resultSFX);
-                _dice.SetOutlineColor(result >= 4 ? Color.green : Color.red);
+                _dice.SetOutlineColor(result >= 4 ? ColorVision.Good(Color.green) : ColorVision.Bad(Color.red));
                 _dice.PulseOutline();
 
                 ShowResult(result);
@@ -128,6 +129,7 @@ namespace TJ
                     {
                         CampaignSaveData rewindSaveData = SaveDataHandler.Load();
                         rewindSaveData.consumables.Remove(ConsumableEnum.Rewind);
+                        rewindSaveData.RunStats.consumableUsed = true;
                         SaveDataHandler.SaveCampaign(rewindSaveData);
                         IAudioRequester.Instance.PlaySFX(SFXData.Drink);
                         choiceTCS.TrySetResult(false);
@@ -200,7 +202,7 @@ namespace TJ
                 _ => SFXData.DiceRoll
             };
             IAudioRequester.Instance.PlaySFX(resultSFX);
-            _dice.SetOutlineColor(result >= 4 ? Color.green : Color.red);
+            _dice.SetOutlineColor(result >= 4 ? ColorVision.Good(Color.green) : ColorVision.Bad(Color.red));
             _dice.PulseOutline();
             ShowResult(result);
 

@@ -276,7 +276,9 @@ namespace TJ.Map
         {
             firstLayer.LayerNodes.RemoveRange(1, firstLayer.LayerNodes.Count - 1);
             var singleNode = firstLayer.LayerNodes[0];
-            singleNode.type = _bookNumber == 1 ? firstNodeTypeBook1 : firstNodeTypeOtherBooks;
+            // Endless acts open on the act 1 node (Treasure): the spoils of the war just won.
+            bool treasureOpener = _bookNumber == 1 || _bookNumber > TabletopTavernConstants.FINAL_STORY_ACT;
+            singleNode.type = treasureOpener ? firstNodeTypeBook1 : firstNodeTypeOtherBooks;
             singleNode.position = startNodePosition +
                                     new Vector2(SeededRandom.Range(-randomOffset.x, randomOffset.x),
                                                 SeededRandom.Range(-randomOffset.y, randomOffset.y));

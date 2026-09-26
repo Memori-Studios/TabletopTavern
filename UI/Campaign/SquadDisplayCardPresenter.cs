@@ -6,6 +6,7 @@ using Memori.SaveData;
 using MoreMountains.Feedbacks;
 using Memori.UI;
 using Memori.Audio;
+using Memori.Utilities;
 
 namespace TJ
 {
@@ -31,6 +32,35 @@ namespace TJ
         [Header("Healthbar")]
         [SerializeField] protected Slider healthSlider;
         public Slider HealthSlider => healthSlider;
+
+        #region Colorblind Mode
+
+        private Image _healthFill;
+        private Color _healthFillOff;
+        private bool _healthFillCached;
+
+        // Squad cards only ever show the player's own squads, so the fill takes the player colour.
+        private void OnEnable()
+        {
+            ApplyHealthColor();
+            ColorVision.Changed += ApplyHealthColor;
+        }
+        private void OnDisable()
+        {
+            ColorVision.Changed -= ApplyHealthColor;
+        }
+        private void ApplyHealthColor()
+        {
+            if (!_healthFillCached)
+            {
+                _healthFillCached = true;
+                if (healthSlider != null && healthSlider.fillRect != null) _healthFill = healthSlider.fillRect.GetComponent<Image>();
+                if (_healthFill != null) _healthFillOff = _healthFill.color;
+            }
+            if (_healthFill != null) _healthFill.color = ColorVision.Good(_healthFillOff);
+        }
+
+        #endregion
 
         [Header("Tiers and Levels")]
         [SerializeField] protected Image tierGradient;

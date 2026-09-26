@@ -1,0 +1,28 @@
+{
+    "name": "TabletopTavern.Settings.Editor",
+    "rootNamespace": "",
+    "references": [
+        "TabletopTavern.Core",
+        "TabletopTavern.Collection.Editor",
+        "Unity.TextMeshPro",
+        "UnityEngine.UI",
+        "Unity.Localization",
+        "Unity.Localization.Editor",
+        "Memori.Utilities",
+        "Memori.UI",
+        "Memori.Input",
+        "Memori.Audio",
+        "MagicaClothV2"
+    ],
+    "includePlatforms": [
+        "Editor"
+    ],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": false,
+    "precompiledReferences": [],
+    "autoReferenced": false,
+    "defineConstraints": [],
+    "versionDefines": [],
+    "noEngineReferences": false
+}

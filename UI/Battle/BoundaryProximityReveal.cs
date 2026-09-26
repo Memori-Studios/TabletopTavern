@@ -58,7 +58,8 @@ namespace TJ
             }
 
             Vector2 mouse = Input.mousePosition;
-            const float fadeEnd = RevealRadiusPx + FadeWidthPx;
+            float revealRadius = RevealRadiusPx * BattlefieldMarkerScale.Current;
+            float fadeEnd = revealRadius + FadeWidthPx * BattlefieldMarkerScale.Current;
             float step = FadeSpeed * Time.unscaledDeltaTime;
 
             for (int i = 0; i < count; i++)
@@ -72,7 +73,7 @@ namespace TJ
                     if (screen.z > 0f)
                     {
                         float dist = Vector2.Distance(mouse, new Vector2(screen.x, screen.y));
-                        target = 1f - Mathf.SmoothStep(0f, 1f, Mathf.InverseLerp(RevealRadiusPx, fadeEnd, dist));
+                        target = 1f - Mathf.SmoothStep(0f, 1f, Mathf.InverseLerp(revealRadius, fadeEnd, dist));
                     }
                 }
 

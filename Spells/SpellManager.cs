@@ -29,6 +29,7 @@ public class SpellManager : MonoBehaviour
     // Which cursor is up, so SetCursor runs on a change and not every frame. Null = the default cursor.
     private Texture2D activeCursor;
     private bool targetHintValid;
+    private bool targetHintOverSquad;
     private SpellData targetHintSpell;
     // The one ActiveSpell prefab every cast starts from (AOE Spell); per-spell art is SpellData.SpellVisualPrefab.
     [SerializeField] private ActiveSpell aoeSpellPrefab;
@@ -44,6 +45,10 @@ public class SpellManager : MonoBehaviour
     // Seconds the browse menu lingers after the pointer leaves both the spell buttons and the menu,
     // so crossing the gap between them does not flicker it closed.
     [SerializeField] private float browseCloseDelay = 0.12f;
+    [Header("Spell test mode")]
+    // The custom battle panel. The cast menu takes its top-right corner once the battle starts and the
+    // deployment canvas (and that panel with it) hides.
+    [SerializeField] private RectTransform testCastMenuAnchor;
 
     private class SpellSlotState
     {
@@ -74,6 +79,9 @@ public class SpellManager : MonoBehaviour
     private const float APPROACH_RANGE_FRACTION = 0.9f;
     #endregion
 
+    // Friendly-target spells draw their aim in the friendly colour, never attack red.
+    public bool ArmedSpellTargetsFriends => ArmedSpell != null && ArmedSpell.TargetTeam == Team.Player;
+
     // Whatever is armed right now, from either source. Null when nothing is.
     private SpellData ArmedSpell
     {
@@ -103,6 +111,11 @@ public class SpellManager : MonoBehaviour
     public int ManaRemaining => manaRemaining;
     public int ManaMax => manaMax;
     public event Action<int, int> OnManaChanged;
+    // Mana the hovered (else armed) hotbar spell would spend, for the mana bar's preview. 0 = none.
+    private int manaPreview;
+    public int ManaPreview => manaPreview;
+    public event Action<int> OnManaPreviewChanged;
+    private int hoveredHotbarSlot = -1;
 
     // Pre-battle browse state.
     private bool browsingEnabled;
@@ -151,6 +164,10 @@ public class SpellManager : MonoBehaviour
     {
         if(slotStates == null) return;
 
+        // Polled rather than pushed: the armed slot is cleared from many paths, and this reads them all.
+        RefreshManaPreview();
+        RefreshTestMenuArmed();
+
         for (int i = 0; i < slotStates.Length; i++) {
             SpellSlotState slot = slotStates[i];
             if(slot.CooldownRemaining <= 0f) continue;
@@ -159,7 +176,7 @@ public class SpellManager : MonoBehaviour
             bool justFinished = slot.CooldownRemaining <= 0f;
             if(justFinished) slot.CooldownRemaining = 0f;
 
-            spellCastButtons[i].RenderCooldown(slot.CooldownRemaining / slot.CooldownDuration, !justFinished);
+            spellCastButtons[i].RenderCooldown(slot.CooldownRemaining / slot.CooldownDuration, !justFinished, slot.CooldownRemaining);
             if(justFinished) spellCastButtons[i].FlashCooldownImage(Color.white);
         }
     }
@@ -185,6 +202,8 @@ public class SpellManager : MonoBehaviour
 
         if(hotbarSlotCount < 0) hotbarSlotCount = spellCastButtons.Length;
         if(SpellTestMode.Active) BuildTestGrid();
+        else RemoveTestGrid();
+        PreloadSummonedUnits();
 
         // Two passes on purpose. State is fully populated before any View code runs, so a missing
         // serialized reference on a hotbar prefab throws ONCE and stays readable - filling and wiring
@@ -220,6 +239,8 @@ public class SpellManager : MonoBehaviour
         }
         selectedSpellIndex = -1;
         slotsCastMask = 0;
+        // A custom battle has no run to report to, and a stale tally must not leak into the next campaign battle.
+        SaveDataHandler.SpellsCastThisBattle.Clear();
 
         // After the wiring pass - LoadSpellUI resets each button's affordability to true.
         RefreshAffordability();
@@ -233,6 +254,7 @@ public class SpellManager : MonoBehaviour
 
         if(browsingEnabled && spellBrowseMenu != null)
             spellBrowseMenu.Initialize(new List<SpellData>(SpellRegistry.All).ToArray(), SwapSpell, OnBrowseMenuHoverEnter, OnBrowseMenuHoverExit);
+        if(SpellTestMode.Active) OpenTestCastMenu();
     }
     /// <summary>
     /// Grows the loadout so it covers every hotbar button, because SwapSpell writes back into
@@ -252,10 +274,10 @@ public class SpellManager : MonoBehaviour
     private RectTransform testGrid;
 
     /// <summary>
-    /// Every registered spell not already on the hotbar gets a cloned hotbar button in a grid stacked
-    /// above the hotbar. The clones are appended to spellCastButtons and defaultSpells so the rest
-    /// of this class treats them as ordinary slots; hotkeys and the quick-cast menu still cover only
-    /// the real four. The grid dies with the scene, like the hotbar it copies.
+    /// Every registered spell not already on the hotbar gets a cloned hotbar button in a hidden grid.
+    /// The clones are appended to spellCastButtons and defaultSpells so the rest of this class treats
+    /// them as ordinary slots, which is what the test cast menu arms; hotkeys still cover only the
+    /// real hotbar. The grid dies with the scene, like the hotbar it copies.
     /// </summary>
     private void BuildTestGrid()
     {
@@ -277,6 +299,12 @@ public class SpellManager : MonoBehaviour
             return;
         }
         testGrid = SpellTestMode.CreateGrid(template.transform as RectTransform);
+        // The grimoire is the test UI now; the clones stay only as the slots it casts through. Hidden by
+        // alpha, not SetActive, so each clone still runs Awake.
+        CanvasGroup gridGroup = testGrid.gameObject.AddComponent<CanvasGroup>();
+        gridGroup.alpha = 0f;
+        gridGroup.blocksRaycasts = false;
+        gridGroup.interactable = false;
 
         int first = hotbarSlotCount;
         Array.Resize(ref spellCastButtons, first + extras.Count);
@@ -286,20 +314,73 @@ public class SpellManager : MonoBehaviour
             clone.name = $"Test Grid {extras[i].Spell}";
             spellCastButtons[first + i] = clone;
             defaultSpells[first + i] = extras[i];
-            // The army preload only read the real hotbar, so a summon on the grid preloads here.
-            if(extras[i].SummonsSquad)
-                BattleManager.Instance.UnitGPUAnimLoader.PreloadAdditionalUnit(extras[i].SummonedUnitName);
         }
+    }
+
+    // Turning test mode off mid-deployment drops the clones so the hotbar is back to its real slots.
+    private void RemoveTestGrid()
+    {
+        if(testGrid == null) return;
+        Destroy(testGrid.gameObject);
+        testGrid = null;
+        Array.Resize(ref spellCastButtons, hotbarSlotCount);
+        Array.Resize(ref defaultSpells, hotbarSlotCount);
+    }
+
+    /// <summary>
+    /// The custom battle panel's toggle. Applies at once during Deployment by reloading the spell bar on
+    /// the current hotbar; later it only stores the choice for the next battle.
+    /// </summary>
+    public void SetTestMode(bool on)
+    {
+        SpellTestMode.Enabled = on;
+        if(BattleManager.Instance.GamePhase != GamePhase.Deployment || hotbarSlotCount < 0) return;
+
+        SpellData[] hotbar = new SpellData[hotbarSlotCount];
+        Array.Copy(defaultSpells, hotbar, hotbarSlotCount);
+        LoadSpellManager(hotbar);
     }
 
     private static float CooldownFor(SpellData spellData)
         => SpellTestMode.Active ? SpellTestMode.CooldownSeconds : spellData.SpellCooldown;
+
+    // The spell the test menu currently shows as armed, so it is repainted only on a change.
+    private SpellData testMenuArmedSpell;
+
+    /// <summary>
+    /// Test mode casts from the grimoire. Every spell already owns a slot (hotbar or hidden grid
+    /// clone), so a click just arms that slot through SelectSpell. The menu shows only in Battle:
+    /// nothing can be cast in Deployment, and there it would sit under the custom battle panel.
+    /// </summary>
+    private void OpenTestCastMenu()
+    {
+        if(spellBrowseMenu == null) return;
+        spellBrowseMenu.Initialize(new List<SpellData>(SpellRegistry.All).ToArray(),
+            (_, spell) => SelectSpell(Array.FindIndex(slotStates, slot => slot.SpellData == spell)), null, null);
+        testMenuArmedSpell = null;
+        if(BattleManager.Instance.GamePhase == GamePhase.Battle) spellBrowseMenu.OpenForCasting(testCastMenuAnchor);
+    }
+
+    // Polled like the mana preview: the armed slot is cleared from many paths.
+    private void RefreshTestMenuArmed()
+    {
+        if(!SpellTestMode.Active || spellBrowseMenu == null) return;
+        SpellData armed = selectedSpellIndex >= 0 ? slotStates[selectedSpellIndex].SpellData : null;
+        if(armed == testMenuArmedSpell) return;
+        testMenuArmedSpell = armed;
+        spellBrowseMenu.SetArmedSpell(armed);
+    }
     #endregion
     private void WireSlotButton(int slotIndex, SpellData spellData)
     {
         Action browseEnter = browsingEnabled ? () => OnButtonBrowseHoverEnter(slotIndex) : null;
         Action browseExit = browsingEnabled ? () => OnButtonBrowseHoverExit(slotIndex) : null;
-        spellCastButtons[slotIndex].LoadSpellUI(spellData, () => SelectSpell(slotIndex), slotIndex + 1, browseEnter, browseExit);
+        Action<bool> hoverChanged = hovered => {
+            if(hovered) hoveredHotbarSlot = slotIndex;
+            else if(hoveredHotbarSlot == slotIndex) hoveredHotbarSlot = -1;
+        };
+        spellCastButtons[slotIndex].LoadSpellUI(spellData, () => SelectSpell(slotIndex), slotIndex + 1, browseEnter, browseExit,
+            default, hoverChanged);
     }
     /// <summary>
     /// Unit names any equipped spell can summon, so their GPU anim prefabs can be preloaded with the
@@ -480,6 +561,10 @@ public class SpellManager : MonoBehaviour
         CancelPendingClose();
         if(spellBrowseMenu != null) spellBrowseMenu.Close();
         ClearBrowseHighlight();
+        if(SpellTestMode.Active && spellBrowseMenu != null) {
+            spellBrowseMenu.OpenForCasting(testCastMenuAnchor);
+            testMenuArmedSpell = null;
+        }
 
         // With the picker gone its info panel goes too, so the floating tooltips are the only
         // description left in battle. Hand them back.
@@ -501,7 +586,27 @@ public class SpellManager : MonoBehaviour
         for (int i = 0; i < slotStates.Length; i++) {
             if(spellCastButtons[i] == null) continue;
             spellCastButtons[i].SetAffordable(CanAfford(slotStates[i].SpellData));
+            SpellData spellData = slotStates[i].SpellData;
+            spellCastButtons[i].SetManaShort(spellData == null ? 0 : Mathf.Max(0, spellData.SpellManaCost - manaRemaining));
         }
+    }
+
+    // Only a spell the pool can pay for previews; an unaffordable one already reads red on its cost gem.
+    private int PreviewCostOf(int slotIndex)
+    {
+        if(slotIndex < 0 || slotIndex >= slotStates.Length) return 0;
+        SpellData spell = slotStates[slotIndex].SpellData;
+        return spell != null && CanAfford(spell) ? spell.SpellManaCost : 0;
+    }
+
+    private void RefreshManaPreview()
+    {
+        int preview = PreviewCostOf(hoveredHotbarSlot);
+        if(preview == 0) preview = PreviewCostOf(selectedSpellIndex);
+        if(preview == manaPreview) return;
+
+        manaPreview = preview;
+        OnManaPreviewChanged?.Invoke(manaPreview);
     }
 
     private void SpendMana(int amount)
@@ -585,6 +690,11 @@ public class SpellManager : MonoBehaviour
             return;
         }
 
+        if(!SummonPrefabsReady(slotStates[slotIndex].SpellData)) {
+            RejectCast(slotIndex, $"{slotStates[slotIndex].SpellData.name} summon prefabs for {slotStates[slotIndex].SpellData.SummonedUnitName} are not loaded yet");
+            return;
+        }
+
         IAudioRequester.Instance.Play(selectSound, ignoreDucking: true);
 
         if(IsPlacementSpell(slotStates[slotIndex].SpellData)) {
@@ -611,6 +721,21 @@ public class SpellManager : MonoBehaviour
     }
 
     #region Placement spells (Starstep, Raise Dead)
+    // Custom battles in a player build never run the army preload, so every equipped summon requests its own unit.
+    private void PreloadSummonedUnits()
+    {
+        foreach(SpellData spell in defaultSpells)
+            if(spell != null && spell.SummonsSquad)
+                BattleManager.Instance.UnitGPUAnimLoader.PreloadAdditionalUnit(spell.SummonedUnitName);
+    }
+    // A summon cast before its unit prefabs have loaded would spend mana and spawn nothing.
+    private bool SummonPrefabsReady(SpellData spell)
+    {
+        if(!spell.SummonsSquad) return true;
+        if(UnitGPUAnimPrefabs.Find(World.DefaultGameObjectInjectionWorld.EntityManager, spell.SummonedUnitName) != null) return true;
+        BattleManager.Instance.UnitGPUAnimLoader.PreloadAdditionalUnit(spell.SummonedUnitName);
+        return false;
+    }
     private void BeginPlacementFlow(int slotIndex)
     {
         if(placementPhase != SpellPlacementPhase.None) CancelPlacement(false);
@@ -632,7 +757,7 @@ public class SpellManager : MonoBehaviour
         {
             // The blink needs a squad first; the selection-changed handler moves us on to placing.
             placementPhase = SpellPlacementPhase.AwaitingSquad;
-            ui.ShowCursorHint(LocalizationManager.Instance.GetText("SpellHintSelectSquad"));
+            ui.ShowSpellTargetHint(validTargetCursor, LocalizationManager.Instance.GetText("SpellHintSelectSquad"));
         }
         else
         {
@@ -645,7 +770,7 @@ public class SpellManager : MonoBehaviour
             BattleManager.Instance.PositionDrawer.SetLookRotation(Quaternion.Euler(0f, -90f, 0f));
             BattleManager.Instance.PositionDrawer.PreviewSpawnFormation(MouseWorldPosition.Instance.GetWorldPosition(), count, spread);
             placementPhase = SpellPlacementPhase.Placing;
-            ui.ShowCursorHint(LocalizationManager.Instance.GetText("SpellHintPlaceFormation"));
+            ui.ShowSpellTargetHint(validTargetCursor, LocalizationManager.Instance.GetText("SpellHintPlaceFormation"));
         }
 
         if(BattleManager.Instance.CursorMode != CursorMode.CastSpell)
@@ -680,7 +805,7 @@ public class SpellManager : MonoBehaviour
         BattleManager.Instance.PositionDrawer.SetLookRotation(Quaternion.Euler(0f, BattleInputManager.Instance.Angle, 0f));
         BattleManager.Instance.PositionDrawer.TurnOn(selection.GetMousePositionOffsetByFormationCenter(), selection.SelectedSquadEntityAndEntitiesCountDict);
         placementPhase = SpellPlacementPhase.Placing;
-        BattleManager.Instance.UIManager.ShowCursorHint(LocalizationManager.Instance.GetText("SpellHintPlaceFormation"));
+        BattleManager.Instance.UIManager.ShowSpellTargetHint(validTargetCursor, LocalizationManager.Instance.GetText("SpellHintPlaceFormation"));
     }
     /// <summary>The right-click that confirms a drawn formation. Called by BattleInputManager.HandleSpellPlacementCursorMode.</summary>
     public void ConfirmPlacement()
@@ -740,7 +865,7 @@ public class SpellManager : MonoBehaviour
         placementPhase = SpellPlacementPhase.None;
         placementSlot = -1;
         BattleManager.Instance.PositionDrawer.TurnOff();
-        BattleManager.Instance.UIManager.HideCursorHint();
+        BattleManager.Instance.UIManager.HideSpellTargetHint();
         if(resetCursor && BattleManager.Instance.CursorMode == CursorMode.CastSpell)
             BattleManager.Instance.SetCursorMode(CursorMode.Free);
     }
@@ -771,7 +896,7 @@ public class SpellManager : MonoBehaviour
     {
         SpellSlotState slot = slotStates[slotIndex];
         if(slot.SpellData == null || slot.OnCooldown || !CanAfford(slot.SpellData)
-           || BattleManager.Instance.GamePhase != GamePhase.Battle) {
+           || BattleManager.Instance.GamePhase != GamePhase.Battle || !SummonPrefabsReady(slot.SpellData)) {
             RejectCast(slotIndex, "failed re-check at placement time");
             return;
         }
@@ -791,6 +916,7 @@ public class SpellManager : MonoBehaviour
         spellsCast++;
         slotsCastMask |= 1 << slotIndex;
         CheckFullArsenal();
+        RecordSpellCast(slot.SpellData);
     }
     #endregion
     /// <summary>
@@ -822,7 +948,7 @@ public class SpellManager : MonoBehaviour
     {
         if(!validSpellCastPoint){
             Debug.Log($"SpellManager: Cast failed, invalid cast point (selected slot {selectedSpellIndex}, mage {armedMageSquadId}, cursor {spellCursorOrigin})");
-            NotificationManager.Instance.ErrorNotification("Invalid Spell Cast Point");
+            NotificationManager.Instance.ErrorNotification(LocalizationManager.Instance.GetText("SpellTargetInvalid"));
             return;
         }
 
@@ -1106,13 +1232,18 @@ public class SpellManager : MonoBehaviour
         }
         // A valid point past the armed mage's reach is still a cast and reads as one; the leash's
         // colour, not the hint, says the mage will walk first.
-        if(targetHintSpell == spell && targetHintValid == valid) return;
+        // "Invalid target" in red only once the cursor is on a squad the spell cannot take; until then the
+        // hint just says what to click, so a freshly armed friendly spell does not open on an error.
+        bool overWrongSquad = !valid && BattleManager.Instance.UIManager.HoveredSquadId != 0;
+        if(targetHintSpell == spell && targetHintValid == valid && targetHintOverSquad == overWrongSquad) return;
         targetHintSpell = spell;
         targetHintValid = valid;
+        targetHintOverSquad = overWrongSquad;
         LocalizationManager loc = LocalizationManager.Instance;
-        string message = valid
-            ? loc.GetText("SpellTargetCastHint")
-            : $"<color=#E04040>{loc.GetText("SpellTargetInvalid")}</color> {string.Format(loc.GetText("SpellTargetValidTargets"), ValidTargetsLabel(spell))}";
+        string validTargets = string.Format(loc.GetText("SpellTargetValidTargets"), ValidTargetsLabel(spell));
+        string message = valid ? loc.GetText("SpellTargetCastHint")
+            : overWrongSquad ? $"<color=#E04040>{loc.GetText("SpellTargetInvalid")}</color> {validTargets}"
+            : validTargets;
         BattleManager.Instance.UIManager.ShowSpellTargetHint(cursor, message);
     }
     public static string ValidTargetsLabel(SpellData spell)
@@ -1189,6 +1320,7 @@ public class SpellManager : MonoBehaviour
         spellsCast++;
         slotsCastMask |= 1 << selectedSpellIndex;
         CheckFullArsenal();
+        RecordSpellCast(slot.SpellData);
 
         mouseReleased = false;
         while(!mouseReleased){
@@ -1219,6 +1351,14 @@ public class SpellManager : MonoBehaviour
         ActiveSpell spellInstance = SpawnActiveSpell(position);
         if(spellInstance == null) return;
         spellInstance.Load(spellData, position, targetSquadEntity, sourceTeam, sourceSquadId);
+        if(sourceTeam == Team.Player) RecordSpellCast(spellData);
+    }
+
+    // Per-battle tally for the runEnded analytics event; SaveSquadsPostBattle folds it into RunStats.
+    private static void RecordSpellCast(SpellData spellData)
+    {
+        SaveDataHandler.SpellsCastThisBattle.TryGetValue(spellData.Spell, out int casts);
+        SaveDataHandler.SpellsCastThisBattle[spellData.Spell] = casts + 1;
     }
     // Every cast in the game starts from the one shared prefab; per-spell art rides in as
     // SpellData.SpellVisualPrefab, which ActiveSpell.Load spawns underneath.

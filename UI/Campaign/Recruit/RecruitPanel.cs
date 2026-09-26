@@ -201,7 +201,6 @@ namespace TJ.Recruit
                 RecruitCard recruitCard = Instantiate(recruitCardPrefab, recruitCardsParent);
                 // bool isPurchased = campaignSaveManager.SaveData.townData.recruitedIndices.Contains(i);
                 recruitCard.SetUp(recruitmentOptions[i], this, i, GetRawImage(i), false);
-                recruitCard.AddHoverToAttributes();
                 recruitCards.Add(recruitCard);
                 await Task.Delay(200);
             }

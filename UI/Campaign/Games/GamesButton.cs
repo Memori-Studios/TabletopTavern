@@ -47,8 +47,8 @@ namespace TJ.Games
         }
         public void ActivateButton()
         {
-            canvasGroup.canvasGroup.interactable = true;
-            canvasGroup.canvasGroup.blocksRaycasts = true;
+            canvasGroup.interactable = true;
+            canvasGroup.blocksRaycasts = true;
             canvasGroup.FadeInAsync(0.2f);
         }
         public void DeactivateButton()

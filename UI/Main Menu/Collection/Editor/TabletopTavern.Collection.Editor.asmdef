@@ -1,0 +1,23 @@
+{
+    "name": "TabletopTavern.Collection.Editor",
+    "rootNamespace": "",
+    "references": [
+        "TabletopTavern.Core",
+        "Unity.TextMeshPro",
+        "UnityEngine.UI",
+        "Memori.Utilities",
+        "Memori.Tooltip",
+        "Memori.Audio"
+    ],
+    "includePlatforms": [
+        "Editor"
+    ],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": false,
+    "precompiledReferences": [],
+    "autoReferenced": false,
+    "defineConstraints": [],
+    "versionDefines": [],
+    "noEngineReferences": false
+}

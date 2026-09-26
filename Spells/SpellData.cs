@@ -136,13 +136,12 @@ namespace TJ.Spells
         // back to the campaign save. Author these as SpellTargetingType.World.
         public UnitName SummonedUnitName;
 
+        /// <summary>The formatted description, keyword tags still raw: draw it through KeywordText.</summary>
         public string GetLocalizedSpellDescription()
         {
             string localizedSpellDescription = LocalizationManager.Instance.GetText(Spell.ToString() + "_Desc");
             if(string.IsNullOrEmpty(localizedSpellDescription)) return Spell.ToString();
-            localizedSpellDescription = string.Format(localizedSpellDescription, SpellType, SpellModifierValue, SpellDuration);
-            ColorData.XMLTagColorApplicator(ref localizedSpellDescription);
-            return localizedSpellDescription;
+            return string.Format(localizedSpellDescription, SpellType, SpellModifierValue, SpellDuration);
         }
     }
 }

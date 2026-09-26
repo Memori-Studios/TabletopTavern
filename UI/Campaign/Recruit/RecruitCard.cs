@@ -83,12 +83,14 @@ namespace TJ.Recruit
             if (cardContentRect == null) Debug.LogError("RecruitCard: cardContentRect is not assigned", this);
             iconHighlight.enabled = false;
             canvas = GetComponent<Canvas>();
+            // The prefab's order 0 sits under the Map Canvas (order 1), so the title banner draws over an unhovered card.
+            canvas.sortingOrder = 1;
             graphicRaycaster = GetComponent<GraphicRaycaster>();
             graphicRaycaster.enabled = true;
 
             SetUpTierVisuals();
             goldCostText.text = cost.ToString();
-            goldCostText.color = CampaignManager.Instance.GoldManager.CheckIfCanAfford(cost) ? Color.white : Color.red;
+            goldCostText.color = CampaignManager.Instance.GoldManager.CheckIfCanAfford(cost) ? Color.white : ColorVision.Bad(Color.red);
 
             recruitNameText.text = LocalizationManager.Instance.GetText(squadStats.unitName.ToString());
             // The count this recruit will actually arrive with, hero rule included.
@@ -150,10 +152,6 @@ namespace TJ.Recruit
             CampaignManager.Instance.CampaignSaveManager.OnArmyStructureChanged += RefreshCombineState;
 
             OnPointerExit(null); // Ensure the card is not highlighted on setup
-        }
-        public void AddHoverToAttributes()
-        {
-            unitAttributesUIContainer.EnableHoverBonuses();
         }
 
         /// <summary>

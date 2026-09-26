@@ -9,6 +9,7 @@ using TJ.Map;
 using Memori.Audio;
 using MoreMountains.Feedbacks;
 using Memori.Localization;
+using Memori.Utilities;
 
 namespace TJ
 {
@@ -386,7 +387,7 @@ namespace TJ
             }
 
             healthRecoveryJuiceText.text = (changeInUnitCount > 0 ? "+" : "" ) + changeInUnitCount.ToString();
-            healthRecoveryJuiceText.color = changeInUnitCount > 0 ? Color.green : Color.red;
+            healthRecoveryJuiceText.color = changeInUnitCount > 0 ? ColorVision.Good(Color.green) : ColorVision.Bad(Color.red);
 
             healthRecoveryJuiceMMF.StopFeedbacks();
             healthRecoveryJuiceMMF.PlayFeedbacks();
@@ -423,6 +424,7 @@ namespace TJ
         }
         public void RenameSquad()
         {
+            TutorialManager.Instance.CompleteStepCheck(TutorialStepEnum.RenameSquad);
             hudPanel.GiveRenameSquadPrompt(squad.UniqueID);
         }
         public void OnBeginDrag(PointerEventData eventData)

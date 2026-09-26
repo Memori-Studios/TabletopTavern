@@ -10,7 +10,7 @@ public class UnitBonusUI : MonoBehaviour
     public void LoadUnitBonusUI(string _bonusName, string _bonusDescription)
     {
         bonusNameText.text = _bonusName;
-        bonusDescriptionText.text = _bonusDescription;
+        KeywordText.Apply(bonusDescriptionText, _bonusDescription);
     }
 }
 }

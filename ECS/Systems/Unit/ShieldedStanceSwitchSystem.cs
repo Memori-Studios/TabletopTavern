@@ -43,6 +43,8 @@ partial struct ShieldedStanceSwitchSystem : ISystem {
 
                 if(entityManager.HasComponent<ShieldedStanceUnitComponent>(referencedEntity)) {
                     RefRW<ShieldedStanceUnitComponent> shieldedStanceUnit = SystemAPI.GetComponentRW<ShieldedStanceUnitComponent>(referencedEntity);
+                    // The stat change is a delta, so a unit already in the requested stance must not get it again.
+                    if(shieldedStanceUnit.ValueRO.Stance == ShieldedStanceSquadComponent.ValueRO.Stance) continue;
                     shieldedStanceUnit.ValueRW.Stance = ShieldedStanceSquadComponent.ValueRO.Stance;
 
                     if(entityManager.HasComponent<MeleeDefense>(referencedEntity)) 

@@ -1,5 +1,6 @@
 using UnityEngine;
 using UnityEngine.UI;
+using Memori.Utilities;
 
 namespace TJ
 {
@@ -28,6 +29,8 @@ namespace TJ
         [Header("Prestige Icons")]
         [SerializeField] private GameObject prestige1GO;
         [SerializeField] private GameObject prestige2GO, prestige1RangedGO, prestige2RangedGO;
+        // Casters get their own pair: the archer frames are drawn around a 3-bar stack and the cooldown row sits outside them.
+        [SerializeField] private GameObject prestige1MageGO, prestige2MageGO;
         private bool _isExhausted = false;
         public bool IsExhausted => _isExhausted;
         private bool _weaponStrengthBonusActive = false;
@@ -49,10 +52,15 @@ namespace TJ
         private bool _isOutOfAmmo = false;
         public bool IsOutOfAmmo => _isOutOfAmmo;
         
+        private bool isPlayer;
+
         public void SetUp(Team _team, Transform _squadTransform, int ammunition, bool isGate, bool hasCooldown)
         {
             squadTransform = _squadTransform;
-            fill.color = _team == Team.Player ? playerColor : enemyColor;
+            isPlayer = _team == Team.Player;
+            ApplyTeamColor();
+            ColorVision.Changed -= ApplyTeamColor;
+            ColorVision.Changed += ApplyTeamColor;
             DisableAllStatusIcons();
 
             // Only artillery and casters have a cycle worth a bar, so for everything else the row is
@@ -201,12 +209,15 @@ namespace TJ
             if (outOfAmmoGO != null)
             outOfAmmoGO.SetActive(isOutOfAmmo);
         }
-        public void SetPrestige(int prestige, bool isRanged)
+        public void SetPrestige(int prestige, bool isRanged, bool isCaster)
         {
-            if (prestige1GO != null) prestige1GO.SetActive(!isRanged && prestige == 1);
-            if (prestige2GO != null) prestige2GO.SetActive(!isRanged && prestige == 2);
-            if (prestige1RangedGO != null) prestige1RangedGO.SetActive(isRanged && prestige == 1);
-            if (prestige2RangedGO != null) prestige2RangedGO.SetActive(isRanged && prestige == 2);
+            bool melee = !isRanged && !isCaster;
+            if (prestige1GO != null) prestige1GO.SetActive(melee && prestige == 1);
+            if (prestige2GO != null) prestige2GO.SetActive(melee && prestige == 2);
+            if (prestige1RangedGO != null) prestige1RangedGO.SetActive(isRanged && !isCaster && prestige == 1);
+            if (prestige2RangedGO != null) prestige2RangedGO.SetActive(isRanged && !isCaster && prestige == 2);
+            if (prestige1MageGO != null) prestige1MageGO.SetActive(isCaster && prestige == 1);
+            if (prestige2MageGO != null) prestige2MageGO.SetActive(isCaster && prestige == 2);
         }
         public void DisablePrestigeIcons()
         {
@@ -214,6 +225,42 @@ namespace TJ
             if (prestige2GO != null) prestige2GO.SetActive(false);
             if (prestige1RangedGO != null) prestige1RangedGO.SetActive(false);
             if (prestige2RangedGO != null) prestige2RangedGO.SetActive(false);
+            if (prestige1MageGO != null) prestige1MageGO.SetActive(false);
+            if (prestige2MageGO != null) prestige2MageGO.SetActive(false);
+        }
+        private Image _enemyMarker;
+
+        // Colorblind Mode also marks enemy bars with a diamond, so team reads by shape as well as colour.
+        private void ApplyTeamColor()
+        {
+            fill.color = ColorVision.Team(isPlayer, isPlayer ? playerColor : enemyColor);
+
+            bool showMarker = !isPlayer && ColorVision.IsOn;
+            if (showMarker && _enemyMarker == null) _enemyMarker = CreateEnemyMarker();
+            if (_enemyMarker != null)
+            {
+                _enemyMarker.gameObject.SetActive(showMarker);
+                _enemyMarker.color = fill.color;
+            }
+        }
+        private Image CreateEnemyMarker()
+        {
+            RectTransform bar = healthSlider.transform as RectTransform;
+            float size = bar.rect.height * 1.6f;
+            var marker = new GameObject("Enemy Marker", typeof(RectTransform), typeof(Image)).GetComponent<Image>();
+            RectTransform rt = marker.rectTransform;
+            rt.SetParent(bar, false);
+            rt.anchorMin = rt.anchorMax = new Vector2(0f, 0.5f);
+            rt.pivot = new Vector2(0.5f, 0.5f);
+            rt.sizeDelta = new Vector2(size, size);
+            rt.anchoredPosition = new Vector2(-size, 0f);
+            rt.localRotation = Quaternion.Euler(0f, 0f, 45f);
+            marker.raycastTarget = false;
+            return marker;
+        }
+        private void OnDestroy()
+        {
+            ColorVision.Changed -= ApplyTeamColor;
         }
     }
 }

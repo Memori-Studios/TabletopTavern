@@ -17,6 +17,12 @@ namespace TJ.MainMenu
         [SerializeField] private Image heroImage, heroFrameImage, selectedFrameImage, maxDifficultyFrameImage, maxDifficultyBackgroundImage;
         [SerializeField] private TMP_Text maxDifficultyText;
         [SerializeField] private GameObject completedGO, lockedGO, selectedGO;
+        // Greyscale copies of the gold frame, wings and numeral shield, tinted for every level except Hard.
+        [SerializeField] private Sprite greyscaleFrameSprite;
+        [SerializeField] private Sprite greyscaleWingsSprite;
+        [SerializeField] private Sprite greyscaleShieldSprite;
+        [SerializeField] private Image badgeShieldImage;
+        Sprite _goldFrameSprite, _goldWingsSprite, _goldShieldSprite;
         Hero _hero;
         PlayPanel _playPanel;
         List<int> _difficultiesCompletedForHero;
@@ -53,16 +59,16 @@ namespace TJ.MainMenu
 #endif
 
             _difficultiesCompletedForHero = SaveDataHandler.GetHeroDifficultiesCompleted(hero.HeroID);
-            //Display Max Difficulty
-            int maxDifficultyCompleted = -1;
+            //Display Max Difficulty; saves can hold ten-tier values, so compare ranks
+            int maxDifficultyCompleted = 0;
             foreach(int difficulty in _difficultiesCompletedForHero)
             {
-                if(difficulty > maxDifficultyCompleted)
-                    maxDifficultyCompleted = difficulty;
+                maxDifficultyCompleted = DifficultyRules.Harder(maxDifficultyCompleted, difficulty);
             }
-            if(maxDifficultyCompleted >= 0)
+            bool anyCompleted = DifficultyRules.Rank(maxDifficultyCompleted) >= 0;
+            if(anyCompleted)
             {
-                string romanNumeral = MemoriUI.ConvertNumberToRomanNumeral(maxDifficultyCompleted);
+                string romanNumeral = MemoriUI.ConvertNumberToRomanNumeral(DifficultyRules.LevelNumber((TT_Difficulty)maxDifficultyCompleted));
                 maxDifficultyText.text = $"{romanNumeral}";
                 completedGO.SetActive(true);
             }
@@ -72,8 +78,7 @@ namespace TJ.MainMenu
                 completedGO.SetActive(false);
             }
 
-            maxDifficultyBackgroundImage.enabled = maxDifficultyCompleted == 10;
-            maxDifficultyFrameImage.enabled = maxDifficultyCompleted == 10;
+            ShowRankFrame(maxDifficultyCompleted);
 
             // _playerSaveMaxDifficultyCompletedOverall = SaveDataHandler.LoadPlayerSaveData().MaxDifficultyOverall;
             GetComponent<Button>().onClick.RemoveAllListeners();
@@ -93,6 +98,42 @@ namespace TJ.MainMenu
                 listenerSetUp = true;
             }
         }
+        #region Rank frame
+        static readonly Color BronzeTint = new Color32(186, 120, 72, 255);
+        static readonly Color SilverTint = new Color32(206, 214, 226, 255);
+        static readonly Color GodkingTint = new Color32(214, 58, 48, 255);
+
+        // The frame, wings and numeral shield take the metal of the best level completed: bronze, silver, gold, then red for Godking.
+        private void ShowRankFrame(int bestCompleted)
+        {
+            int rank = DifficultyRules.Rank(bestCompleted);
+            maxDifficultyFrameImage.enabled = rank >= 0;
+            maxDifficultyBackgroundImage.enabled = rank >= 0;
+            // The rank frame replaces the plain hero frame; drawing both doubles the border.
+            heroFrameImage.enabled = rank < 0;
+            if (rank < 0) return;
+
+            if (_goldFrameSprite == null) _goldFrameSprite = maxDifficultyFrameImage.sprite;
+            if (_goldWingsSprite == null) _goldWingsSprite = maxDifficultyBackgroundImage.sprite;
+            if (_goldShieldSprite == null && badgeShieldImage != null) _goldShieldSprite = badgeShieldImage.sprite;
+            bool missing = greyscaleFrameSprite == null || greyscaleWingsSprite == null || greyscaleShieldSprite == null || badgeShieldImage == null;
+            if (missing)
+                Debug.LogError($"[HeroDifficultyButton] A greyscale rank sprite or the badge shield image is not assigned on {name}.");
+
+            bool gold = rank == DifficultyRules.Rank(TT_Difficulty.Hard) || missing;
+            Color tint = gold ? Color.white : rank == 0 ? BronzeTint : rank == 1 ? SilverTint : GodkingTint;
+            Paint(maxDifficultyFrameImage, gold ? _goldFrameSprite : greyscaleFrameSprite, tint);
+            Paint(maxDifficultyBackgroundImage, gold ? _goldWingsSprite : greyscaleWingsSprite, tint);
+            if (badgeShieldImage != null) Paint(badgeShieldImage, gold ? _goldShieldSprite : greyscaleShieldSprite, tint);
+        }
+
+        private static void Paint(Image image, Sprite sprite, Color tint)
+        {
+            image.sprite = sprite;
+            image.color = new Color(tint.r, tint.g, tint.b, image.color.a);
+        }
+        #endregion
+
         public async void LoadSprite()
         {
             Sprite loadedSprite = await TabletopTavernData.Instance.LoadHeroSpriteAsync(_hero.HeroID);
@@ -109,18 +150,18 @@ namespace TJ.MainMenu
                 return;
             }
 
-            //for peasant just check if we have access
-            if(difficultyLevel == (int)TT_Difficulty.Peasant)
+            //for the easiest level just check if we have access
+            if(DifficultyRules.Rank(difficultyLevel) == 0)
             {
                 completedGO.SetActive(_difficultiesCompletedForHero.Contains(difficultyLevel));
                 ShowVisuals(_hasAccessToHero);
                 return;
             }
-            
+
             //otherwise, check if max hero difficulty completed overall is atleast this difficulty level -1
             // Debug.Log($"Checking difficulty status for level: {difficultyLevel} for hero: {_hero.HeroID} max completed overall: {_playerSaveMaxDifficultyCompletedOverall}");
 
-            if(difficultyLevel - 1 > _playerSaveMaxDifficultyCompletedOverall)
+            if(DifficultyRules.IsLocked((TT_Difficulty)difficultyLevel, _playerSaveMaxDifficultyCompletedOverall))
             {
                 completedGO.SetActive(false);
                 ShowVisuals(false);

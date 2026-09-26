@@ -56,7 +56,7 @@ namespace TJ
             statNameText.text = LocalizationManager.Instance.GetText(unitStat.ToString());
 
             totalBonus = 0;
-            string description = LocalizationManager.Instance.GetText(unitStat.ToString()+"Desc");
+            string description = KeywordText.Render(LocalizationManager.Instance.GetText(unitStat.ToString()+"Desc"), false);
             description += $"\n\n<color {ColorData.Green}>{baseValueLocalized}: {amount}</color>";
             
             UnitType unitType = TabletopTavernData.Instance.GetUnitTypeFromUnitName(_unitName);
@@ -359,7 +359,10 @@ namespace TJ
                 }
             }
 
-            statScoreText.text = $"{amount + totalBonus}";
+            // The signed bonus marks a buff or debuff without relying on the colour.
+            statScoreText.text = totalBonus == 0
+                ? $"{amount + totalBonus}"
+                : $"{amount + totalBonus}<size=65%> {(totalBonus > 0 ? "+" : "")}{totalBonus}</size>";
             Color textColor = Color.black;
             textColor = totalBonus switch
             {

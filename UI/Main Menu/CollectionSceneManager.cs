@@ -1,4 +1,5 @@
 using UnityEngine;
+using Memori.Audio;
 using Memori.Input;
 using Memori.Scenes;
 
@@ -13,6 +14,7 @@ namespace TJ.MainMenu
     public class CollectionSceneManager : MonoBehaviour
     {
         [SerializeField] private CollectionPanel collectionPanel;
+        [SerializeField] private CollectionPreviewRig previewRig;
 
         private bool _closing;
 
@@ -26,7 +28,7 @@ namespace TJ.MainMenu
             // also holds blockRaycastsDuringTransition and would otherwise lock all input.
             try
             {
-                collectionPanel.SetUp(Close);
+                collectionPanel.SetUp(Close, previewRig);
                 collectionPanel.OpenPanel();
 
                 // Esc and right-click both close the overlay; MainMenu's right-click handler
@@ -45,6 +47,7 @@ namespace TJ.MainMenu
             if (_closing) return;
             _closing = true;
 
+            IAudioRequester.Instance.PlaySFX(SFXData.CloseUI);
             collectionPanel.ClosePanel();
             await SceneHandler.Instance.CloseOverlayScene(SceneHandler.CollectionScenePath);
         }

@@ -18,9 +18,9 @@ namespace TJ.MainMenu
     /// Screen two of run setup: everything that fills a slot or spends the treasury, under one
     /// persistent purse.
     ///
-    /// Layout is source | loadout | inspector. The loadout blocks double as the navigation -
-    /// clicking a block swaps the source column to that block's list - so nothing is hidden behind
-    /// a hover flyout the way the old Starting Gear / Modify Starting Army buttons were.
+    /// Layout is source | loadout. The source column switches with its tabs, or by hovering a
+    /// loadout block, so nothing is hidden behind a hover flyout the way the old Starting Gear /
+    /// Modify Starting Army buttons were. Details show in tooltips and the unit hover panel.
     ///
     /// Army and gear remain owned by <see cref="StartingArmyManager"/>; this panel only drives
     /// section focus, the purse readout, the spell loadout, and validation.
@@ -38,10 +38,18 @@ namespace TJ.MainMenu
         [SerializeField] private MemoriTooltipTrigger treasuryTooltipTrigger;
 
         [Header("Source Column")]
-        [SerializeField] private TMP_Text sourceTitleText;
         [SerializeField] private GameObject armySourceRoot;
         [SerializeField] private GameObject gearSourceRoot;
         [SerializeField] private GameObject spellSourceRoot;
+
+        [Header("Source Tabs")]
+        [SerializeField] private CollectionTab armyTab;
+        [SerializeField] private CollectionTab gearTab;
+        [SerializeField] private CollectionTab spellTab;
+
+        [Header("Army Heading")]
+        [SerializeField] private TMP_Text armyHeadingText;
+        [SerializeField] private TMP_Text armyHintText;
 
         // One per loadout block, each authored with its own WarbandSection. Focus follows the
         // pointer rather than needing a click.
@@ -67,22 +75,14 @@ namespace TJ.MainMenu
         // Optional, same role as SpellBrowseMenu.specialGroupParent: the four Lesser spells are a band
         // of four rather than a pair, so they can be given their own full-width line.
         [SerializeField] private Transform grimoireSpecialGroupParent;
+        // Optional. Lives inside grimoireContentParent and is kept as its last cell across rebuilds.
+        [SerializeField] private Transform grimoireLegend;
+        [SerializeField] private TMP_Text legendEquippedText;
+        [SerializeField] private TMP_Text legendLockedText;
 
-        // The unit half of the inspector is StartingArmyManager's existing SquadBattleInfo, which
-        // already receives every unit and gear hover - this panel only swaps which half is visible.
-        [Header("Inspector")]
-        [SerializeField] private GameObject unitInspectorRoot;
-        [SerializeField] private GameObject spellInspectorRoot;
-        [SerializeField] private TMP_Text spellInspectorNameText;
-        [SerializeField] private TMP_Text spellInspectorDescriptionText;
-        [SerializeField] private Image spellInspectorIcon;
-        // Faction identity, mirroring SpellBrowseMenu's docked info panel. All optional and additive -
-        // the inspector still names and describes the spell without any of them.
-        [SerializeField] private TMP_Text spellInspectorRaceText;
-        [SerializeField] private Image spellInspectorAccentImage;
-        // Shown INSTEAD OF nothing, not instead of the description: a locked spell still describes what
-        // it does, and this line says why it cannot be taken yet.
-        [SerializeField] private TMP_Text spellInspectorLockedText;
+        [Header("Grimoire Header")]
+        [SerializeField] private TMP_Text grimoireTitleText;
+        [SerializeField] private TMP_Text grimoireHintText;
 
         [Header("Validation")]
         [SerializeField] private RunSetupValidation validation;
@@ -93,6 +93,7 @@ namespace TJ.MainMenu
         private bool focusApplied;
 
         private readonly List<SpellBrowseSlot> grimoireTiles = new();
+        private readonly List<MemoriTooltipTrigger> grimoireTooltips = new();
         private Spell[] loadout = Array.Empty<Spell>();
         // Slot the grimoire will fill on the next pick. Never the signature slot.
         private int targetSpellSlot = 1;
@@ -114,6 +115,10 @@ namespace TJ.MainMenu
             backToCommanderButton.onClick.RemoveAllListeners();
             backToCommanderButton.onClick.AddListener(playPanel.ShowCommanderScreen);
 
+            WireTab(armyTab, WarbandSection.Army);
+            WireTab(gearTab, WarbandSection.Gear);
+            WireTab(spellTab, WarbandSection.Spells);
+
             // -= before += so a second SetUp (returning to the panel) does not double-subscribe.
             startingArmySection.remainingTreasury.OnValueChanged -= RefreshPurse;
             startingArmySection.remainingTreasury.OnValueChanged += RefreshPurse;
@@ -131,15 +136,25 @@ namespace TJ.MainMenu
             // The armed slot is per-visit, not per-hero: leaving it wherever the last pick landed
             // means re-opening the screen arms an arbitrary slot the player never chose.
             targetSpellSlot = SpellLoadout.SignatureSlotIndex + 1;
+            SetGrimoireLegendText();
+            SetSourceText(hero);
             BuildGrimoire();
             RefreshSpellSlots();
             RefreshCommanderSummary(hero);
             RefreshPurse(startingArmySection.remainingTreasury.Value);
-            // Force the focus to re-apply even if Army was already focused: the source title
-            // embeds the hero's race, so a no-op here would leave the previous faction's name up.
+            // Re-applied even if Army was already focused, so every visit opens on the recruit list.
             focusApplied = false;
             SetFocus(WarbandSection.Army);
-            ShowUnitInspector();
+        }
+
+        private void SetSourceText(Hero hero)
+        {
+            armyTab.SetLabel(LocalizationManager.Instance.GetText("WarbandTabRecruit"));
+            gearTab.SetLabel(LocalizationManager.Instance.GetText("WarbandTabArmory"));
+            spellTab.SetLabel(LocalizationManager.Instance.GetText("WarbandTabGrimoire"));
+            armyHeadingText.text = string.Format(LocalizationManager.Instance.GetText("WarbandRecruitHeading"),
+                                                 LocalizationManager.Instance.GetText(hero.Race.ToString()));
+            armyHintText.text = LocalizationManager.Instance.GetText("WarbandRecruitHint");
         }
 
         /// <summary>
@@ -163,13 +178,12 @@ namespace TJ.MainMenu
             string factionName = LocalizationManager.Instance.GetText(hero.Race.ToString());
             DifficultyLevel difficultyData = DifficultyData.GetDifficultyLevelData(playPanel.SelectedDifficulty);
             string difficultyName = LocalizationManager.Instance.GetText(difficultyData.difficultyName);
-            string levelLocalized = LocalizationManager.Instance.GetText("LevelShort");
 
             // The hero carries the line; faction and difficulty are context, so they drop to the
             // muted colour and a smaller size rather than competing at equal weight.
             commanderSummaryText.text =
                 $"<b><color={ColorData.Primary}>{heroName}</color></b>" +
-                $"<color={ColorData.Secondary}><size=85%> · {factionName} · {levelLocalized} {(int)playPanel.SelectedDifficulty} {difficultyName}</size></color>";
+                $"<color={ColorData.Secondary}><size=85%> · {factionName} · {difficultyName}</size></color>";
         }
 
         #region Focus
@@ -192,25 +206,17 @@ namespace TJ.MainMenu
             gearSectionHighlight.SetActive(section == WarbandSection.Gear);
             spellSectionHighlight.SetActive(section == WarbandSection.Spells);
 
-            // Leaving the spell block is the ONLY thing that puts the unit inspector back. Mousing
-            // off an individual row or slot deliberately leaves its text up, so a description stays
-            // readable while the pointer travels - same "last hovered wins" rule as section focus.
-            // Entering it seeds the inspector with the pinned signature, so the panel says something
-            // about spells immediately instead of holding the previous section's unit. The
-            // early-return above is what keeps this from fighting "last hovered wins": coming back to
-            // the block from a tile you just hovered never re-enters here, so that tile's text stays.
-            if (section == WarbandSection.Spells) ShowSignatureSpellInspector();
-            else ShowUnitInspector();
-
-            sourceTitleText.text = section switch
-            {
-                WarbandSection.Gear   => LocalizationManager.Instance.GetText("ArmorySourceTitle"),
-                WarbandSection.Spells => LocalizationManager.Instance.GetText("GrimoireSourceTitle"),
-                _                     => string.Format(LocalizationManager.Instance.GetText("RecruitSourceTitle"),
-                                             LocalizationManager.Instance.GetText(playPanel.hero.Race.ToString())),
-            };
+            armyTab.SetActive(section == WarbandSection.Army);
+            gearTab.SetActive(section == WarbandSection.Gear);
+            spellTab.SetActive(section == WarbandSection.Spells);
 
             IAudioRequester.Instance.PlaySFX(SFXData.ButtonHover);
+        }
+
+        private void WireTab(CollectionTab tab, WarbandSection section)
+        {
+            tab.Button.onClick.RemoveAllListeners();
+            tab.Button.onClick.AddListener(() => SetFocus(section));
         }
         #endregion
 
@@ -311,6 +317,7 @@ namespace TJ.MainMenu
             ClearGrimoireBands(grimoireContentParent, immediateClear);
             ClearGrimoireBands(grimoireSpecialGroupParent, immediateClear);
             grimoireTiles.Clear();
+            grimoireTooltips.Clear();
 
             foreach (Race race in GRIMOIRE_GROUP_ORDER)
             {
@@ -334,10 +341,13 @@ namespace TJ.MainMenu
                     // release overrideSorting while it was briefly a root canvas, and fail silently.
                     SpellBrowseSlot tile = Instantiate(grimoireTilePrefab, group.TilesParent);
                     SpellData captured = spellData;
-                    tile.SetUp(captured, () => PickSpell(captured), ShowSpellInspector, NotifySpellAlreadyEquipped);
+                    tile.SetUp(captured, () => PickSpell(captured), null, NotifySpellAlreadyEquipped);
                     grimoireTiles.Add(tile);
+                    if (Application.isPlaying) AddGrimoireTooltip(tile, captured);
                 }
             }
+
+            if (grimoireLegend != null) grimoireLegend.SetAsLastSibling();
         }
 
         private void ClearGrimoireBands(Transform parent, bool immediate)
@@ -346,10 +356,32 @@ namespace TJ.MainMenu
 
             for (int i = parent.childCount - 1; i >= 0; i--)
             {
-                GameObject child = parent.GetChild(i).gameObject;
-                if (immediate) DestroyImmediate(child);
-                else Destroy(child);
+                Transform child = parent.GetChild(i);
+                if (child == grimoireLegend) continue;
+                if (immediate) DestroyImmediate(child.gameObject);
+                else Destroy(child.gameObject);
             }
+        }
+
+        private void SetGrimoireLegendText()
+        {
+            if (legendEquippedText != null) legendEquippedText.text = LocalizationManager.Instance.GetText("GrimoireLegendEquipped");
+            if (legendLockedText != null) legendLockedText.text = LocalizationManager.Instance.GetText("Locked");
+        }
+
+        /// <summary>
+        /// Names the slot the next pick fills, or says there is none to fill until one is bought.
+        /// </summary>
+        private void RefreshGrimoireHeader()
+        {
+            if (grimoireTitleText == null) return;
+
+            bool hasFreeSlot = !SpellLoadout.IsSlotLocked(targetSpellSlot);
+            grimoireTitleText.text = hasFreeSlot
+                ? string.Format(LocalizationManager.Instance.GetText("SpellBrowseTitle"), targetSpellSlot + 1)
+                : LocalizationManager.Instance.GetText("GrimoireNoFreeSlotTitle");
+            if (grimoireHintText != null)
+                grimoireHintText.text = LocalizationManager.Instance.GetText(hasFreeSlot ? "GrimoireSlotHint" : "GrimoireNoFreeSlotHint");
         }
 
         private void RefreshSpellSlots()
@@ -358,10 +390,11 @@ namespace TJ.MainMenu
             {
                 SpellData spellData = i < loadout.Length ? SpellRegistry.Get(loadout[i]) : null;
                 bool locked = SpellLoadout.IsSlotLocked(i);
-                spellSlots[i].LoadSlot(i, spellData, FocusSpellSlot, ShowSpellInspector, locked);
+                spellSlots[i].LoadSlot(i, spellData, FocusSpellSlot, null, locked);
                 spellSlots[i].SetFocused(!locked && i == targetSpellSlot);
             }
             RefreshGrimoireStates();
+            RefreshGrimoireHeader();
             RefreshCounters();
         }
 
@@ -401,6 +434,9 @@ namespace TJ.MainMenu
                 tile.SetState(SpellLoadout.IsUnlocked(spell)
                     ? SpellBrowseState.Available : SpellBrowseState.Unavailable);
             }
+
+            // The footer names the armed slot and what it holds, so a showing tooltip must repaint.
+            foreach (MemoriTooltipTrigger tooltip in grimoireTooltips) tooltip.RefreshContent();
         }
 
         /// <summary>Clicking a spell slot arms it as the destination for the next grimoire pick.</summary>
@@ -414,6 +450,8 @@ namespace TJ.MainMenu
             {
                 spellSlots[i].SetFocused(i == slotIndex);
             }
+            RefreshGrimoireStates();
+            RefreshGrimoireHeader();
             SetFocus(WarbandSection.Spells);
         }
 
@@ -451,75 +489,37 @@ namespace TJ.MainMenu
         }
         #endregion
 
-        #region Inspector
-        /// <summary>
-        /// Hover handler for spell slots and grimoire rows. There is no unhover counterpart by
-        /// design - the text stays up until the pointer leaves the spell block entirely, which
-        /// SetFocus handles. That also means no flicker to bridge between adjacent rows.
-        /// </summary>
-        private void ShowSpellInspector(SpellData spellData)
+        #region Grimoire tooltip
+        private void AddGrimoireTooltip(SpellBrowseSlot tile, SpellData spellData)
         {
-            if (spellData == null)
-            {
-                ShowUnitInspector();
-                return;
-            }
-
-            unitInspectorRoot.SetActive(false);
-            spellInspectorRoot.SetActive(true);
-
-            spellInspectorNameText.text = LocalizationManager.Instance.GetText(spellData.Spell.ToString());
-            spellInspectorIcon.sprite = spellData.SpellSprite;
-            spellInspectorDescriptionText.text = spellData.GetLocalizedSpellDescription();
-
-            ApplyInspectorFaction(spellData);
-            ApplyInspectorAvailability(spellData);
+            MemoriTooltipTrigger trigger = tile.GetComponent<MemoriTooltipTrigger>();
+            if (trigger == null) trigger = tile.gameObject.AddComponent<MemoriTooltipTrigger>();
+            trigger.SetContentProvider(() => BuildGrimoireTooltip(spellData));
+            grimoireTooltips.Add(trigger);
         }
 
-        /// <summary>
-        /// Paints the inspector with the spell's faction: the same display colour its tile carries, so
-        /// hovering does not change what colour the spell "is". No hero label here - the lock line
-        /// already names the hero, and for an unlocked spell it is not information you act on.
-        /// </summary>
-        private void ApplyInspectorFaction(SpellData spellData)
+        /// <summary>The shared spell tooltip, with a footer that says what a click does, like the armory tooltip.</summary>
+        private TooltipContent BuildGrimoireTooltip(SpellData spellData)
         {
-            Color factionColour = ColorData.GetRaceDisplayColor(spellData.Race);
-
-            // The icon sprites are white, so this tint is what gives them their faction colour.
-            spellInspectorIcon.color = factionColour;
-            if (spellInspectorAccentImage != null) spellInspectorAccentImage.color = factionColour;
-
-            if (spellInspectorRaceText != null)
-            {
-                spellInspectorRaceText.text = SpellRaceLabel.Get(spellData.Race);
-                spellInspectorRaceText.color = factionColour;
-            }
+            int equippedSlot = Array.IndexOf(loadout, spellData.Spell);
+            bool pinned = equippedSlot == SpellLoadout.SignatureSlotIndex;
+            TooltipContent content = SpellTooltip.Build(spellData, new SpellTooltip.Context { Pinned = pinned });
+            if (!pinned) content.Footer = BuildGrimoireFooter(spellData, equippedSlot);
+            return content;
         }
 
-        /// <summary>
-        /// Shows the unlock requirement on its own line, leaving the description intact - a locked spell
-        /// should still tell you what it does, or there is nothing to want.
-        ///
-        /// Equipped counts as available, same rule as <see cref="RefreshGrimoireStates"/>: a hero's own
-        /// signature is not IsUnlocked until that hero is beaten on Godking, and telling the player to
-        /// earn the spell already sitting in their slot 1 would be nonsense.
-        /// </summary>
-        private void ApplyInspectorAvailability(SpellData spellData)
+        // Equipped is checked before locked: the active hero's signature sits in slot 1 before that hero is beaten.
+        private string BuildGrimoireFooter(SpellData spellData, int equippedSlot)
         {
-            if (spellInspectorLockedText == null) return;
+            LocalizationManager loc = LocalizationManager.Instance;
+            if (equippedSlot >= 0) return string.Format(loc.GetText("GrimoireInSlot"), equippedSlot + 1);
+            if (!SpellLoadout.IsUnlocked(spellData.Spell)) return $"<color={ColorData.Error}>{BuildLockedDescription(spellData)}</color>";
+            if (SpellLoadout.IsSlotLocked(targetSpellSlot)) return loc.GetText("GrimoireNoFreeSlotTitle");
 
-            bool available = IsAvailableToPlayer(spellData.Spell);
-            spellInspectorLockedText.gameObject.SetActive(!available);
-            if (!available) spellInspectorLockedText.text = BuildLockedDescription(spellData);
-        }
-
-        /// <summary>
-        /// Unlocked outright, or already in the loadout. The second half matters only for the active
-        /// hero's signature, which occupies slot 1 regardless of whether that hero has been beaten.
-        /// </summary>
-        private bool IsAvailableToPlayer(Spell spell)
-        {
-            return SpellLoadout.IsUnlocked(spell) || Array.IndexOf(loadout, spell) >= 0;
+            string footer = string.Format(loc.GetText("GrimoireClickToEquip"), targetSpellSlot + 1);
+            SpellData replaced = targetSpellSlot < loadout.Length ? SpellRegistry.Get(loadout[targetSpellSlot]) : null;
+            if (replaced != null) footer += "\n" + string.Format(loc.GetText("WarbandGearReplaces"), loc.GetText(replaced.Spell.ToString()));
+            return footer;
         }
 
         /// <summary>"Complete a run as {hero} to unlock." Falls back to a heroless line if no hero
@@ -533,28 +533,6 @@ namespace TJ.MainMenu
 
             return string.Format(LocalizationManager.Instance.GetText("SpellLockedDesc"),
                                  LocalizationManager.Instance.GetText(owner.HeroName));
-        }
-
-        /// <summary>
-        /// Seeds the inspector when the spell block takes focus. The pinned signature is the one
-        /// spell guaranteed to be in every loadout, so it is the sensible thing to show before the
-        /// pointer has reached a slot or a grimoire tile.
-        /// </summary>
-        private void ShowSignatureSpellInspector()
-        {
-            Spell signature = SpellLoadout.SignatureSlotIndex < loadout.Length
-                ? loadout[SpellLoadout.SignatureSlotIndex]
-                : Spell.None;
-
-            // ShowSpellInspector falls back to the unit inspector on a null SpellData, so a hero with
-            // no authored signature degrades to the old behaviour rather than showing a blank panel.
-            ShowSpellInspector(SpellRegistry.Get(signature));
-        }
-
-        private void ShowUnitInspector()
-        {
-            spellInspectorRoot.SetActive(false);
-            unitInspectorRoot.SetActive(true);
         }
         #endregion
 
@@ -572,13 +550,6 @@ namespace TJ.MainMenu
         // BuildGrimoireBands the game uses so the two cannot drift.
         //
         // Preview objects are ordinary scene objects: CLEAR BEFORE SAVING.
-
-        // Editor-only placeholders. Not player-facing, so exempt from the no-hardcoded-strings rule -
-        // and deliberately not localized, because LocalizationManager.Instance auto-creates on miss and
-        // would fabricate a phantom manager GameObject in the open scene.
-        private const string PREVIEW_DESCRIPTION =
-            "Preview text. This line exists to show how a two or three line spell description wraps inside the panel.";
-        private const string PREVIEW_LOCKED = "Complete Godking difficulty as Bertha Barrelstorm to unlock.";
 
         [ContextMenu("Preview/Build")]
         private void EditorBuildPreview()
@@ -609,7 +580,6 @@ namespace TJ.MainMenu
             EditorRegisterUndo(grimoireSpecialGroupParent);
 
             EditorApplyPreviewStates();
-            EditorPreviewInspector(pool);
 
             // The bands cannot size to their labels until those labels have been measured once.
             LayoutRebuilder.ForceRebuildLayoutImmediate((RectTransform)transform);
@@ -651,37 +621,6 @@ namespace TJ.MainMenu
                     case 14: grimoireTiles[i].SetState(SpellBrowseState.Unavailable);  break;
                     default: grimoireTiles[i].SetState(SpellBrowseState.Available);    break;
                 }
-            }
-        }
-
-        /// <summary>
-        /// Fills the inspector without touching LocalizationManager, and shows the lock line so it can
-        /// be positioned - it is only ever visible on a locked spell at runtime.
-        /// </summary>
-        private void EditorPreviewInspector(List<SpellData> pool)
-        {
-            SpellData sample = null;
-            foreach (SpellData spellData in pool)
-            {
-                if (spellData.Race == Race.Special) continue;
-                sample = spellData;
-                break;
-            }
-            if (sample == null) sample = pool[0];
-
-            if (unitInspectorRoot != null) unitInspectorRoot.SetActive(false);
-            if (spellInspectorRoot != null) spellInspectorRoot.SetActive(true);
-
-            spellInspectorNameText.text = sample.Spell.ToString();
-            spellInspectorDescriptionText.text = PREVIEW_DESCRIPTION;
-            spellInspectorIcon.sprite = sample.SpellSprite;
-
-            ApplyInspectorFaction(sample);
-
-            if (spellInspectorLockedText != null)
-            {
-                spellInspectorLockedText.gameObject.SetActive(true);
-                spellInspectorLockedText.text = PREVIEW_LOCKED;
             }
         }
 

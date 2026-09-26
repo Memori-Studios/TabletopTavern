@@ -121,7 +121,7 @@ public class MageCastRail : MonoBehaviour
             {
                 MageCast cast = entityManager.GetComponentData<MageCast>(units[0].Entity);
                 bool onCooldown = cast.Timer > 0f;
-                tile.RenderCooldown(cast.Cooldown > 0f ? cast.Timer / cast.Cooldown : 0f, onCooldown);
+                tile.RenderCooldown(cast.Cooldown > 0f ? cast.Timer / cast.Cooldown : 0f, onCooldown, cast.Timer);
             }
 
             tile.SetSelected(armed == tile.SquadId);

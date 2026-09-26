@@ -14,7 +14,7 @@ namespace TJ
         int _tab;
 
         static readonly string[] Tabs = { "Stats", "Collection", "Tavern / Unlocks", "Tutorial" };
-        static readonly TT_Difficulty[] Difficulties = (TT_Difficulty[])System.Enum.GetValues(typeof(TT_Difficulty));
+        static readonly TT_Difficulty[] Difficulties = DifficultyRules.Ladder;
         static readonly Race[] Races = (Race[])System.Enum.GetValues(typeof(Race));
         static readonly UnlockCondition[] UnlockConditions = (UnlockCondition[])System.Enum.GetValues(typeof(UnlockCondition));
         static readonly ConsumableEnum[] Consumables = (ConsumableEnum[])System.Enum.GetValues(typeof(ConsumableEnum));

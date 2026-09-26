@@ -12,7 +12,7 @@ public class HeroCompletionEditor : EditorWindow
     Vector2 _scroll;
     bool _dirty;
 
-    static readonly TT_Difficulty[] Difficulties = (TT_Difficulty[])System.Enum.GetValues(typeof(TT_Difficulty));
+    static readonly TT_Difficulty[] Difficulties = DifficultyRules.Ladder;
 
     [MenuItem("Tabletop Tavern/Hero Completion Editor")]
     static void Open() => GetWindow<HeroCompletionEditor>("Hero Completions");

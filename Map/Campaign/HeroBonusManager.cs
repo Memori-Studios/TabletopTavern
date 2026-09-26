@@ -112,6 +112,10 @@ namespace TJ
         }
                     
         public static List<UnitStatBonus> GetHeroStatBonus(UnitStat _unitStat, UnitName _requestingUnit, int activeHeroID, float currentStatValue)
+            => GetHeroStatBonus(_unitStat, _requestingUnit, activeHeroID, currentStatValue, enemyRace);
+
+        // Explicit enemy race, for a hero on either side: an enemy warlord's EnemyRace rules read the player's race.
+        public static List<UnitStatBonus> GetHeroStatBonus(UnitStat _unitStat, UnitName _requestingUnit, int activeHeroID, float currentStatValue, Race _enemyRace)
         {
             List<UnitStatBonus> unitStatBonuses = new();
 
@@ -123,7 +127,7 @@ namespace TJ
             foreach (var rule in _statRules)
             {
                 if (rule.HeroID != activeHeroID || rule.Stat != _unitStat) continue;
-                if (!rule.Condition.Matches(_requestingUnit, stats, enemyRace)) continue;
+                if (!rule.Condition.Matches(_requestingUnit, stats, _enemyRace)) continue;
 
                 float value = rule.MagnitudeKind == BonusMagnitudeKind.PercentOfCurrentValue ? currentStatValue * rule.Value : rule.Value;
                 unitStatBonuses.Add(new UnitStatBonus(_unitStat, LocalizationManager.Instance.GetText(rule.LocalizationKey), value));
@@ -132,6 +136,9 @@ namespace TJ
             return unitStatBonuses;
         }
         public static List<UnitAttributeBonus> GetHeroAttributeBonus(UnitName _requestingUnit, int activeHeroID)
+            => GetHeroAttributeBonus(_requestingUnit, activeHeroID, enemyRace);
+
+        public static List<UnitAttributeBonus> GetHeroAttributeBonus(UnitName _requestingUnit, int activeHeroID, Race _enemyRace)
         {
             List<UnitAttributeBonus> unitAttributeBonuses = new();
 
@@ -145,7 +152,7 @@ namespace TJ
             {
                 if (rule.HeroID != activeHeroID) continue;
                 if (TabletopTavernConstants.GetAttribute(squadAttributes, rule.GrantedAttribute)) continue; // already has it
-                if (!rule.Condition.Matches(_requestingUnit, stats, enemyRace)) continue;
+                if (!rule.Condition.Matches(_requestingUnit, stats, _enemyRace)) continue;
 
                 unitAttributeBonuses.Add(new UnitAttributeBonus(rule.GrantedAttribute, LocalizationManager.Instance.GetText(rule.LocalizationKey), 0));
             }

@@ -77,7 +77,8 @@ public class ActiveSpell : MonoBehaviour
                      SpellPlacement _placement = null, bool _effectHandledByCaster = false)
     {
         spellData = _spellData;
-        targetSquadEntity = _targetSquadEntity;
+        // A mage's auto-cast always names the squad it aimed at; a ground spell stays where it landed instead of following it.
+        targetSquadEntity = spellData.SpellTargetingType == SpellTargetingType.World ? Entity.Null : _targetSquadEntity;
         sourceTeam = _sourceTeam;
         sourceSquadId = _sourceSquadId;
         placement = _placement;
@@ -106,6 +107,8 @@ public class ActiveSpell : MonoBehaviour
         areaParticles = GetComponentsInChildren<ParticleSystem>(true);
         if (visualAddon != null && visualAddon.keepOwnColors)
             areaParticles = Array.FindAll(areaParticles, p => !p.transform.IsChildOf(visualAddon.transform));
+        else if (visualAddon != null)
+            areaParticles = Array.FindAll(areaParticles, p => !KeepsOwnColor(p.transform));
         if (areaDisc != null)
         {
             areaDisc.Type = DiscType.Ring;
@@ -113,6 +116,15 @@ public class ActiveSpell : MonoBehaviour
         }
         ApplyAreaState(range, 0f);
         StartCoroutine(AnimateAreaSize(range, growCurve));
+    }
+    // A part listed in keepOwnColorRoots is read for its own colour (Dread's clouds), so the tint skips it.
+    private bool KeepsOwnColor(Transform particle)
+    {
+        Transform[] roots = visualAddon.keepOwnColorRoots;
+        if (roots == null) return false;
+        for (int i = 0; i < roots.Length; i++)
+            if (roots[i] != null && particle.IsChildOf(roots[i])) return true;
+        return false;
     }
     // One t for everything so the disc edge, the band, the particle ring and the alpha always agree:
     // disc radius and thickness, the root scale and the alpha of the disc and every particle.
@@ -268,16 +280,24 @@ public class ActiveSpell : MonoBehaviour
         else if (spellData.BracesTarget)
         {
             // Shieldwall - brace the targeted friendly squad; ShieldwallSystem applies the knockback
-            // immunity + speed penalty and reverses them after SpellDuration. Guard against re-bracing an
-            // already-braced squad so the one-time speed halving can't stack.
-            if (targetSquadEntity != Entity.Null && entityManager.Exists(targetSquadEntity)
-                && !entityManager.HasComponent<ShieldwallTag>(targetSquadEntity))
+            // immunity + speed penalty and reverses them after SpellDuration. A recast on a braced squad
+            // only resets the timer; Applied is kept as the system left it so the speed halving can't stack.
+            if (targetSquadEntity != Entity.Null && entityManager.Exists(targetSquadEntity))
             {
-                ecb.AddComponent(targetSquadEntity, new ShieldwallTag
+                if (entityManager.HasComponent<ShieldwallTag>(targetSquadEntity))
                 {
-                    RemainingDuration = spellData.SpellDuration,
-                    Applied = false
-                });
+                    ShieldwallTag brace = entityManager.GetComponentData<ShieldwallTag>(targetSquadEntity);
+                    brace.RemainingDuration = spellData.SpellDuration;
+                    entityManager.SetComponentData(targetSquadEntity, brace);
+                }
+                else
+                {
+                    ecb.AddComponent(targetSquadEntity, new ShieldwallTag
+                    {
+                        RemainingDuration = spellData.SpellDuration,
+                        Applied = false
+                    });
+                }
                 WriteSquadStatus(entityManager, targetSquadEntity, statusSpellId);
             }
         }
@@ -349,7 +369,8 @@ public class ActiveSpell : MonoBehaviour
                 });
             }
 
-            if (spellData.BonusStats != null && spellData.BonusStats.Count > 0)
+            bool hasBonusStats = spellData.BonusStats != null && spellData.BonusStats.Count > 0;
+            if (hasBonusStats)
             {
                 // Multi-stat spell: one independent applicator per (stat, value) pair. Each gets a fresh
                 // Guid, so BattlefieldBonusApplicationSystem's Guid dedupe lets them coexist on the same
@@ -358,12 +379,13 @@ public class ActiveSpell : MonoBehaviour
                 foreach (SpellBonusStat bonusStat in spellData.BonusStats)
                     CreateBonusApplicator(bonusStat.UnitStat, BattlefieldBonusEnum.SpellStatBonus, bonusStat.Value);
             }
-            else
-            {
-                // Single-bonus spell (morale rate, wind, weapon strength, etc.) - the original path,
-                // where BonusType selects the apply branch and SpellModifierValue is the magnitude.
+
+            // Single-bonus spell (morale rate, wind, weapon strength, etc.) - the original path, where
+            // BonusType selects the apply branch and SpellModifierValue is the magnitude. A spell with its
+            // own BonusType (Rally's charge aura) can carry flat BonusStats alongside it.
+            bool hasOwnBonusType = spellData.BonusType != BattlefieldBonusEnum.None && spellData.BonusType != BattlefieldBonusEnum.SpellStatBonus;
+            if (!hasBonusStats || hasOwnBonusType)
                 CreateBonusApplicator(spellData.BonusUnitStat, spellData.BonusType, spellData.SpellModifierValue);
-            }
         }
         else
         {

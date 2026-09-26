@@ -17,16 +17,27 @@ namespace TJ.MainMenu
         string _activeThemeKey;
         TavernThemeData themeToLoad;
         int _loadGeneration;
+        readonly System.Threading.Tasks.TaskCompletionSource<bool> _bootThemeLoad = new System.Threading.Tasks.TaskCompletionSource<bool>();
+
+        // Completes once the boot theme is placed or has failed, so the menu can keep its doors shut until then.
+        public System.Threading.Tasks.Task BootThemeLoaded => _bootThemeLoad.Task;
 
         private async void Start()
         {
-            _flagMaterialInstance = Instantiate(_flagMaterial);
-            CreateTableClothInstances();
-            SaveDataHandler.RefreshTavernThemeUnlocks();
-            themeToLoad = GetThemeForCurrentSave();
-// #if !UNITY_EDITOR
-            await LoadTheme(themeToLoad);
-// #endif
+            try
+            {
+                _flagMaterialInstance = Instantiate(_flagMaterial);
+                CreateTableClothInstances();
+                SaveDataHandler.RefreshTavernThemeUnlocks();
+                themeToLoad = GetThemeForCurrentSave();
+                var loadTimer = System.Diagnostics.Stopwatch.StartNew();
+                await LoadTheme(themeToLoad);
+                Debug.Log($"[TavernThemeManager] Boot theme '{(themeToLoad == null ? "none" : themeToLoad.ThemeName)}' loaded in {loadTimer.ElapsedMilliseconds} ms");
+            }
+            finally
+            {
+                _bootThemeLoad.TrySetResult(true);
+            }
         }
 
         private TavernThemeData GetThemeForCurrentSave()

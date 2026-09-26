@@ -20,6 +20,8 @@ partial struct SnareTrapSystem : ISystem
     {
         EntityCommandBuffer ecb = SystemAPI.GetSingleton<EndSimulationEntityCommandBufferSystem.Singleton>()
             .CreateCommandBuffer(state.WorldUnmanaged);
+        // No CompleteAllTrackedJobs here, unlike SpellSystem and ExplosionSystem: this polls every frame,
+        // so an overlap against a half-built tree only delays the spring by one frame.
         CollisionWorld collisionWorld = SystemAPI.GetSingleton<PhysicsWorldSingleton>().CollisionWorld;
         float deltaTime = SystemAPI.Time.DeltaTime;
 

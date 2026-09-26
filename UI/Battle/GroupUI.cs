@@ -28,7 +28,8 @@ public class GroupUI : MonoBehaviour, IPointerEnterHandler, IPointerExitHandler,
         groupID = _groupNumber;
         this._color = _color;
 
-        groupNumberText.text = _groupNumber.ToString();
+        // Group 10 is selected with the 0 key, so its badge shows 0.
+        groupNumberText.text = _groupNumber == 10 ? "0" : _groupNumber.ToString();
         groupBackgroundImage.sizeDelta = new Vector2((_squadCount*60) + ((_squadCount-1) * 5), 25);
         SetSelected(false);
 

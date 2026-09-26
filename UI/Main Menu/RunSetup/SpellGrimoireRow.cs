@@ -56,9 +56,8 @@ namespace TJ.MainMenu
             // A locked row keeps its name and art - it reads as something to earn rather than an
             // anonymous blank - but its description is replaced by how to earn it.
             lockedBlocker.SetActive(!isUnlocked);
-            tooltipTrigger.SetUpToolTip(spellNameText.text,
-                                        isUnlocked ? spellData.GetLocalizedSpellDescription()
-                                                   : BuildLockedDescription());
+            if (isUnlocked) tooltipTrigger.SetContentProvider(() => SpellTooltip.Build(spellData));
+            else tooltipTrigger.SetUpToolTip(spellNameText.text, BuildLockedDescription());
 
             ApplyRaceTint();
 

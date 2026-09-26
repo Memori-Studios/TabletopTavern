@@ -18,6 +18,7 @@ using TJ.Battle;
 using Unity.Entities;
 using Memori.Notifications;
 using Memori.SaveData;
+using TJ.Map;
 
 namespace TJ
 {
@@ -39,7 +40,9 @@ namespace TJ
         [SerializeField] private BattlefieldBonusInfo battlefieldBonusInfo;
         [SerializeField] private TMP_Text spawnErrorText;
         [SerializeField] private GameObject addingOrQueuingIconParent;
-        [SerializeField] private Image addingOrQueuingIcon;
+        [UnityEngine.Serialization.FormerlySerializedAs("addingOrQueuingIcon")]
+        [SerializeField] private Image queueingOrderIcon;
+        [SerializeField] private Image addingUnitsIcon;
 
         [Header("Spell Target Hint")]
         [SerializeField] private MemoriCanvasGroup spellTargetHint;
@@ -48,6 +51,7 @@ namespace TJ
         private bool isOverUI;
         // Which words the auto-retarget button currently carries, so the tooltip is rewritten on a change only.
         private bool autoRetargetReadsAsFreeCast;
+        private bool ceaseFireReadsAsHoldSpells;
 
         [Header("Battle")]
         [SerializeField] private Button startBattleButton;
@@ -87,9 +91,6 @@ namespace TJ
         [SerializeField] private Button continueAfterBattleButton, restartBattleButton;
         [SerializeField] private TMP_Text battleOutcomeText, battleVictoryOrDefeatText, continueAfterBattleButtonText;
 
-        [Header("Garrison Tutorial")]
-        [SerializeField] private GameObject garrisonTutorial;
-        [SerializeField] private Button garrisonTutorialCloseButton;
 
         [Header("Weather Effects")]
         [SerializeField] private TMP_Text weatherTitleText;
@@ -117,6 +118,11 @@ namespace TJ
         {
             if (_isLoaded) return;
             _isLoaded = true;
+            ApplyHealthBarScale(BattlefieldMarkerScale.Current);
+            BattlefieldMarkerScale.Changed -= ApplyHealthBarScale;
+            BattlefieldMarkerScale.Changed += ApplyHealthBarScale;
+            SettingsManager.Instance.UIScale.OnValueChanged -= OnUIScaleChangedForHealthBars;
+            SettingsManager.Instance.UIScale.OnValueChanged += OnUIScaleChangedForHealthBars;
 
             startBattleButton.onClick.RemoveAllListeners();
 
@@ -164,9 +170,12 @@ namespace TJ
             InputHandler.Instance.OnWithdrawCommand += OnWithdrawSquadButtonClicked;
             BattleManager.Instance.SquadOrderManager.OnSquadOrderChanged += OnSquadOrderReceived;
             BattleManager.Instance.BattlefieldEnvManager.OnWeatherChanged += OnWeatherChanged;
-            if (addingOrQueuingIcon != null) addingOrQueuingIcon.enabled = false;
-            InputHandler.Instance.OnQueueOrder += EnableAddingOrQueuingIcon;
-            InputHandler.Instance.OnQueueOrderCanceled += CancelAddingOrQueuingIcon;
+            if (queueingOrderIcon != null) queueingOrderIcon.enabled = false;
+            if (addingUnitsIcon != null) addingUnitsIcon.enabled = false;
+            InputHandler.Instance.OnQueueOrder += ShowQueueingOrderIcon;
+            InputHandler.Instance.OnQueueOrderCanceled += HideQueueingOrderIcon;
+            InputHandler.Instance.OnAddUnitsToSelection += ShowAddingUnitsIcon;
+            InputHandler.Instance.OnAddUnitsToSelectionCanceled += HideAddingUnitsIcon;
             InputHandler.Instance.OnFireAtWillModeToggle += SetFireAtWillMode;
             InputHandler.Instance.OnVolleyFireModeToggle += SetVolleyFireMode;
             InputHandler.Instance.OnBalancedStanceToggle += SetBalancedStance;
@@ -177,20 +186,6 @@ namespace TJ
 
             endBattlePanel.SetActive(false);
             UpdateBattleButtons(false);
-
-            if (BattleManager.Instance.BattleSaveManager.IsGarrisonBattle)
-            {
-                bool seenTutorial = PlayerPrefs.GetInt("GarrisonTutorialSeen", 0) == 1;
-                if (!seenTutorial && garrisonTutorial != null)
-                {
-                    garrisonTutorial.SetActive(true);
-                    PlayerPrefs.SetInt("GarrisonTutorialSeen", 1);
-                    PlayerPrefs.Save();
-
-                    if (garrisonTutorialCloseButton != null)
-                        garrisonTutorialCloseButton.onClick.AddListener(() => garrisonTutorial.SetActive(false));
-                }
-            }
 
             if(BattleManager.Instance.BattleSaveManager.IsCustomBattle)
             {
@@ -784,9 +779,9 @@ namespace TJ
             string fireAtWillTitleLocalized = LocalizationManager.Instance.GetText("FireAtWillTitle");
             string fireAtWillDescLocalized = LocalizationManager.Instance.GetText("FireAtWillDesc");
             string balancedStanceTitleLocalized = LocalizationManager.Instance.GetText("BalancedStanceTitle");
-            string balancedStanceDescLocalized = LocalizationManager.Instance.GetText("BalancedStanceDesc");
+            string balancedStanceDescLocalized = KeywordText.ForTooltip(LocalizationManager.Instance.GetText("BalancedStanceDesc"));
             string defensiveStanceTitleLocalized = LocalizationManager.Instance.GetText("DefensiveStanceTitle");
-            string defensiveStanceDescLocalized = LocalizationManager.Instance.GetText("DefensiveStanceDesc");
+            string defensiveStanceDescLocalized = KeywordText.ForTooltip(LocalizationManager.Instance.GetText("DefensiveStanceDesc"));
 
             string toggleGuardModeKey = InputControlPath.ToHumanReadableString(
                 InputHandler.Instance.GameControls.Battle.ToggleGuardMode.bindings[0].effectivePath, 
@@ -897,8 +892,7 @@ namespace TJ
 
             // Mages are included: MageCastSystem and MageSquadFindTargetSystem both already respect
             // CeaseFireTag, and RegisterSquad adds the tag to every squad regardless of type, so this
-            // is the only thing that was gating the command off for them. The button still reads
-            // "Cease Fire" on a mage.
+            // is the only thing that was gating the command off for them.
             bool mageOnlyFreeCast = selectedSquadsContainMageUnits && !selectedSquadsContainRangedUnits;
             if (mageOnlyFreeCast != autoRetargetReadsAsFreeCast)
             {
@@ -911,11 +905,34 @@ namespace TJ
                     LocalizationManager.Instance.GetText(mageOnlyFreeCast ? "MageFreeCastDesc" : "AutoRetargetDesc"));
             }
 
+            // A mage-only selection reads the same button as "Hold Spells"; anything with a shooter in it keeps
+            // "Cease Fire", since both meanings apply.
+            bool mageOnlyHoldSpells = selectedSquadsContainMageUnits && !selectedSquadsContainRangedUnits && !selectedSquadsContainArtilleryUnits;
+            if (mageOnlyHoldSpells != ceaseFireReadsAsHoldSpells)
+            {
+                ceaseFireReadsAsHoldSpells = mageOnlyHoldSpells;
+                string key = InputControlPath.ToHumanReadableString(
+                    InputHandler.Instance.GameControls.Battle.CeaseFireCommand.bindings[0].effectivePath,
+                    InputControlPath.HumanReadableStringOptions.OmitDevice);
+                ceaseFireButton.SetTooltip(
+                    $"{LocalizationManager.Instance.GetText(mageOnlyHoldSpells ? "MageHoldSpellsTitle" : "CeaseFireTitle")} ({key})",
+                    LocalizationManager.Instance.GetText(mageOnlyHoldSpells ? "MageHoldSpellsDesc" : "CeaseFireDesc"));
+            }
+
             bool anySelectedSquadCanHoldFire = selectedSquadsContainArtilleryUnits || selectedSquadsContainRangedUnits || selectedSquadsContainMageUnits;
             ceaseFireButton.gameObject.SetActive(anySelectedSquadCanHoldFire);
             if (anySelectedSquadCanHoldFire)
             {
                 ceaseFireButton.SetOnOrOff(allSelectedSquadsCeaseFire);
+            }
+            // Shooters only: a mage-only selection reads this button as Hold Spells.
+            if (selectedSquadsContainRangedUnits || selectedSquadsContainArtilleryUnits)
+            {
+                string ceaseFireKey = InputControlPath.ToHumanReadableString(
+                    InputHandler.Instance.GameControls.Battle.CeaseFireCommand.bindings[0].effectivePath,
+                    InputControlPath.HumanReadableStringOptions.OmitDevice);
+                // Open left: the unit card strip sits above the action row, right of this button.
+                TutorialManager.Instance.LoadTooltip(TutorialData.CeaseFire, ceaseFireButton.transform, CalloutSide.Left, ceaseFireKey);
             }
 
             balancedStanceButton.gameObject.SetActive(selectedSquadsContainShieldedUnits);
@@ -950,6 +967,7 @@ namespace TJ
             BattleManager.Instance.UnitPositioningManager.QueueSquadCommand(SquadCommand.HaltAndFreeze, false);
             BattleManager.Instance.SquadManager.CeaseFire();
             ceaseFireButton.SetOnOrOff(true);
+            TutorialManager.Instance.CloseTooltip();
         }
         private void OnSquadUpdated(int _squadId, float2 _unitCount)
         {
@@ -957,9 +975,16 @@ namespace TJ
             RefreshSquadDisplay(_squadId, (int)_unitCount.x);
         }
 
+        // Health bars sit on the overlay canvas, which the UI Scale already grows; divide it back out so they follow the marker setting instead.
+        private void ApplyHealthBarScale(float markerScale)
+        {
+            healthBarParent.localScale = Vector3.one * (markerScale / SettingsManager.Instance.UIScale.Value);
+        }
+        private void OnUIScaleChangedForHealthBars(float _) => ApplyHealthBarScale(BattlefieldMarkerScale.Current);
         private void OnDestroy()
         {
             _isLoaded = false;
+            BattlefieldMarkerScale.Changed -= ApplyHealthBarScale;
             if (BattleManager.HasInstance)
             {
                 BattleManager.Instance.OnGamePhaseChanged -= OnGamePhaseChanged;
@@ -970,6 +995,7 @@ namespace TJ
             }
             if (SettingsManager.HasInstance)
             {
+                SettingsManager.Instance.UIScale.OnValueChanged -= OnUIScaleChangedForHealthBars;
                 SettingsManager.Instance.OnSettingsPanelToggled -= OnSettingsPanelToggled;
             }
             if (InputHandler.HasInstance)
@@ -980,8 +1006,10 @@ namespace TJ
                 InputHandler.Instance.OnToggleMeleeMode -= ToggleMeleeMode;
                 InputHandler.Instance.OnHaltCommand -= IssueHaltCommand;
                 InputHandler.Instance.OnWithdrawCommand -= OnWithdrawSquadButtonClicked;
-                InputHandler.Instance.OnQueueOrder -= EnableAddingOrQueuingIcon;
-                InputHandler.Instance.OnQueueOrderCanceled -= CancelAddingOrQueuingIcon;
+                InputHandler.Instance.OnQueueOrder -= ShowQueueingOrderIcon;
+                InputHandler.Instance.OnQueueOrderCanceled -= HideQueueingOrderIcon;
+                InputHandler.Instance.OnAddUnitsToSelection -= ShowAddingUnitsIcon;
+                InputHandler.Instance.OnAddUnitsToSelectionCanceled -= HideAddingUnitsIcon;
                 InputHandler.Instance.OnFireAtWillModeToggle -= SetFireAtWillMode;
                 InputHandler.Instance.OnVolleyFireModeToggle -= SetVolleyFireMode;
                 InputHandler.Instance.OnBalancedStanceToggle -= SetBalancedStance;
@@ -1099,7 +1127,7 @@ namespace TJ
             spellTargetHintIcon.texture = icon;
             spellTargetHintIcon.enabled = icon != null;
             spellTargetHintText.text = message;
-            if(spellTargetHint.canvasGroup.alpha < 1f) spellTargetHint.FadeInAsync(0.15f, false, false);
+            if(spellTargetHint.alpha < 1f) spellTargetHint.FadeInAsync(0.15f, false, false);
         }
         public void HideSpellTargetHint()
         {
@@ -1190,15 +1218,25 @@ namespace TJ
                 LocalizationManager.Instance.GetText(weather.ToString());
             weatherDescriptionText.text = WeatherInfo.GetDescription(weather);
         }
-        private void EnableAddingOrQueuingIcon()
+        private void ShowQueueingOrderIcon()
         {
-            if (addingOrQueuingIcon == null) { Debug.LogWarning("addingOrQueuingIcon not assigned in Inspector"); return; }
-            addingOrQueuingIcon.enabled = true;
+            if (queueingOrderIcon == null) { Debug.LogWarning("queueingOrderIcon not assigned in Inspector"); return; }
+            queueingOrderIcon.enabled = true;
         }
-        private void CancelAddingOrQueuingIcon()
+        private void HideQueueingOrderIcon()
         {
-            if (addingOrQueuingIcon == null) return;
-            addingOrQueuingIcon.enabled = false;
+            if (queueingOrderIcon == null) return;
+            queueingOrderIcon.enabled = false;
+        }
+        private void ShowAddingUnitsIcon()
+        {
+            if (addingUnitsIcon == null) { Debug.LogWarning("addingUnitsIcon not assigned in Inspector"); return; }
+            addingUnitsIcon.enabled = true;
+        }
+        private void HideAddingUnitsIcon()
+        {
+            if (addingUnitsIcon == null) return;
+            addingUnitsIcon.enabled = false;
         }
         public void UpdateBalanceOfPower(BalanceOfPower balanceOfPower)
         {

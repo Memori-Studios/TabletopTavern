@@ -58,12 +58,6 @@ namespace TJ.Map
 
             sellValue = ConsumableData.SellValue(consumable.ConsumableRarity);
 
-            //DifficultyMod 13
-            if(CampaignManager.Instance.CampaignSaveManager.SaveData.difficultyLevel >= TT_Difficulty.Emperor)
-            {
-                sellValue = 0;
-            }
-
             #region Metaprogression
             if(SaveDataHandler.IsMetaprogressionNodeUnlocked(_consumableSellValueMetaprogressionModel)) {
                 sellValue += _consumableSellValueMetaprogressionModel.NodeValue;

@@ -4,9 +4,9 @@ using UnityEngine.UI;
 namespace TJ.Spells
 {
     /// <summary>
-    /// Editor-only sandbox for polishing spells in a custom battle: a mana pool that never runs out,
-    /// one-second cooldowns and every registered spell on screen at once. Toggled from
-    /// Tabletop Tavern > Spell Test Mode. A player build compiles Enabled to a constant false.
+    /// Custom-battle sandbox for trying spells: a mana pool that never runs out, one-second cooldowns
+    /// and every registered spell castable from the grimoire. Players toggle it on the custom battle
+    /// panel; Tabletop Tavern > Spell Test Mode flips the same PlayerPrefs value in the Editor.
     /// </summary>
     public static class SpellTestMode
     {
@@ -17,16 +17,12 @@ namespace TJ.Spells
         // Lifts the grid clear of the bottom bar so squad cards never cover it.
         private const float GridRiseAboveHotbar = 160f;
 
-#if UNITY_EDITOR
         public const string PrefsKey = "TabletopTavern.SpellTestMode";
         public static bool Enabled
         {
-            get => UnityEditor.EditorPrefs.GetBool(PrefsKey, false);
-            set => UnityEditor.EditorPrefs.SetBool(PrefsKey, value);
+            get => PlayerPrefs.GetInt(PrefsKey, 0) == 1;
+            set => PlayerPrefs.SetInt(PrefsKey, value ? 1 : 0);
         }
-#else
-        public static bool Enabled => false;
-#endif
 
         /// <summary>Custom battle only. A campaign battle keeps its real numbers even with the toggle on.</summary>
         public static bool Active => Enabled && Memori.SaveData.SaveDataHandler.IsCustomBattle();

@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using Memori.Localization;
+using Memori.Tooltip;
 using TMPro;
 using UnityEngine;
 using UnityEngine.EventSystems;
@@ -11,10 +12,9 @@ namespace TJ.Spells
     /// <summary>
     /// Pre-battle spell picker. Opened by hovering a <see cref="SpellCastButton"/> (custom battle,
     /// Deployment phase only). Clicking a row asks the <see cref="SpellManager"/> to swap that spell
-    /// into the slot the menu was opened from. Hovering a row renders its name and description in one
-    /// fixed info panel rather than a floating tooltip, so the text is always in the same place.
+    /// into the slot the menu was opened from. Hovering a row shows the shared spell tooltip.
     ///
-    /// Rows are grouped into faction bands rather than listed flat. Every spell in the pool is shown,
+    /// Rows are grouped into faction trays rather than listed flat. Every spell in the pool is shown,
     /// including the ones already equipped - an equipped row dims in place and displays which slot holds
     /// it, so the list never reorders under the cursor mid-swap.
     ///
@@ -31,19 +31,8 @@ namespace TJ.Spells
         // to give them their own line; leave it null and they fall in with everything else.
         [SerializeField] private Transform specialGroupParent;
 
-        // Fixed info panel for the hovered row. Authored OUTSIDE this menu's root, because Open()
-        // re-centers the root on whichever cast button was hovered and the panel must not move.
-        // Its GameObject must stay ACTIVE in the scene - MemoriCanvasGroup.Awake never runs on an
-        // inactive object, leaving canvasGroup null and CGEnable throwing. It hides via alpha.
-        [Header("Spell Info Panel")]
-        [SerializeField] private MemoriCanvasGroup spellInfoPanel;
-        [SerializeField] private TMP_Text spellInfoNameText;
-        [SerializeField] private TMP_Text spellInfoDescriptionText;
-        // Both optional and purely additive - the panel still names and describes the spell without
-        // them. Tinted from the same display ramp the tile interiors use, so the panel picks up the
-        // colour of whatever is being hovered.
-        [SerializeField] private TMP_Text spellInfoRaceText;
-        [SerializeField] private Image spellInfoAccentImage;
+        // "Choose a spell for slot {0}", filled with the slot the menu was opened from.
+        [SerializeField] private TMP_Text titleText;
 
         private SpellData[] pool;
         private Action<int, SpellData> onSpellPicked;
@@ -51,6 +40,8 @@ namespace TJ.Spells
 
         private readonly List<SpellBrowseSlot> rows = new();
         private int targetSlotIndex = -1;
+        // Spell test mode: the menu stays open and a click arms the spell instead of swapping a slot.
+        private bool castMode;
 
         /// <summary>
         /// Wires the fixed data once (pool + callbacks) and hides the menu. Called from
@@ -63,11 +54,9 @@ namespace TJ.Spells
             onHoverEnter = _onHoverEnter;
             onHoverExit = _onHoverExit;
 
-            // Reported rather than thrown: SpellManager.LoadSpellManager runs inside an async Task, so
-            // an exception here can be swallowed instead of reaching the console. The picker still
-            // works without the panel, it just cannot describe anything.
-            if(spellInfoPanel == null)
-                Debug.LogError($"SpellBrowseMenu: spellInfoPanel is not assigned on {name}. Spell descriptions will not render.");
+            // Rows capture the mode they were built in (cast or swap), and spell test mode can switch
+            // modes mid-deployment, so a re-initialise starts from fresh rows.
+            ClearBands(false);
 
             Close();
         }
@@ -75,6 +64,8 @@ namespace TJ.Spells
         public void Open(int _targetSlotIndex, SpellData[] equippedSpells, RectTransform anchor)
         {
             targetSlotIndex = _targetSlotIndex;
+            if(titleText != null)
+                titleText.text = string.Format(LocalizationManager.Instance.GetText("SpellBrowseTitle"), targetSlotIndex + 1);
             BuildRowsIfNeeded();
             RefreshEquippedState(equippedSpells);
             gameObject.SetActive(true);
@@ -87,13 +78,6 @@ namespace TJ.Spells
             LayoutRebuilder.ForceRebuildLayoutImmediate((RectTransform)transform);
 
             if(anchor != null) CenterHorizontallyOn(anchor);
-
-            // Opening describes the slot it was opened from. That is the content the cast button's
-            // floating tooltip used to carry - SpellManager suppresses that tooltip for the whole
-            // browsing window, so this panel is the only place the hovered slot is described.
-            SpellData spellInArmedSlot = SpellInArmedSlot(equippedSpells);
-            if(spellInArmedSlot != null) ShowSpellInfo(spellInArmedSlot);
-            else HideSpellInfo();
         }
 
         /// <summary>The spell currently occupying the slot the menu was opened for, or null.</summary>
@@ -117,67 +101,45 @@ namespace TJ.Spells
             rect.position = pos;
         }
 
+        /// <summary>
+        /// Spell test mode: opens the menu for casting rather than swapping. It stays open. With
+        /// <paramref name="alignTo"/> the menu's top-right corner moves onto that rect's.
+        /// </summary>
+        public void OpenForCasting(RectTransform alignTo = null)
+        {
+            castMode = true;
+            targetSlotIndex = -1;
+            if(titleText != null) titleText.text = LocalizationManager.Instance.GetText("SpellCastMenuTitle");
+            BuildRowsIfNeeded();
+            SetArmedSpell(null);
+            gameObject.SetActive(true);
+            LayoutRebuilder.ForceRebuildLayoutImmediate((RectTransform)transform);
+            if(alignTo != null) AlignTopRightTo(alignTo);
+        }
+
+        // World-space corners, so it holds whatever either rect's pivot, anchors or scale.
+        private void AlignTopRightTo(RectTransform target)
+        {
+            Vector3[] corners = new Vector3[4];
+            target.GetWorldCorners(corners);
+            Vector3 targetTopRight = corners[2];
+            ((RectTransform)transform).GetWorldCorners(corners);
+            transform.position += targetTopRight - corners[2];
+        }
+
+        /// <summary>Cast mode: lights the armed spell's tile, every other tile reads as available.</summary>
+        public void SetArmedSpell(SpellData armed)
+        {
+            foreach(SpellBrowseSlot row in rows)
+                row.SetState(armed != null && row.SpellData == armed ? SpellBrowseState.InArmedSlot : SpellBrowseState.Available);
+        }
+
         public void Close()
         {
+            castMode = false;
             targetSlotIndex = -1;
-            HideSpellInfo();
             if(gameObject.activeSelf) gameObject.SetActive(false);
         }
-
-        #region Spell Info Panel
-        /// <summary>
-        /// Renders the hovered row's spell in the fixed info panel. Called on hover only - nothing
-        /// clears it while the menu is open, so the last hovered spell stays readable.
-        /// </summary>
-        private void ShowSpellInfo(SpellData spell)
-        {
-            if(spell == null || spellInfoPanel == null) return;
-
-            spellInfoNameText.text = LocalizationManager.Instance.GetText(spell.Spell.ToString());
-            spellInfoDescriptionText.text = spell.GetLocalizedSpellDescription();
-
-            Color factionColour = ColorData.GetRaceDisplayColor(spell.Race);
-            if(spellInfoRaceText != null)
-            {
-                spellInfoRaceText.text = SpellRaceLabel.Get(spell.Race);
-                spellInfoRaceText.color = factionColour;
-                ReserveRaceTagWidth();
-            }
-            if(spellInfoAccentImage != null) spellInfoAccentImage.color = factionColour;
-
-            spellInfoPanel.CGEnable();
-            // CGEnable turns raycast blocking on. This panel is display only, and swallowing pointer
-            // events near the menu would read as "pointer left" and close it mid-browse.
-            spellInfoPanel.canvasGroup.blocksRaycasts = false;
-        }
-
-        // Gap between the end of the spell name and the start of the faction tag.
-        private const float RACE_TAG_GAP = 8f;
-
-        /// <summary>
-        /// The name and the faction tag share one line, name left and tag right. The tag's width
-        /// changes with the faction ("Common" vs "Taelindor Forest") and with the locale, so the
-        /// name's right margin is measured off the tag each time rather than authored once - a
-        /// fixed margin let "Artillery Bombardment" run under "Deepstone Hold". The name auto-sizes
-        /// down inside whatever is left.
-        /// </summary>
-        private void ReserveRaceTagWidth()
-        {
-            if(spellInfoNameText == null || spellInfoRaceText == null) return;
-            // GetPreferredValues includes the component's own margins; take them back out.
-            Vector4 tagMargin = spellInfoRaceText.margin;
-            float tagWidth = spellInfoRaceText.GetPreferredValues(spellInfoRaceText.text).x - tagMargin.x - tagMargin.z;
-            Vector4 margin = spellInfoNameText.margin;
-            margin.z = tagMargin.z + tagWidth + RACE_TAG_GAP;
-            spellInfoNameText.margin = margin;
-        }
-
-        private void HideSpellInfo()
-        {
-            if(spellInfoPanel == null) return;
-            spellInfoPanel.CGDisable();
-        }
-        #endregion
 
         // Band order: the Lesser spells lead, then the eight factions in Race enum order. Exhaustive
         // over Race, so no pool entry can be silently dropped.
@@ -220,7 +182,9 @@ namespace TJ.Spells
                     // give up overrideSorting while it was briefly a root canvas, and fail silently.
                     SpellBrowseSlot row = Instantiate(rowPrefab, group.TilesParent);
                     SpellData capturedSpell = spell;
-                    row.SetUp(capturedSpell, () => Pick(capturedSpell), ShowSpellInfo, NotifyAlreadyEquipped);
+                    row.SetUp(capturedSpell, () => Pick(capturedSpell), null, castMode ? null : NotifyAlreadyEquipped);
+                    // Added here, not on the prefab: Run History adds its own trigger to the same tile.
+                    row.gameObject.AddComponent<MemoriTooltipTrigger>().SetContentProvider(() => SpellTooltip.Build(capturedSpell));
                     rows.Add(row);
                 }
             }
@@ -262,6 +226,11 @@ namespace TJ.Spells
 
         private void Pick(SpellData spell)
         {
+            if(castMode)
+            {
+                onSpellPicked?.Invoke(-1, spell);
+                return;
+            }
             if(targetSlotIndex < 0) return;
             onSpellPicked?.Invoke(targetSlotIndex, spell);
         }
@@ -295,7 +264,12 @@ namespace TJ.Spells
             {
                 GameObject child = parent.GetChild(i).gameObject;
                 if(immediate) DestroyImmediate(child);
-                else Destroy(child);
+                else
+                {
+                    // Destroy lands at end of frame; detach now so the grid never lays out old and new rows together.
+                    child.transform.SetParent(null, false);
+                    Destroy(child);
+                }
             }
         }
 
@@ -310,11 +284,6 @@ namespace TJ.Spells
         // across the rows so all four can be styled in one pass. Preview objects are ordinary scene
         // objects, so CLEAR BEFORE SAVING - though BuildRowsIfNeeded now clears leftovers at runtime
         // too, so forgetting is not fatal.
-
-        // Editor-only placeholder, sized like a real description so wrapping can be judged. Not
-        // player-facing, so it is exempt from the no-hardcoded-strings rule.
-        private const string PREVIEW_DESCRIPTION =
-            "Preview text. This line exists to show how a two or three line spell description wraps inside the panel.";
 
         [ContextMenu("Preview/Build")]
         private void EditorBuildPreview()
@@ -343,7 +312,6 @@ namespace TJ.Spells
             targetSlotIndex = 1;
 
             int index = 0;
-            SpellData infoSample = null;
 
             foreach(Race race in GROUP_ORDER)
             {
@@ -367,8 +335,6 @@ namespace TJ.Spells
                     UnityEditor.Undo.RegisterCreatedObjectUndo(row.gameObject, "Build Spell Picker Preview");
                     row.SetUp(spell, null, null);
                     EditorApplyPreviewState(row, spell, index);
-
-                    if(infoSample == null && race != Race.Special) infoSample = spell;
                     index++;
                 }
             }
@@ -377,7 +343,6 @@ namespace TJ.Spells
             // them, or the preview shows the rule cutting through the text.
             LayoutRebuilder.ForceRebuildLayoutImmediate((RectTransform)transform);
 
-            EditorPreviewInfoPanel(infoSample != null ? infoSample : previewPool[0]);
             Debug.Log($"SpellBrowseMenu: preview built with {index} rows. Clear it before saving the scene.", this);
         }
 
@@ -407,34 +372,6 @@ namespace TJ.Spells
                 case 5:  row.SetState(SpellBrowseState.Equipped, 2);   break;
                 case 11: row.SetState(SpellBrowseState.Equipped, 3);   break;
                 default: row.SetState(SpellBrowseState.Available);     break;
-            }
-        }
-
-        /// <summary>
-        /// Fills the info panel without touching LocalizationManager or MemoriCanvasGroup - the first
-        /// would fabricate a phantom singleton GameObject in the open scene, and the second has not run
-        /// Awake in the Editor, so its cached canvasGroup may be null.
-        /// </summary>
-        private void EditorPreviewInfoPanel(SpellData sample)
-        {
-            if(sample == null) return;
-
-            if(spellInfoNameText != null) spellInfoNameText.text = sample.Spell.ToString();
-            if(spellInfoDescriptionText != null) spellInfoDescriptionText.text = PREVIEW_DESCRIPTION;
-
-            Color factionColour = ColorData.GetRaceDisplayColor(sample.Race);
-            if(spellInfoRaceText != null)
-            {
-                spellInfoRaceText.text = SpellRaceLabel.Get(sample.Race);
-                spellInfoRaceText.color = factionColour;
-                ReserveRaceTagWidth();
-            }
-            if(spellInfoAccentImage != null) spellInfoAccentImage.color = factionColour;
-
-            if(spellInfoPanel != null)
-            {
-                CanvasGroup group = spellInfoPanel.GetComponent<CanvasGroup>();
-                if(group != null) group.alpha = 1f;
             }
         }
 

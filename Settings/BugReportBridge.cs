@@ -3,6 +3,7 @@ using Memori.Localization;
 using Memori.Scenes;
 using Memori.Utilities;
 using Memori.Notifications;
+using TabletopTavern.Analytics;
 using UnityEngine;
 
 namespace TJ
@@ -16,6 +17,8 @@ namespace TJ
             reportABugScreen.OnBlankSubmit.AddListener(OnBlankSubmit);
             reportABugScreen.LoadedModsProvider = DescribeLoadedMods;
             reportABugScreen.GameStateProvider = DescribeGameState;
+            reportABugScreen.AnalyticsIdProvider = DescribeAnalyticsId;
+            reportABugScreen.ReportSent += OnReportSent;
         }
 
         private void OnDisable()
@@ -23,11 +26,23 @@ namespace TJ
             reportABugScreen.OnBlankSubmit.RemoveListener(OnBlankSubmit);
             reportABugScreen.LoadedModsProvider = null;
             reportABugScreen.GameStateProvider = null;
+            reportABugScreen.AnalyticsIdProvider = null;
+            reportABugScreen.ReportSent -= OnReportSent;
+        }
+
+        private static void OnReportSent(BugReportOutcome outcome)
+        {
+            GameEventTracker.BugReportSubmitted(outcome.Delivered, outcome.MessageUrl, outcome.CrashReportAttached, outcome.GameState);
         }
 
         private static string DescribeGameState()
         {
             return SceneHandler.Instance.CurrentGameState.ToString();
+        }
+
+        private static string DescribeAnalyticsId()
+        {
+            return GameEventTracker.InstallId;
         }
 
         // The boot snapshot of what ApplyModOverrides actually loaded, not modlist.json's current

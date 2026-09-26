@@ -186,8 +186,8 @@ namespace TJ.Event
             eventNameText.text = eventTitleLocalized;
             eventDescriptionText.text = eventDescriptionLocalized;
 
-            eventPanelCanvasGroup.canvasGroup.interactable = true;
-            eventPanelCanvasGroup.canvasGroup.blocksRaycasts = true;
+            eventPanelCanvasGroup.interactable = true;
+            eventPanelCanvasGroup.blocksRaycasts = true;
             eventPanelCanvasGroup.FadeInAsync();
             descMemoriCanvasGroup.FadeInAsync();
             TutorialManager.Instance.LoadStepsFromRandomSpot(new TutorialStep[1]{ TutorialData.EventExplanation });
@@ -275,6 +275,7 @@ namespace TJ.Event
             if (eventCamera.TryGetComponent<ParallaxCamera>(out var parallax)) parallax.enabled = false;
             IAudioRequester.Instance.PlaySFX(SFXData.ShakeDice);
             rollResultText.text = "";
+            RollOutcomeText.text = "";
             eventDescriptionText.text = "";
 
             rollBonus = 0;
@@ -319,9 +320,9 @@ namespace TJ.Event
             continueButtonText.text = acceptLocalized;
 
             //DifficultyMod 8
-            bool rerollLocked = CampaignManager.Instance.CampaignSaveManager.SaveData.difficultyLevel >= TT_Difficulty.Baron;
+            bool rerollLocked = DifficultyRules.EventRollsLocked(CampaignManager.Instance.CampaignSaveManager.SaveData.difficultyLevel);
             string difficultyLocalized = LocalizationManager.Instance.GetText("Difficulty");
-            string difficultyLevelLocalized = LocalizationManager.Instance.GetText("difficultyName" + (int)CampaignManager.Instance.CampaignSaveManager.SaveData.difficultyLevel);
+            string difficultyLevelLocalized = LocalizationManager.Instance.GetText(DifficultyData.GetDifficultyLevelData(CampaignManager.Instance.CampaignSaveManager.SaveData.difficultyLevel).difficultyName);
             rerollLockedButton.SetLockedState(rerollLocked, $"{difficultyLocalized}: {difficultyLevelLocalized}");
 
             reputationSlider.LoadReputationSlider(roll, this);
@@ -349,7 +350,6 @@ namespace TJ.Event
         private void ShowRowResult()
         {
             int modifiedRoll = roll + rollBonus;
-            rollResultText.text = modifiedRoll.ToString();
             rollTextObject.SetActive(true);
 
             if (modifiedRoll == 20)
@@ -365,7 +365,33 @@ namespace TJ.Event
                 eventRollOutcome = modifiedRoll >= selectedChoice.minimumRollNeeded ? EventRollOutcome.Success : EventRollOutcome.Failure;
             }
 
-            rollResultText.color = modifiedRoll >= selectedChoice.minimumRollNeeded ? Color.green : Color.red;
+            rollResultText.text = modifiedRoll.ToString();
+            rollResultText.color = modifiedRoll >= selectedChoice.minimumRollNeeded ? ColorVision.Good(Color.green) : ColorVision.Bad(Color.red);
+            RollOutcomeText.text = LocalizationManager.Instance.GetText(eventRollOutcome.ToString());
+            RollOutcomeText.color = rollResultText.color;
+        }
+
+        private TMP_Text _rollOutcomeText;
+
+        // The outcome word under the roll keeps pass and fail readable without colour; cloned so it shares the roll's font and outline.
+        private TMP_Text RollOutcomeText
+        {
+            get
+            {
+                if (_rollOutcomeText != null) return _rollOutcomeText;
+                _rollOutcomeText = Instantiate(rollResultText, rollResultText.transform.parent);
+                _rollOutcomeText.name = "Roll Outcome Text";
+                _rollOutcomeText.enableAutoSizing = false;
+                _rollOutcomeText.fontSize = rollResultText.fontSize * 0.45f;
+                _rollOutcomeText.alignment = TextAlignmentOptions.Center;
+                _rollOutcomeText.textWrappingMode = TextWrappingModes.NoWrap;
+                RectTransform source = rollResultText.rectTransform;
+                RectTransform rt = _rollOutcomeText.rectTransform;
+                rt.sizeDelta = new Vector2(source.rect.width * 3f, source.rect.height * 0.4f);
+                rt.anchoredPosition = source.anchoredPosition + new Vector2(0f, -source.rect.height * 0.85f);
+                _rollOutcomeText.text = "";
+                return _rollOutcomeText;
+            }
         }
         public void ModifyRoll(int _value)
         {
@@ -425,6 +451,10 @@ namespace TJ.Event
         }
         public TT_Event GetRandomEvent()
         {
+            // There are fewer events than a long endless run visits, so reshuffle once every event has been seen.
+            CampaignSaveData save = campaignSaveManager.SaveData;
+            if (save.eventOrdering == null || save.eventOrdering.Count == 0)
+                save.eventOrdering = EventData.GetEventOrdering(new System.Random(save.seed + save.bookNumber * 13 + save.activeMapLayer));
             TT_Event ttEvent = gc_Events[campaignSaveManager.SaveData.eventOrdering[0]];
             campaignSaveManager.SaveData.eventOrdering.RemoveAt(0);
             return ttEvent;

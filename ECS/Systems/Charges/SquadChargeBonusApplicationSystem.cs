@@ -57,13 +57,14 @@ partial struct SquadChargeBonusApplicationSystem : ISystem
 
             SquadStats squadStats = statsBlob.GetStats(squad.UnitName);
             int bonus = squadStats.ChargeBonus;
-            if (squad.Team == Team.Player && campaignSaveDataHolder.ActiveHeroID != -1)
+            BattleHeroContext hero = BattleHeroContext.For(campaignSaveDataHolder, squad.Team);
+            if (hero.HasHero)
             {
                 // Rule data lives in HeroBonusRuleData (Components assembly) - HeroBonusManager
                 // itself (main assembly) isn't visible from here.
-                float heroBonus = HeroBonusRuleEvaluator.SumHeroStatBonus(UnitStat.ChargeBonus, squad.UnitName, campaignSaveDataHolder.ActiveHeroID, squadStats, campaignSaveDataHolder.EnemyRace, bonus);
-                if (campaignSaveDataHolder.OnlySakuraUnits)
-                    heroBonus += HeroBonusRuleEvaluator.SumFactionStatBonus(UnitStat.ChargeBonus, campaignSaveDataHolder.PlayerHeroRace, bonus);
+                float heroBonus = HeroBonusRuleEvaluator.SumHeroStatBonus(UnitStat.ChargeBonus, squad.UnitName, hero.HeroID, squadStats, hero.EnemyRace, bonus);
+                if (hero.OnlySakuraUnits)
+                    heroBonus += HeroBonusRuleEvaluator.SumFactionStatBonus(UnitStat.ChargeBonus, hero.HeroRace, bonus);
                 bonus += (int)heroBonus;
             }
 

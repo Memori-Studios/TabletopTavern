@@ -27,5 +27,8 @@ namespace TJ.Spells
             color = Color.white;
             return false;
         }
+
+        // The unit card's spell badges need the name and description too, not just the sprite.
+        public static bool TryGetData(int spellId, out SpellData spellData) => _bySpellId.TryGetValue(spellId, out spellData);
     }
 }

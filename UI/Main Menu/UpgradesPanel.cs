@@ -13,6 +13,7 @@ using Memori.Localization;
 using Memori.Scenes;
 using System.Threading.Tasks;
 using UnityEngine.Serialization;
+using Memori.Utilities;
 
 
 namespace TJ.MainMenu
@@ -386,7 +387,7 @@ namespace TJ.MainMenu
                 string localizedRace = theme.Race == Race.Special
                     ? LocalizationManager.Instance.GetText("None")
                     : LocalizationManager.Instance.GetText(theme.Race.ToString());
-                string label = unlocked ? localizedRace : $"<color=red>{localizedRace}</color>";
+                string label = unlocked ? localizedRace : $"<color={ColorVision.BadHex("#FF0000")}>{localizedRace}</color>";
                 _tavernThemeDropdown.options.Add(new TMP_Dropdown.OptionData(label));
             }
 

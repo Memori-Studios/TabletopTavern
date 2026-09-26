@@ -231,10 +231,13 @@ namespace TJ
                 UnitAttribute grantedTrait = BattleManager.Instance.SquadManager.GetSquadPrestigeTrait(squadEntity.SquadId);
                 if (grantedTrait != UnitAttribute.None)
                     TabletopTavernConstants.SetAttribute(ref squadStats.SquadAttributes, grantedTrait);
-                // Hero-granted attributes (Deep Quivers, Powder Reserves) need the same merge.
-                if (squadEntity.SquadId > 0)
-                    foreach (var attributeBonus in HeroBonusManager.GetHeroAttributeBonus(squadEntity.UnitName, HeroBonusManager.Instance.ActiveHeroID))
+                // Hero-granted attributes (Deep Quivers, Powder Reserves) need the same merge, from this team's own hero.
+                Team squadTeam = squadEntity.SquadId > 0 ? Team.Player : Team.Enemy;
+                BattleHeroContext hero = BattleManager.Instance.SquadManager.HeroFor(squadTeam);
+                if (hero.HasHero)
+                    foreach (var attributeBonus in HeroBonusManager.GetHeroAttributeBonus(squadEntity.UnitName, hero.HeroID, hero.EnemyRace))
                         TabletopTavernConstants.SetAttribute(ref squadStats.SquadAttributes, attributeBonus.UnitAttribute);
+                bool heroFactionRules = squadTeam == Team.Player ? BattleManager.Instance.OnlySakuraUnits : hero.OnlySakuraUnits;
 
                 //Create Range Drawer for the squad
                 if (TabletopTavernConstants.FightsAtRange(unitType))
@@ -252,14 +255,13 @@ namespace TJ
                             ammunition += TabletopTavernConstants.DEEP_QUIVERS_AMMO_BONUS;
                     }
 
-                    // Hero-granted ammunition bonuses (e.g. Bertha/14 Supply Lines) now come from
-                    // HeroBonusManager's rule data instead of a hardcoded hero check.
-                    if (HeroBonusManager.Instance.ActiveHeroID != -1)
+                    // Hero-granted ammunition bonuses (e.g. Bertha/14 Supply Lines), from this team's own hero only.
+                    if (hero.HasHero)
                     {
-                        foreach (var bonus in HeroBonusManager.GetHeroStatBonus(UnitStat.Ammunition, squadEntity.UnitName, HeroBonusManager.Instance.ActiveHeroID, ammunition))
+                        foreach (var bonus in HeroBonusManager.GetHeroStatBonus(UnitStat.Ammunition, squadEntity.UnitName, hero.HeroID, ammunition, hero.EnemyRace))
                             ammunition += (int)bonus.Value;
-                        if (squadEntity.SquadId > 0 && BattleManager.Instance.OnlySakuraUnits)
-                            foreach (var bonus in HeroBonusManager.GetFactionBonusForHero(UnitStat.Ammunition, HeroBonusManager.Instance.ActiveHeroID))
+                        if (heroFactionRules)
+                            foreach (var bonus in HeroBonusManager.GetFactionBonusForHero(UnitStat.Ammunition, hero.HeroID))
                                 ammunition += (int)bonus.Value;
                     }
                     ecb.AddComponent(entity, new RangedSquad()
@@ -290,14 +292,13 @@ namespace TJ
                     int ammunition = squadStats.Ammunition + TabletopTavernConstants.PRESTIGE_AMMO_BONUS_ARTILLERY * BattleManager.Instance.SquadManager.GetSquadPrestige(squadEntity.SquadId);
                     if (squadStats.SquadAttributes.PowderReserves)
                         ammunition = (int)(ammunition * TabletopTavernConstants.POWDER_RESERVES_AMMO_MULTIPLIER);
-                    // Hero-granted ammunition bonuses (e.g. Bertha/14 Supply Lines) now come from
-                    // HeroBonusManager's rule data instead of a hardcoded hero check.
-                    if (HeroBonusManager.Instance.ActiveHeroID != -1)
+                    // Hero-granted ammunition bonuses (e.g. Bertha/14 Supply Lines), from this team's own hero only.
+                    if (hero.HasHero)
                     {
-                        foreach (var bonus in HeroBonusManager.GetHeroStatBonus(UnitStat.Ammunition, squadEntity.UnitName, HeroBonusManager.Instance.ActiveHeroID, ammunition))
+                        foreach (var bonus in HeroBonusManager.GetHeroStatBonus(UnitStat.Ammunition, squadEntity.UnitName, hero.HeroID, ammunition, hero.EnemyRace))
                             ammunition += (int)bonus.Value;
-                        if (squadEntity.SquadId > 0 && BattleManager.Instance.OnlySakuraUnits)
-                            foreach (var bonus in HeroBonusManager.GetFactionBonusForHero(UnitStat.Ammunition, HeroBonusManager.Instance.ActiveHeroID))
+                        if (heroFactionRules)
+                            foreach (var bonus in HeroBonusManager.GetFactionBonusForHero(UnitStat.Ammunition, hero.HeroID))
                                 ammunition += (int)bonus.Value;
                     }
                     ecb.AddComponent(entity, new RangedSquad() { });

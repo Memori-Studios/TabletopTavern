@@ -6,6 +6,7 @@ using System.Collections.Generic;
 using Unity.Entities;
 using TJ.Shapes;
 using Memori.Input;
+using Memori.Utilities;
 
 namespace TJ
 {
@@ -52,6 +53,10 @@ namespace TJ
         private ShapesBloom blastRingBloom;
         private bool _isCaster = false;
         private bool _hasBlastRing = false;
+        // A caster whose spell lands on its own side (Battle Brew, Runeward) never draws its cast in attack red.
+        private bool _castsOnFriends = false;
+        private bool _attackTargetIsFriendly = false;
+        private Color CastColor => _castsOnFriends ? MovementColor : AttackColor;
         // Resolving a squad id to its entity is not free (see TryGetHoverPreviewCenter), so the last
         // hovered squad is cached. 0 is "no squad hovered" in UIManager and no real squad carries it.
         private int _previewHoveredSquadId = 0;
@@ -68,8 +73,8 @@ namespace TJ
 
         #region Style shared with the caster leash
         // ShapesDrawingManager reads these off the prefab so the leash matches the arrow the order becomes.
-        public Color AttackColor => attackColor;
-        public Color MovementColor => movementColor;
+        public Color AttackColor => ColorVision.Bad(attackColor);
+        public Color MovementColor => ColorVision.Good(movementColor);
         public Polyline MovementLine => movementLine;
         public ShapeRenderer PointTriangle => pointTriangle;
         public float ApproachDashSize => approachDashSize;
@@ -155,6 +160,9 @@ namespace TJ
             movementLineBloom = movementLine.GetComponent<ShapesBloom>();
             triangleBloom = pointTriangle.GetComponent<ShapesBloom>();
             archerRangeBloom = archerAttackArc.GetComponent<ShapesBloom>();
+            ApplyMarkerScale(BattlefieldMarkerScale.Current);
+            BattlefieldMarkerScale.Changed -= ApplyMarkerScale;
+            BattlefieldMarkerScale.Changed += ApplyMarkerScale;
             gameObject.name = $"AttackArrow_{squadEntity.SquadId}_{squadEntity.UnitName}";
 
             SetUpBlastRadiusRing();
@@ -188,6 +196,7 @@ namespace TJ
 
             TJ.Spells.SpellData mageSpell = TabletopTavernData.Instance.SquadAssetsDictionary[squadEntity.UnitName].mageSpell;
             float blastRadius = mageSpell == null ? 0f : mageSpell.SpellRadius;
+            _castsOnFriends = mageSpell != null && mageSpell.TargetTeam == Team.Player;
 
             // A single-target spell, or a caster whose SquadData has no mageSpell at all (which
             // EntityWatcher already logs), has no footprint worth drawing - a zero-radius ring would
@@ -264,7 +273,7 @@ namespace TJ
             if (!show) return;
 
             PositionBlastRadiusRing(impactPoint);
-            blastRingBloom.SetColor(attackColor);
+            blastRingBloom.SetColor(CastColor);
             blastRingBloom.Bloom();
         }
 
@@ -276,6 +285,9 @@ namespace TJ
             center = Vector3.zero;
 
             if (!BattleManager.Instance.UnitSelectionManager.SelectedSquadIds.Contains(squadEntity.SquadId)) return false;
+
+            // A friendly-target spell never lands on the hovered enemy, so a footprint there would mislead.
+            if (_castsOnFriends) return false;
 
             // Negative ids are the enemy, 0 is nothing hovered. The right-click that issues a cast
             // order only accepts an enemy squad, so previewing on a friendly would advertise an
@@ -321,7 +333,8 @@ namespace TJ
             castApproachLine.DashSpace = DashSpace.Relative;
             castApproachLine.DashSize = approachDashSize;
             castApproachLine.DashSpacing = approachDashSpacing;
-            castApproachLine.Color = new Color(attackColor.r, attackColor.g, attackColor.b, movementLineBloom.BloomAmount);
+            Color cast = CastColor;
+            castApproachLine.Color = new Color(cast.r, cast.g, cast.b, movementLineBloom.BloomAmount);
             lineObject.SetActive(false);
         }
 
@@ -404,6 +417,7 @@ namespace TJ
             if(queuedOrders.Length > 0)
             {
                 _squadDestinationType = SquadDestinationType.Movement;
+                _attackTargetIsFriendly = false;
                 foreach(QueuedOrder currentOrder in queuedOrders)
                 {
                     if(currentOrder.Type == QueuedOrderType.Move)
@@ -435,6 +449,8 @@ namespace TJ
                             // Debug.Log($"[AttackArrow] Squad {squadEntity.SquadId}: Attack target {targetSquadId} exists={EntityManager.Exists(targetSquadEntity.SelfEntity)} but missing SquadMovementComponent → no destination added");
                         }
                         _squadDestinationType = SquadDestinationType.Attack;
+                        // Same sign = same side: a friendly caster walking in to cast on its own squad.
+                        _attackTargetIsFriendly = (targetSquadId > 0) == (squadEntity.SquadId > 0);
                     }
                 }
             }
@@ -603,7 +619,9 @@ namespace TJ
         private void SetArrowColor()
         {
             // The walk in to casting range is a move; the cast leg carries the red on its own line.
-            Color color = (_squadDestinationType == SquadDestinationType.Attack && !_isApproachingCast) ? attackColor : movementColor;
+            bool isAttack = _squadDestinationType == SquadDestinationType.Attack && !_isApproachingCast && !_attackTargetIsFriendly;
+            Color color = isAttack ? AttackColor : MovementColor;
+            SetHeadBoost(isAttack && ColorVision.IsOn ? AttackHeadBoost : 1f);
             movementLineBloom.SetColor(color);
             triangleBloom.SetColor(color);
             archerRangeBloom.SetColor(color);
@@ -612,8 +630,36 @@ namespace TJ
             triangleBloom.Bloom();
             archerRangeBloom.Bloom();
         }
+        // Line and head widths follow the marker setting; the arc radius is the real range and stays.
+        private float _baseLineThickness, _baseArcThickness;
+        private Vector3 _baseTriangleScale;
+        private bool _markerBaseCached;
+        private void ApplyMarkerScale(float scale)
+        {
+            if (!_markerBaseCached)
+            {
+                _baseLineThickness = movementLine.Thickness;
+                _baseArcThickness = archerAttackArc.Thickness;
+                _baseTriangleScale = pointTriangle.transform.localScale;
+                _markerBaseCached = true;
+            }
+            movementLine.Thickness = _baseLineThickness * scale;
+            archerAttackArc.Thickness = _baseArcThickness * scale;
+            pointTriangle.transform.localScale = _baseTriangleScale * scale * _headBoost;
+            if (castApproachLine != null) castApproachLine.Thickness = movementLine.Thickness;
+        }
+        // Colorblind Mode gives attack orders a larger head, so attack and move differ in shape as well as colour.
+        private const float AttackHeadBoost = 1.5f;
+        private float _headBoost = 1f;
+        private void SetHeadBoost(float boost)
+        {
+            if (Mathf.Approximately(_headBoost, boost) || !_markerBaseCached) return;
+            _headBoost = boost;
+            pointTriangle.transform.localScale = _baseTriangleScale * BattlefieldMarkerScale.Current * _headBoost;
+        }
         private void OnDestroy()
         {
+            BattlefieldMarkerScale.Changed -= ApplyMarkerScale;
             if (InputHandler.HasInstance)
             {
                 InputHandler.Instance.OnShowUnitMovement -= ToggleArrowSateToToggledOn;

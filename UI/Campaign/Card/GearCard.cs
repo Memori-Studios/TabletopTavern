@@ -75,7 +75,7 @@ public class GearCard : MonoBehaviour, IPointerEnterHandler, IPointerExitHandler
         if(gearName != null)
         {
             gearName.text = gearNameLocalized;
-            gearDescriptionText.text = gearDescLocalized;
+            KeywordText.Show(gearDescriptionText, $"{ColorData.GearRarityLabel(gear.GearRarity)}\n{KeywordText.Render(gearDescLocalized)}");
             gearFlavorText.text = gearFlavorLocalized;
         }
 
