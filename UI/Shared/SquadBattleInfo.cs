@@ -113,10 +113,9 @@ namespace TJ
         [Header("Battlefield Attributes")]
         [SerializeField] private UnitAttributesUI inForestAttribute;
         [SerializeField] private UnitAttributesUI inSwampAttribute, isChargingAttribute, inCombatAttribute, isTerrifiedAttribute, isExhaustedAttribute, isOutOfAmmoAttribute, bloodFrenzyAttribute, rageAttribute, armorSunderedAttribute, isOnFireAttribute, garrisonDefenderAttribute, defendersResolveAttribute;
-        // Template for the spell badges (it was the Hunter's Mark badge). Optional because the run-setup
-        // copies of this panel have no live squad.
+        // The old Hunter's Mark badge, kept hidden: lasting spells are listed on SquadHoveredTooltip instead.
+        // Optional because the run-setup copies of this panel have no live squad.
         [SerializeField] private UnitAttributesUI huntersMarkAttribute;
-        private readonly List<UnitAttributesUI> spellStatusBadges = new();
 
         int currentEntityCount, maxEntityCount, prestige, health, maxHealth, battlefieldBonusCount, lastCrashingHordeStacks = -1, lastDeathcryBonus = -1, lastHuntersPatienceBonus = -1, lastKenseiEyeStage = -1, lastOathcarvedDeaths = -1, lastApexHuntersStacks = -1, lastAmmunition = -1, lastHealth = -1, lastEntityCount = -1;
         UnitAttribute prestigeTrait;
@@ -352,7 +351,6 @@ namespace TJ
             if (ammoRefreshTimer >= AMMO_REFRESH_INTERVAL)
             {
                 ammoRefreshTimer = 0f;
-                RefreshSpellStatuses(entityManager);
                 if (entityManager.HasComponent<SquadAmmunition>(squadEntity.SelfEntity))
                 {
                     int currentAmmunition = entityManager.GetComponentData<SquadAmmunition>(squadEntity.SelfEntity).Value;
@@ -443,10 +441,12 @@ namespace TJ
                 } 
             }
             unitNameText.text = displayName;
-            string unitTypeLocalised = LocalizationManager.Instance.GetText(squadStats.unitType.ToString());
+            // A class with a keyword is tagged, so hovering it says which gear it gets; Structure has none.
+            string unitTypeKey = squadStats.unitType.ToString();
+            string unitTypeLabel = KeywordRegistry.TryGet(unitTypeKey, out _) ? $"[{unitTypeKey}]" : LocalizationManager.Instance.GetText(unitTypeKey);
             string unitSizeLocalised = (squadStats.unitSize != UnitSize.Artillery && squadStats.unitType != UnitType.Structure) ? " " + LocalizationManager.Instance.GetText(squadStats.unitSize.ToString()) : "";
 
-            unitTypeText.text = $"{unitTypeLocalised}{unitSizeLocalised}";
+            KeywordText.Apply(unitTypeText, $"{unitTypeLabel}{unitSizeLocalised}");
 
             // unitCount.text = $"{TabletopTavernData.Instance.GetSquadCurrentUnitCount(squadToLoad)} ({maxEntityCount})";
             unitIcon.sprite = TabletopTavernData.Instance.GetSquadTypeIcon(squadStats.unitName);
@@ -849,7 +849,7 @@ namespace TJ
                 armorSunderedAttribute.Load(UnitAttribute.Emblazing);
                 armorSunderedAttribute.SetUpTooltip();
             }
-            RefreshSpellStatuses(entityManager);
+            if (huntersMarkAttribute != null) huntersMarkAttribute.gameObject.SetActive(false);
             isOnFireAttribute.gameObject.SetActive(entityManager.IsComponentEnabled<TakingFireDamage>(squadEntity.SelfEntity));
             if (isOnFireAttribute.gameObject.activeSelf)
             {
@@ -862,35 +862,6 @@ namespace TJ
             defendersResolveAttribute.gameObject.SetActive(entityManager.HasComponent<DefendersResolveComponent>(squadEntity.SelfEntity));
             if (defendersResolveAttribute.gameObject.activeSelf)
                 defendersResolveAttribute.Load(UnitCondition.DefendersResolve);
-        }
-        // One badge per lasting spell on the squad, read from the same buffer as the health bar icons. They
-        // carry a countdown, so unlike the other badges they are re-read on the ammo tick while the panel is up.
-        private void RefreshSpellStatuses(EntityManager entityManager)
-        {
-            if (huntersMarkAttribute == null) return;
-            huntersMarkAttribute.gameObject.SetActive(false);
-
-            int shown = 0;
-            if (entityManager.HasBuffer<SpellStatusBufferElement>(squadEntity.SelfEntity))
-            {
-                DynamicBuffer<SpellStatusBufferElement> buffer = entityManager.GetBuffer<SpellStatusBufferElement>(squadEntity.SelfEntity, true);
-                double now = World.DefaultGameObjectInjectionWorld.Time.ElapsedTime;
-                for (int i = 0; i < buffer.Length; i++)
-                {
-                    // Expired entries stay until a writer prunes them, as in SquadFlagGameObject.HandleSpellStatus.
-                    if (buffer[i].ExpiresAtTime <= now) continue;
-                    if (!TJ.Spells.SpellStatusIcons.TryGetData(buffer[i].SpellId, out TJ.Spells.SpellData spell)) continue;
-
-                    if (shown == spellStatusBadges.Count)
-                        spellStatusBadges.Add(Instantiate(huntersMarkAttribute, huntersMarkAttribute.transform.parent));
-                    UnitAttributesUI badge = spellStatusBadges[shown++];
-                    badge.gameObject.SetActive(true);
-                    bool zone = !spell.IsOneOff && spell.TickInterval > 0f;
-                    badge.LoadSpell(spell, (float)(buffer[i].ExpiresAtTime - now), !zone);
-                }
-            }
-            for (int i = shown; i < spellStatusBadges.Count; i++)
-                spellStatusBadges[i].gameObject.SetActive(false);
         }
         private void TurnOffBattlefieldConditions()
         {
@@ -905,7 +876,6 @@ namespace TJ
             rageAttribute.gameObject.SetActive(false);
             armorSunderedAttribute.gameObject.SetActive(false);
             if (huntersMarkAttribute != null) huntersMarkAttribute.gameObject.SetActive(false);
-            foreach (UnitAttributesUI badge in spellStatusBadges) badge.gameObject.SetActive(false);
             isOnFireAttribute.gameObject.SetActive(false);
             garrisonDefenderAttribute.gameObject.SetActive(false);
             defendersResolveAttribute.gameObject.SetActive(false);

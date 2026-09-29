@@ -186,7 +186,9 @@ namespace TJ.MainMenu
             unitName.text = T(unit.ToString());
             unitTypeIcon.sprite = TabletopTavernData.Instance.GetSquadTypeIcon(unit);
             string size = stats.unitSize != UnitSize.Artillery && stats.unitType != UnitType.Structure ? " " + T(stats.unitSize.ToString()) : string.Empty;
-            unitType.text = T(stats.unitType.ToString()) + size;
+            // A class with a keyword is tagged, so hovering it says which gear it gets; Structure has none.
+            string typeKey = stats.unitType.ToString();
+            KeywordText.Apply(unitType, (KeywordRegistry.TryGet(typeKey, out _) ? $"[{typeKey}]" : T(typeKey)) + size);
             unitTier.Set(T(stats.RarityTier.ToString()), (Color)ColorData.GetRarityTierColor(stats.RarityTier));
             unitNotFound.gameObject.SetActive(!found);
 

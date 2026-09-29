@@ -125,8 +125,8 @@ partial struct SpellSystem : ISystem
 
                     if (SystemAPI.HasComponent<Health>(hitEntity) && SystemAPI.GetComponent<Health>(hitEntity).Value <= 0) continue;
 
-                    DynamicBuffer<DamageBufferElement> damageBuffer = SystemAPI.GetBuffer<DamageBufferElement>(hitEntity);
-                    damageBuffer.Add(damageBufferElement);
+                    if (!spellEntity.ValueRO.SkipsDamage)
+                        SystemAPI.GetBuffer<DamageBufferElement>(hitEntity).Add(damageBufferElement);
 
                     // Zone spells have no squad-level tag, so each tick stamps the parent squad's status entry
                     // to outlive the next tick by half a second; a squad that leaves the zone drops it then.

@@ -76,8 +76,8 @@ namespace TJ.Event
         [SerializeField] private MetaprogressionModel _eventDoubleRewardsMetaprogressionModel;
         [SerializeField] private MetaprogressionModel _eventReducedRollRequirementsMetaprogressionModel;
 
-        TT_Event[] gc_Events;
-        TT_Event gc_Event;
+        EventDefinitionSO[] gc_Events;
+        EventDefinitionSO gc_Event;
 
         MemoriCanvasGroup eventPanelCanvasGroup;
         List<EventChoiceDisplay> eventChoices = new List<EventChoiceDisplay>();
@@ -88,9 +88,11 @@ namespace TJ.Event
         [SerializeField] bool rollAccepted = false;
         int rollBonus = 0;
         int roll = 0;
+        int selectedChoiceIndex;
+        // A d20 locked before a quit; RollDice shows it instead of drawing a new one.
+        int resumeRoll = 0;
         bool eventRolled = false;
         public bool CanReroll => !rollAccepted && eventRolled;
-        string collapsedEventName;
         private void Awake()
         {
             originalRotation = eventCamera.transform.rotation;
@@ -175,14 +177,17 @@ namespace TJ.Event
                 startLitGuidance.SetActive(false);
             }
 
-            gc_Event = GetRandomEvent();
+            NodeResume resume = campaignSaveManager.SaveData.nodeResume;
+            EventDefinitionSO resumeEvent = resume.active && resume.nodeType == NodeType.Event
+                ? System.Array.Find(gc_Events, x => x.TableKey == resume.eventKey)
+                : null;
+            gc_Event = resumeEvent != null ? resumeEvent : GetRandomEvent();
             string chapterLocalized = LocalizationManager.Instance.GetText("Chapter");
             chapterNumberText.text = $"{chapterLocalized} {MemoriUI.ConvertNumberToRomanNumeral(_chapter + 1)}";
 
             //localization
-            collapsedEventName = gc_Event.EventName.Replace(" ", "");
-            string eventTitleLocalized = LocalizationManager.Instance.GetEventString(collapsedEventName + "Name");
-            string eventDescriptionLocalized = LocalizationManager.Instance.GetEventString(collapsedEventName + "Desc");
+            string eventTitleLocalized = LocalizationManager.Instance.GetEventString(gc_Event.NameKey);
+            string eventDescriptionLocalized = LocalizationManager.Instance.GetEventString(gc_Event.DescriptionKey);
             eventNameText.text = eventTitleLocalized;
             eventDescriptionText.text = eventDescriptionLocalized;
 
@@ -209,32 +214,50 @@ namespace TJ.Event
             claimedByDestiny.SetActive(false);
 
             await Task.Delay(500);
-            for (int i = 0; i < gc_Event.EventChoices.Length; i++)
+            for (int i = 0; i < gc_Event.Choices.Length; i++)
             {
+                EventChoice choice = gc_Event.Choices[i];
+                if (!campaignSaveManager.MeetsEventRequirements(choice)) continue;
                 EventChoiceDisplay eventChoise = Instantiate(eventChoicePrefab, eventChoicesParent);
-                EventChoice choice = gc_Event.EventChoices[i];
                 if(SaveDataHandler.IsMetaprogressionNodeUnlocked(_eventReducedRollRequirementsMetaprogressionModel)) {
                     choice.minimumRollNeeded = math.max(1, choice.minimumRollNeeded - _eventReducedRollRequirementsMetaprogressionModel.NodeValue);
                 }
-                eventChoise.LoadEventChoice(choice, this, collapsedEventName + i);
+                eventChoise.LoadEventChoice(choice, this, gc_Event.ChoiceKey(i));
                 eventChoices.Add(eventChoise);
                 await Task.Delay(100);
+            }
+
+            if (resumeEvent != null)
+            {
+                EventChoiceDisplay lockedChoice = eventChoices.Find(x => x.Index == resume.choiceIndex);
+                if (lockedChoice != null)
+                {
+                    resumeRoll = resume.roll;
+                    lockedChoice.ResumeSelection();
+                }
+                else Debug.LogError($"[Event] Locked choice {resume.choiceIndex} of {resume.eventKey} is not on the panel");
             }
         }
         public async void ChoiceSelected(EventChoice _eventChoice, int _index)
         {
             selectedChoice = _eventChoice;
+            selectedChoiceIndex = _index;
             IAudioRequester.Instance.PlaySFX(SFXData.ChoiceMade);
             // descriptionObject.SetActive(false);
             eventChoices.ForEach(x => x.Disable());
             startLitGuidance.SetActive(false);
 
-            RollDice();
-
-            uiBackgroundCanvasGroup.FadeOutAsync(0.25f);
+            if (_eventChoice.Kind == EventChoiceKind.Roll)
+            {
+                RollDice();
+                uiBackgroundCanvasGroup.FadeOutAsync(0.25f);
+            }
+            else ResolveWithoutRoll();
 
             while (!rollAccepted)
             {
+                // A quit to the menu unloads the panel before the roll is accepted; stop instead of waiting forever.
+                if (this == null) return;
                 await Task.Yield();
             }
 
@@ -254,7 +277,7 @@ namespace TJ.Event
                 Debug.Log($"Doubled Event Gold Rewards!");
             }
 
-            string eventOutcomeDescription = LocalizationManager.Instance.GetEventString(collapsedEventName + _index + eventRollOutcome.ToString() + "OutcomeDesc");
+            string eventOutcomeDescription = LocalizationManager.Instance.GetEventString(gc_Event.OutcomeKey(_index, eventRollOutcome));
             outcomeDescriptionText.text = eventOutcomeDescription;
 
             //Critical Success, Success, Failure, Critical Failure
@@ -264,6 +287,7 @@ namespace TJ.Event
             eventRewardsDisplay.gameObject.SetActive(true);
 
             await Task.Delay(500);
+            campaignSaveManager.RecordEventOutcome(EventData.HistoryEntry(gc_Event, _index, eventRollOutcome));
             campaignSaveManager.AddEventReward(eventReward);
             eventRewardsDisplay.LoadEventRewards(eventReward);
         }
@@ -279,13 +303,30 @@ namespace TJ.Event
             eventDescriptionText.text = "";
 
             rollBonus = 0;
-            System.Random random = campaignSaveManager.GetCampaignRandom();
-            roll = random.Next(1, 21);
-            if (campaignSaveManager.FateshineElixirArmed)
+            if (resumeRoll > 0)
             {
-                roll = 20;
-                campaignSaveManager.ConsumeFateshineElixir();
+                roll = resumeRoll;
+                resumeRoll = 0;
             }
+            else
+            {
+                System.Random random = campaignSaveManager.GetCampaignRandom();
+                roll = random.Next(1, 21);
+                if (campaignSaveManager.FateshineElixirArmed)
+                {
+                    roll = 20;
+                    campaignSaveManager.ConsumeFateshineElixir();
+                }
+            }
+            // Locked before the die is shown, so a quit to the menu cannot replay the event knowing this roll.
+            campaignSaveManager.LockNodeResult(new NodeResume
+            {
+                nodeIndex   = mapSceneUIManager.LayerNodeSelected,
+                nodeType    = NodeType.Event,
+                eventKey    = gc_Event.TableKey,
+                choiceIndex = selectedChoiceIndex,
+                roll        = roll,
+            });
 
             //old
             // if (CampaignManager.Instance.GearManager.CheckForGear(GearID.Shungite)) roll = math.clamp(roll, 2, 20);
@@ -299,17 +340,20 @@ namespace TJ.Event
             physicsDie.ResetDie();
 
             await Task.Delay(1000);
+            if (this == null) return;
 
             physicsDie.gameObject.SetActive(false);
             diceRollAnimator.gameObject.SetActive(true);
             diceRollAnimator.Play("Dice_" + roll);
 
             await Task.Delay(500);
+            if (this == null) return;
 
             rollTextObject.SetActive(true);
             rollResultText.text = roll.ToString();
 
             await Task.Delay(500);
+            if (this == null) return;
 
             if (roll == 20) SteamAchievements.Unlock(AchievementId.Roll20);
             if (roll == 1) SteamAchievements.Unlock(AchievementId.SnakeEyes);
@@ -346,6 +390,16 @@ namespace TJ.Event
                     break;
             }
             eventRolled = true;
+        }
+        // Pay, Sacrifice and Walk away skip the die and take the success outcome.
+        private void ResolveWithoutRoll()
+        {
+            TutorialManager.Instance.CompleteStepCheck(TutorialStepEnum.EventExplanation);
+            rollBonus = 0;
+            eventRollOutcome = EventRollOutcome.Success;
+            eventDescriptionText.text = "";
+            acceptRollButton.gameObject.SetActive(true);
+            AcceptRoll();
         }
         private void ShowRowResult()
         {
@@ -404,7 +458,6 @@ namespace TJ.Event
             outcomeDescriptionText.enabled = true;
             uiBackgroundCanvasGroup.FadeInAsync(0.25f);
             rollAccepted = true;
-            if (CampaignManager.Instance.GearManager.CheckForGear(GearID.TowerShields)) rollBonus /= 2;
             string localizedString = LocalizationManager.Instance.GetText("Cost");
             CampaignManager.Instance.GoldManager.ModifyGold(-rollBonus, localizedString);
             rerollButton.gameObject.SetActive(false);
@@ -449,15 +502,21 @@ namespace TJ.Event
         {
             mapSceneUIManager.TryDrainPendingPrestigeChoices(() => mapSceneUIManager.CompleteLayerAction());
         }
-        public TT_Event GetRandomEvent()
+        public EventDefinitionSO GetRandomEvent()
         {
-            // There are fewer events than a long endless run visits, so reshuffle once every event has been seen.
             CampaignSaveData save = campaignSaveManager.SaveData;
-            if (save.eventOrdering == null || save.eventOrdering.Count == 0)
-                save.eventOrdering = EventData.GetEventOrdering(new System.Random(save.seed + save.bookNumber * 13 + save.activeMapLayer));
-            TT_Event ttEvent = gc_Events[campaignSaveManager.SaveData.eventOrdering[0]];
-            campaignSaveManager.SaveData.eventOrdering.RemoveAt(0);
-            return ttEvent;
+            MigrateLegacyEventOrdering(save);
+            return EventData.PickEvent(gc_Events, campaignSaveManager.GetEventDrawContext(), save.seenEvents, campaignSaveManager.GetCampaignRandom());
+        }
+        // Saves from before the registry list the first ten registry positions still to come; the rest of those ten were seen.
+        private void MigrateLegacyEventOrdering(CampaignSaveData _save)
+        {
+            const int LegacyEventCount = 10;
+            if (_save.eventOrdering == null || _save.eventOrdering.Count == 0) return;
+            for (int i = 0; i < LegacyEventCount && i < gc_Events.Length; i++)
+                if (!_save.eventOrdering.Contains(i) && !_save.seenEvents.Contains(gc_Events[i].TableKey))
+                    _save.seenEvents.Add(gc_Events[i].TableKey);
+            _save.eventOrdering.Clear();
         }
         public void HideActionButton()
         {
@@ -481,10 +540,8 @@ namespace TJ.Event
             // Copy the modifiers list so AddRange (double-rewards) never mutates the original EventChoice data.
             return new EventReward
             {
-                EventRewardTitle = _eventChoice.eventChoiceTitle,
                 EventOutcome = new EventOutcome
                 {
-                    OutcomeDescription       = source.OutcomeDescription,
                     EventOutcomeModifiers    = new List<EventOutcomeModifier>(source.EventOutcomeModifiers ?? new()),
                 },
             };
@@ -499,6 +556,7 @@ namespace TJ.Event
             Vector3 startPos = eventCamera.transform.position;
             while (lookAtTime > 0)
             {
+                if (this == null) return;
                 lookAtTime -= Time.deltaTime;
 
                 if (_overheadCameraTransform != null)

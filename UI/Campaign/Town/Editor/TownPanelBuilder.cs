@@ -722,13 +722,8 @@ namespace TJ.Town.EditorTools
             GameObject enter = Instance(primaryButton, action, "Enter Town");
             Fixed(enter, 250f, 90f);
             Localize(Child<TMP_Text>(enter.transform, "Button Label"), "EnterTown");
-            GameObject leave = Instance(primaryButton, action, "Continue");
-            Fixed(leave, 250f, 90f);
-            Localize(Child<TMP_Text>(leave.transform, "Button Label"), "continueButton");
-            leave.SetActive(false);
             TMP_Text notTaken = NotTaken(action, "townSackedInstead");
             Ref(so, "enterButton", enter.GetComponent<Button>());
-            Ref(so, "enterContinueButton", leave.GetComponent<Button>());
             Ref(so, "enterNotTaken", notTaken.gameObject);
         }
 
@@ -815,13 +810,8 @@ namespace TJ.Town.EditorTools
             Fixed(fight, 250f, 90f);
             Localize(Child<TMP_Text>(fight.transform, "Button Label"), "FightGarrison");
             RedButton(fight);
-            GameObject leave = Instance(primaryButton, action, "Continue");
-            Fixed(leave, 250f, 90f);
-            Localize(Child<TMP_Text>(leave.transform, "Button Label"), "continueButton");
-            leave.SetActive(false);
             TMP_Text notTaken = NotTaken(action, "townEnteredInstead");
             Ref(so, "fightButton", fight.GetComponent<Button>());
-            Ref(so, "fightContinueButton", leave.GetComponent<Button>());
             Ref(so, "fightNotTaken", notTaken.gameObject);
         }
         #endregion

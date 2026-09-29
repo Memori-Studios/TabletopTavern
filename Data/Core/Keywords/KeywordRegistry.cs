@@ -108,6 +108,10 @@ namespace TJ
 
             Add(new Keyword("Ranged", KeywordKind.UnitClass));
             Add(new Keyword("Melee", KeywordKind.UnitClass));
+            // Their own classes, so gear text can say a [Ranged] bonus leaves them out.
+            Add(new Keyword("Artillery", KeywordKind.UnitClass));
+            Add(new Keyword("Hybrid", KeywordKind.UnitClass));
+            Add(new Keyword("Mage", KeywordKind.UnitClass));
             Add(new Keyword("Cavalry", KeywordKind.UnitClass));
             Add(new Keyword("Monstrous", KeywordKind.UnitClass));
             // The SingleUnit key reads "Monstrous" on unit cards, so the keyword keeps its own name.

@@ -18,30 +18,34 @@ using Memori.Audio;
 using UnityEngine.AddressableAssets;
 using Memori.Notifications;
 using TabletopTavern.Analytics;
+using Memori.Tooltip;
 
 namespace TJ.MainMenu
 {
     public class MainMenu : MonoBehaviour
     {
-        [SerializeField] private MainMenuPanel mainMenuPanel, playPanel, upgradesPanel, questsPanel, runHistoryPanel, leaderboardPanel, exitPanel, modsPanel;
+        [SerializeField] private MainMenuPanel mainMenuPanel, playPanel, upgradesPanel, exitPanel, modsPanel;
 
         [Header("Buttons")]
         [SerializeField] private Button playPanelButton;
-        [SerializeField] private Button upgradesPanelButton, questsPanelButton, collectionPanelButton, settingsPanelButton, exitPanelButton, abandonRunButton, customBattleButton, modsPanelButton;
+        [SerializeField] private Button upgradesPanelButton, collectionPanelButton, settingsPanelButton, exitPanelButton, abandonRunButton, customBattleButton, modsPanelButton;
 
         [Header("Run Summary")]
         [SerializeField] private TMP_Text runSummaryText;
-        // The Play button grows to fit the hero and act line under its label while a run is in progress.
+        [SerializeField] private RectTransform continueRow;
+        // The Play row grows to fit the hero and act line under its label while a run is in progress.
         private const float PlayButtonHeight = 45f;
         private const float PlayButtonHeightWithSummary = 62f;
+        // Play leaves room on its right for the 48 px abandon button and a 6 px gap, so its label shrinks to fit.
+        private const float AbandonButtonSpace = 54f;
+        private const float PlayLabelMaxSize = 20f;
+        private const float PlayLabelMaxSizeWithSummary = 17f;
 
         [Header("Collection Button Badge")]
         [SerializeField] private TMP_Text collectionTotalText;
         [SerializeField] private GameObject collectionUnacknowledgedIndicator;
 
-        [Header("Quests Button Badge")]
-        [SerializeField] private TMP_Text questsCompletedText;
-        enum PanelType { Main, Play, Upgrades, Quests, RunHistory, Leaderboard, Collection, Options, Exit, Mods }
+        enum PanelType { Main, Play, Upgrades, Collection, Options, Exit, Mods }
         MainMenuPanel currentPanel;
         bool _isPanelTransitioning;
         [SerializeField] private Canvas mainMenuCanvas;
@@ -87,7 +91,6 @@ namespace TJ.MainMenu
             abandonRunNoButton.onClick.AddListener(CancelAbandonRun);
             customBattleButton.onClick.AddListener(() => HandleCustomBattle());
             upgradesPanelButton.onClick.AddListener(() => OpenPanel(PanelType.Upgrades));
-            questsPanelButton.onClick.AddListener(() => OpenPanel(PanelType.Quests));
             collectionPanelButton.onClick.AddListener(() => OpenPanel(PanelType.Collection));
             modsPanelButton.onClick.AddListener(() => OpenPanel(PanelType.Mods));
             settingsPanelButton.onClick.AddListener(() => OpenSettingsPanel());
@@ -98,19 +101,9 @@ namespace TJ.MainMenu
             deleteDemoSaveButton.onClick.AddListener(DeleteDemoSave);
             demoSaveImportCanvasGroup.CGDisable();
 
-#if !SPELLS
-            // The Records button opens the Quests board, which lists every achievement in the registry,
-            // half of which only exist on the Steam backend from the SPELLS release on. Run History and
-            // the Leaderboard are tabs of the same screen and are revealed with the same release.
-            questsPanelButton.gameObject.SetActive(false);
-#endif
-
             mainMenuPanel.SetUp(this);
             playPanel.SetUp(this);
             upgradesPanel.SetUp(this);
-            questsPanel.SetUp(this);
-            runHistoryPanel.SetUp(this);
-            leaderboardPanel.SetUp(this);
             exitPanel.SetUp(this);
             modsPanel.SetUp(this);
             SceneHandler.Instance.OnGameStateChanged += OnGameStateChanged;
@@ -222,15 +215,6 @@ namespace TJ.MainMenu
                 case PanelType.Upgrades:
                     SwitchToUpgradesPanel();
                     break;
-                case PanelType.Quests:
-                    SwitchToQuestsPanel();
-                    break;
-                case PanelType.RunHistory:
-                    SwitchToRunHistoryPanel();
-                    break;
-                case PanelType.Leaderboard:
-                    SwitchToLeaderboardPanel();
-                    break;
                 case PanelType.Mods:
                     currentPanel.ClosePanel();
                     playPanel.gameObject.SetActive(false);
@@ -256,9 +240,6 @@ namespace TJ.MainMenu
                 PanelType.Main => mainMenuPanel,
                 PanelType.Play => playPanel,
                 PanelType.Upgrades => upgradesPanel,
-                PanelType.Quests => questsPanel,
-                PanelType.RunHistory => runHistoryPanel,
-                PanelType.Leaderboard => leaderboardPanel,
                 PanelType.Exit => exitPanel,
                 PanelType.Mods => modsPanel,
                 _ => currentPanel
@@ -277,8 +258,8 @@ namespace TJ.MainMenu
                 if (panelToClose != mainMenuPanel)
                     panelToClose.ClosePanel();
 
-                // Mods, Quests, Run History and Leaderboard have no fade to wait out, so returning from them is immediate.
-                if (panelToClose != modsPanel && panelToClose != questsPanel && panelToClose != runHistoryPanel && panelToClose != leaderboardPanel && panelToClose != mainMenuPanel)
+                // Mods has no fade to wait out, so returning from it is immediate.
+                if (panelToClose != modsPanel && panelToClose != mainMenuPanel)
                     await Task.Delay(500);
 
                 mainMenuPanel.gameObject.SetActive(true);
@@ -286,8 +267,6 @@ namespace TJ.MainMenu
                 depthField.focusDistance.value = 9f;
 
                 UpdateCurrentPanel(PanelType.Main);
-                // Cheap, and the board is the one place a player goes to look at their count.
-                RefreshQuestsButtonState();
             }
             finally { _isPanelTransitioning = false; }
         }
@@ -320,31 +299,6 @@ namespace TJ.MainMenu
                 UpdateCurrentPanel(PanelType.Upgrades);
             }
             finally { _isPanelTransitioning = false; }
-        }
-        // Same shape as the Mods branch of OpenPanel: no door animation, so no delay either way.
-        public void SwitchToQuestsPanel()
-        {
-            if (_isPanelTransitioning) return;
-            currentPanel.ClosePanel();
-            questsPanel.OpenPanel();
-            depthField.focusDistance.value = 3f;
-            UpdateCurrentPanel(PanelType.Quests);
-        }
-        public void SwitchToRunHistoryPanel()
-        {
-            if (_isPanelTransitioning) return;
-            currentPanel.ClosePanel();
-            runHistoryPanel.OpenPanel();
-            depthField.focusDistance.value = 3f;
-            UpdateCurrentPanel(PanelType.RunHistory);
-        }
-        public void SwitchToLeaderboardPanel()
-        {
-            if (_isPanelTransitioning) return;
-            currentPanel.ClosePanel();
-            leaderboardPanel.OpenPanel();
-            depthField.focusDistance.value = 3f;
-            UpdateCurrentPanel(PanelType.Leaderboard);
         }
         public void OpenSettingsPanel()
         {
@@ -462,7 +416,9 @@ namespace TJ.MainMenu
             if (!campaignSaveDataExists)
             {
                 runSummaryText.gameObject.SetActive(false);
-                playRect.sizeDelta = new Vector2(playRect.sizeDelta.x, PlayButtonHeight);
+                continueRow.sizeDelta = new Vector2(continueRow.sizeDelta.x, PlayButtonHeight);
+                playRect.offsetMax = new Vector2(0f, playRect.offsetMax.y);
+                playLabel.fontSizeMax = PlayLabelMaxSize;
                 playLabel.margin = new Vector4(labelMargin.x, labelMargin.y, labelMargin.z, 0f);
                 return;
             }
@@ -472,12 +428,15 @@ namespace TJ.MainMenu
             string act = LocalizationManager.Instance.GetText("Act");
             runSummaryText.text = $"{heroName}  -  {act} {save.bookNumber}";
             runSummaryText.gameObject.SetActive(true);
-            playRect.sizeDelta = new Vector2(playRect.sizeDelta.x, PlayButtonHeightWithSummary);
+            continueRow.sizeDelta = new Vector2(continueRow.sizeDelta.x, PlayButtonHeightWithSummary);
+            playRect.offsetMax = new Vector2(-AbandonButtonSpace, playRect.offsetMax.y);
+            playLabel.fontSizeMax = PlayLabelMaxSizeWithSummary;
             // Lifts the label so the summary line fits under it.
             playLabel.margin = new Vector4(labelMargin.x, labelMargin.y, labelMargin.z, PlayButtonHeightWithSummary - PlayButtonHeight);
         }
         private void AbandonRunConfirmationPopUp()
         {
+            TooltipManager.Instance.HideTooltip();
             currentPanel.ClosePanel();
             abandonRunConfirmationCanvasGroup.CGEnable();
         }
@@ -534,10 +493,9 @@ namespace TJ.MainMenu
         }
         private void UpdateButtonText()
         {
-            abandonRunButton.GetComponentInChildren<TMP_Text>().text = LocalizationManager.Instance.GetText("abandonRunButton");
+            abandonRunButton.GetComponent<MemoriTooltipTrigger>().SetUpToolTip(LocalizationManager.Instance.GetText("abandonRunButton"));
             customBattleButton.GetComponentInChildren<TMP_Text>().text = LocalizationManager.Instance.GetText("customBattleButton");
             upgradesPanelButton.GetComponentInChildren<TMP_Text>().text = LocalizationManager.Instance.GetText("upgradesButton");
-            questsPanelButton.GetComponentInChildren<TMP_Text>().text = LocalizationManager.Instance.GetText("recordsButton");
             collectionPanelButton.GetComponentInChildren<TMP_Text>().text = LocalizationManager.Instance.GetText("collectionButton");
             modsPanelButton.GetComponentInChildren<TMP_Text>().text = LocalizationManager.Instance.GetText("modsButton");
             settingsPanelButton.GetComponentInChildren<TMP_Text>().text = LocalizationManager.Instance.GetText("settingsButton");
@@ -549,16 +507,6 @@ namespace TJ.MainMenu
             activeLocaleText.text = LocalizationManager.Instance.GetActiveLocaleName();
             CloseLocalizationPanel();
             RefreshCollectionButtonState();
-            RefreshQuestsButtonState();
-        }
-
-        /// <summary>
-        /// The completed / total counter under the Quests button. Reads Steam directly; when Steam has
-        /// not answered yet it shows 0, and the board itself explains why.
-        /// </summary>
-        private void RefreshQuestsButtonState()
-        {
-            SetCompletionCounter(questsCompletedText, QuestsPanel.CountCompleted(), AchievementRegistry.All.Count);
         }
 
         /// <summary>

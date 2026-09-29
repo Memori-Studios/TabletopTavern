@@ -52,7 +52,6 @@ namespace TJ.Town
         [SerializeField] private TMP_Text recruitCost;
         [SerializeField] private GameObject recruitDone;
         [SerializeField] private Button enterButton;
-        [SerializeField] private Button enterContinueButton;
         [SerializeField] private GameObject enterNotTaken;
         #endregion
 
@@ -80,7 +79,6 @@ namespace TJ.Town
         [SerializeField] private TMP_Text eliteRavagersText;
         [SerializeField] private MemoriTooltipTrigger eliteRavagersTooltip;
         [SerializeField] private Button fightButton;
-        [SerializeField] private Button fightContinueButton;
         [SerializeField] private GameObject fightNotTaken;
         #endregion
 
@@ -92,8 +90,6 @@ namespace TJ.Town
         public Button EnterButton => enterButton;
         public Button FightButton => fightButton;
         public Button RecruitButton => recruitButton;
-        public Button EnterContinueButton => enterContinueButton;
-        public Button FightContinueButton => fightContinueButton;
         public TownSpoilRow GoldRow => goldRow;
         public TownSpoilRow GearRow => gearRow;
         public TownSpoilRow ConscriptRow => conscriptRow;
@@ -206,12 +202,10 @@ namespace TJ.Town
             orMark.SetActive(undecided);
 
             enterButton.gameObject.SetActive(undecided);
-            enterContinueButton.gameObject.SetActive(entered);
             enterNotTaken.SetActive(sacked);
             recruitRow.SetActive(entered);
 
             fightButton.gameObject.SetActive(undecided);
-            fightContinueButton.gameObject.SetActive(sacked);
             fightNotTaken.SetActive(entered);
             garrisonBlock.SetActive(!sacked);
             fightLines.SetActive(!sacked);

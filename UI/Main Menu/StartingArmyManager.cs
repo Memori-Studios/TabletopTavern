@@ -26,8 +26,8 @@ namespace TJ.MainMenu
         [SerializeField] private Transform startingUnitsParent;
         [SerializeField] private SquadToLoad[] _squadsToLoad;
         public SquadToLoad[] SelectedArmy => _squadsToLoad;
-        List<SquadDisplayCardMenu> squadDisplayCards = new();
-        [SerializeField] private SquadDisplayCardMenu squadDisplayCardMenu;
+        List<WarbandArmyTile> armyTiles = new();
+        [SerializeField] private WarbandArmyTile armyTilePrefab;
         
         [Header("Select Starting Army")]
         [SerializeField] private WarbandRecruitList recruitList;
@@ -132,25 +132,23 @@ namespace TJ.MainMenu
         public void RefreshArmyDisplay()
         {
             int armyIndex = 0;
-            foreach (var card in squadDisplayCards)
+            foreach (var tile in armyTiles)
             {
-                if(card != null)
-                    Destroy(card.gameObject);
+                if(tile != null)
+                    Destroy(tile.gameObject);
             }
-            squadDisplayCards.Clear();
+            armyTiles.Clear();
             foreach (var squad in _squadsToLoad)
             {
-                SquadDisplayCardMenu squadDisplayCard = Instantiate(squadDisplayCardMenu, startingUnitsParent);
-                squadDisplayCard.SetUp(squad, false, _isEnemy: true);
-                squadDisplayCard.LockCard(true);
-                squadDisplayCard.InheritCanvasSorting();
-                squadDisplayCard.gameObject.AddComponent<TroopHoverPlayPanel>().SetUp(armyIndex, playPanel);
-                squadDisplayCard.gameObject.AddComponent<StartingTroopDoubleClickHandler>().SetUp(armyIndex, this);
-                squadDisplayCard.gameObject.AddComponent<MemoriTooltipTrigger>().SetUpToolTip(
+                WarbandArmyTile tile = Instantiate(armyTilePrefab, startingUnitsParent);
+                tile.Set(squad);
+                tile.gameObject.AddComponent<TroopHoverPlayPanel>().SetUp(armyIndex, playPanel);
+                tile.gameObject.AddComponent<StartingTroopDoubleClickHandler>().SetUp(armyIndex, this);
+                tile.gameObject.AddComponent<MemoriTooltipTrigger>().SetUpToolTip(
                     LocalizationManager.Instance.GetText(squad.UnitName.ToString()),
                     LocalizationManager.Instance.GetText("DoubleClickRemoveTroop")
                 );
-                squadDisplayCards.Add(squadDisplayCard);
+                armyTiles.Add(tile);
                 armyIndex++;
             }
             OnStartingArmyLengthChanged?.Invoke(_squadsToLoad.Length);

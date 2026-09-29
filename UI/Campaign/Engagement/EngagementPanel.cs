@@ -1,6 +1,6 @@
+﻿using System.Collections;
 using System.Collections.Generic;
 using Memori.Utilities;
-using TMPro;
 using UnityEngine;
 using UnityEngine.UI;
 using TJ.Map;
@@ -12,146 +12,90 @@ using Memori.UI;
 using TJ.IrregularGrid;
 using Memori.Localization;
 using System.Threading.Tasks;
-using MoreMountains.Feedbacks;
 using Memori.Metaprogression;
 using TJ.Recruit;
 using System.Linq;
+using Memori.Steamworks;
+using TJ.Achievements;
 
 namespace TJ.Engagement
 {
-
     public class EngagementPanel : MapPanel
     {
-        [Header("Pre Battle Options")]
-        [SerializeField] private MemoriCanvasGroup battleOptionsCanvasGroup;
-        [SerializeField] private TMP_Text enemyArmyText;
-        [SerializeField] private Transform enemyArmyParent;
-        public Transform EnemyArmyParent => enemyArmyParent;
+        [SerializeField] private EngagementPanelView view;
         [SerializeField] private SquadDisplayCardMenu squadDisplayCardMenuPrefab;
-        [SerializeField] private MemoriCanvasGroup enemyArmyCanvasGroup;
-        [SerializeField] private Button autoResolveButton, startBattleButton;
-        [SerializeField] private AutoResolvePreview autoResolvePreview;
-        [SerializeField] private MemoriTooltipTrigger autoResolveTooltipTrigger, manuallyFightTooltipTrigger;
         [SerializeField] private AutoResolveBattleManager autoResolveBattleManager;
-        [SerializeField] private TMPSpawnScaler battlefieldWeatherText;
-        [SerializeField] private MemoriTooltipTrigger battlefieldWeatherTooltip;
-        [SerializeField] private TMP_Text battlefieldBiomeText;
-        [SerializeField] private TMP_Text autoresolveResultText;
-        [SerializeField] private Button heavensongButton;
-        [SerializeField] private TMP_Text heavensongButtonText;
-        [SerializeField] private MemoriTooltipTrigger heavensongTooltip;
 
-        [Header("Post Battle")]
-        [SerializeField] private MemoriCanvasGroup postBattleTotalCanvasGroup;
-        [SerializeField] private Button claimRewardsButton;
-
-        [Header("Constant Choice Gold Rewards")]
-        [SerializeField] private Button goldRewardButton;
-        [SerializeField] private TMP_Text goldRewardText;
-        int goldRewardAmount;
-
-        [Header("Constant Choice Consumable Rewards")]
-        [SerializeField] private Button claimConsumableButton;
-        [SerializeField] private MemoriTooltipTrigger consumableTooltip;
-        [SerializeField] private TMP_Text consumableText;
-        [SerializeField] private Image consumableIcon;
-
-        [Header("Constant Choice Recruit Unit Rewards")]
-        [SerializeField] private Button recruitUnitButton;
-        [SerializeField] private MemoriTooltipTrigger recruitUnitTooltip;
-        [SerializeField] private TMP_Text recruitUnitText;
-        [SerializeField] private Image recruitUnitIcon;
-
-        [Header("Optional Rewards")]
-        [SerializeField] private MemoriCanvasGroup postBattleChoicesCanvasGroup;
-
-        #region Ransom Captives
-        [SerializeField] private Button ransomCaptivesButton; //bonus gold
-        [SerializeField] private TMP_Text ransomAmountText;
+        #region Corner slot
+        [SerializeField] private Button continueButton;
+        [SerializeField] private Button lootTownButton;
         #endregion
 
-        #region Conscript Survivors
-        [SerializeField] private EngagementRewardButton conscriptSurvivorsButtonScript;
-        [SerializeField] private SquadDisplayCardMenu squadDisplayCardConscript;
-        [SerializeField] private Sprite conscriptSurvivorsImageSprite;
-        [SerializeField] private Image conscriptSurvivorsImage;
-        [SerializeField] private Button conscriptSurvivorsButton; // enemy pack
-        [SerializeField] private MemoriTooltipTrigger conscriptSurvivorsTooltip;
-        private UnitName[] conscriptedUnitNames;
-        #endregion
-
-        #region Raise Dead
-        [SerializeField] private EngagementRewardButton raiseDeadButton;
-        [SerializeField] private SquadDisplayCardMenu raiseDeadCard1, raiseDeadCard2, raiseDeadCard3;
-        #endregion
-
-        #region Consume Survivors
-        [SerializeField] private Button consumeSurvivorsButton;
-        #endregion
-
-        #region Loot Battlefield
-        [SerializeField] private Button lootBattlefieldButton;
-        GearID gearID;
-        [SerializeField] private Image lootBattlefieldImage;
-        [SerializeField] private TMP_Text lootBattlefieldText;
-        [SerializeField] private GameObject lootBattlefieldGearFull;
-        [SerializeField] private MemoriTooltipTrigger lootBattlefieldTooltip;
-        #endregion
-
-        #region Purge The Blight
-        [SerializeField] private Button purgeTheBlightButton;
-        #endregion
-
-        #region Hour of Destiny
-        [SerializeField] private Button hourOfDestinyButton;
-        #endregion
-
-        #region Forbidden Rituals
-        [SerializeField] private Button forbiddenRitualsButton;
-        [SerializeField] private ConsumableEnum _generatedConsumbale;
-        [SerializeField] private Image _generatedConsumbaleImage;
-        [SerializeField] private TMP_Text _generatedConsumbaleText;
-        [SerializeField] private MemoriTooltipTrigger _generatedConsumbaleTooltip;
-        #endregion
-
-        [Header("Run Lost")]
-        [SerializeField] private MemoriCanvasGroup runLostCanvasGroup;
-
-        [Header("End Battle")]
-        [SerializeField] private GameObject endBattlePanel;
-        [SerializeField] private Button endRunButton, lootTownButton, continueButton;
-        [SerializeField] private TMP_Text battleOutcomeText, battleVictoryOrDefeatText;
-        [SerializeField] private MemoriCanvasGroup endBattleCanvasGroup;
-
-        [Header("Juice")]
-        [SerializeField] private MMF_Player openMMFPlayer;
-        [SerializeField] private MMF_Player closeMMFPlayer;
-
-        [Header("Metaprogression")]
+        #region Metaprogression
         [SerializeField] private MetaprogressionModel _postBattleConsumableMetaprogressionModel;
-        [SerializeField] private MetaprogressionModel _postBattleGoldMetaprogressionModel, _postBattleHealthMetaprogressionModel, _postBattleRecruitMetaprogressionModel;
+        [SerializeField] private MetaprogressionModel _postBattleGoldMetaprogressionModel;
+        [SerializeField] private MetaprogressionModel _postBattleRecruitMetaprogressionModel;
+        #endregion
+
+        public Transform EnemyArmyParent => view.EnemyArmyParent;
 
         private CampaignSaveManager campaignSaveManager;
         private MemoriCanvasGroup engagementPanelCanvasGroup;
         private MapSceneUIManager mapSceneUIManager;
         private RecruitPanel recruitPanel;
-        private int ransomAmount;
         private EngagementType engagementType;
-        private List<SquadDisplayCardMenu> enemySquadsCards;
-        private MemoriTooltipTrigger startBattleTooltipTrigger;
-        private ConsumableEnum consumableEnum;
+        private List<SquadDisplayCardMenu> enemySquadsCards = new();
         private bool autoResolved;
         private bool garrisonFight;
-        // private UnitName squadToConscriptName;
-        private bool generateConsumable;
-        private UnitRarity recruitsRarity;
-        private bool postBattleChoicesClaimed;
-        private bool autoResolveResult;
         private bool isLoadingEnemyCompany;
-        private bool recruitButtonHiddenByConscript;
-        private bool raiseDeadHiddenByRecruit;
-        List<UnitName> raiseDeadUnitList = new ();
+        private bool runLost;
         private Dictionary<Weather, string> _cachedWeatherNames;
+
+        #region Rewards
+        private int goldRewardAmount;
+        private int ransomAmount;
+        private bool generateConsumable;
+        private ConsumableEnum consumableEnum;
+        private UnitRarity recruitsRarity;
+        private UnitName[] conscriptedUnitNames;
+        private UnitName[] offeredRecruits;
+        private readonly List<UnitName> raiseDeadUnitList = new();
+        private GearID gearID;
+        private ConsumableEnum _generatedConsumbale;
+        private EngagementSpoilRow bountyRow, consumableRow, recruitRow;
+        private EngagementChoiceRow conscriptRow;
+        // Each spoil of war's title key, which is what the save records as chosen.
+        private readonly Dictionary<EngagementChoiceRow, string> choiceKeys = new();
+        private const string SpoilBounty = "bounty", SpoilConsumable = "consumable", SpoilRecruit = "recruit", SpoilChoice = "choice:";
+        private bool choiceOffered;
+        private bool choiceMade;
+        private bool autoContinueQueued;
+        private Coroutine closeFade;
+        private enum Picker { None, Recruit, Conscript }
+        private Picker openPicker;
+        #endregion
+
+        #region Report
+        private struct SquadReport
+        {
+            public UnitName Unit;
+            public int Damage;
+            public int Kills;
+            public int Lost;
+        }
+        // Copied when the result shows: a lost run erases the save before the player can hover Detailed stats.
+        private readonly List<SquadReport> squadReports = new();
+        // The other side of the same battle; Kills or Lost of -1 means the save did not keep it.
+        private readonly List<SquadReport> enemyReports = new();
+        private string reportSubtitle;
+        private int reportSlain, reportTroopsLost, reportSquadsLost, reportEnemyDestroyed, reportEnemyTotal;
+        private Race reportHeroRace;
+        // One table is 600 wide; the enemy's sits beside it with a 24 gap.
+        private const float DamageTooltipWidth = 600f;
+        private const float DamageTooltipBothWidth = 1224f;
+        // Army slots 0 to 9 fight; 10 and up are reserves.
+        private const int DeployedSlots = 10;
+        #endregion
 
         // Watchdog against a stalled LoadEngagement/ShowEngagementResult chain. Both methods hide/lock
         // the panel, then rely on a run of "await Task.Delay(...)" continuations to unlock it later. If a
@@ -163,15 +107,14 @@ namespace TJ.Engagement
         private bool _engagementRunComplete;
         private int _engagementRetryCount;
         private const float ENGAGEMENT_WATCHDOG_TIMEOUT = 5f;
-        private bool _engagementResultWon;
         private const int ENGAGEMENT_MAX_RETRIES = 2;
 
-        // A run can also finish "successfully" and still strand the player: ShowEngagementResult activates
-        // the action buttons, but the canvas group carrying them is faded in by a fire-and-forget async Task
-        // that sets blocksRaycasts before it starts lerping alpha. A dropped continuation there leaves an
-        // invisible click-eating screen with the enemy cards (own sorted canvas) as the only responsive
-        // thing. This flag marks "results are on screen" so the watchdog can sanity-check visibility.
+        // A run can also finish "successfully" and still strand the player if the panel's fade-in is dropped,
+        // leaving an invisible click-eating screen. This flag marks "results are on screen" so the watchdog
+        // can sanity-check visibility.
         private bool _showedEngagementResult;
+
+        private static string Text(string key) => LocalizationManager.Instance.GetText(key);
 
         #region SetUp
         public void SetUp(CampaignSaveManager _campaignSaveManager, MapSceneUIManager _mapSceneUIManager)
@@ -181,85 +124,31 @@ namespace TJ.Engagement
             engagementPanelCanvasGroup = GetComponent<MemoriCanvasGroup>();
             recruitPanel = mapSceneUIManager.RecruitPanel;
 
-            autoResolveButton.onClick.AddListener(AutoResolveButtonClicked);
-            startBattleButton.onClick.AddListener(StartBattleButtonClicked);
+            view.AutoResolveButton.onClick.AddListener(AutoResolveButtonClicked);
+            view.FightButton.onClick.AddListener(StartBattleButtonClicked);
+            view.HeavensongButton.onClick.AddListener(HeavensongButtonClicked);
+            view.AutoResolveTooltip.SetUpToolTip(_description: Text("AutoResolveDesc"), _delay: 0.5f);
+            view.FightTooltip.SetUpToolTip(_description: Text("ManuallyFightDesc"), _delay: 0.5f);
+            view.SetBattleButtonsInteractable(false);
 
-            postBattleTotalCanvasGroup.CGDisable();
-            claimConsumableButton.onClick.AddListener(ClaimConsumableButtonClicked);
-            goldRewardButton.onClick.AddListener(ClaimGoldRewardButtonClicked);
-            recruitUnitButton.onClick.AddListener(ClaimRecruitUnitButtonClicked);
-
-            ransomCaptivesButton.onClick.AddListener(RansomCaptivesButtonClicked);
-            conscriptSurvivorsButton.onClick.AddListener(ConscriptSurvivorsButtonClicked);
-            // restArmyButton.onClick.AddListener(RestArmyButtonClicked);
-            postBattleChoicesCanvasGroup.CGDisable();
-            claimRewardsButton.onClick.AddListener(ShowPostBattleOptions);
-
-            endRunButton.onClick.AddListener(LoseRun);
-            startBattleTooltipTrigger = startBattleButton.GetComponent<MemoriTooltipTrigger>();
             campaignSaveManager.OnArmyStructureChanged += OnArmyStructureChanged;
             lootTownButton.onClick.AddListener(() => CompleteEngagement(true));
             lootTownButton.gameObject.SetActive(false);
-            continueButton.onClick.AddListener(() => CompleteEngagement(false));
+            continueButton.onClick.AddListener(ContinueClicked);
             continueButton.gameObject.SetActive(false);
-            conscriptSurvivorsButtonScript.SetUp(this);
-            conscriptSurvivorsButtonScript.enabled = false;
-            squadDisplayCardConscript.gameObject.SetActive(false);
-            claimRewardsButton.gameObject.SetActive(false);
-
-            string localizedAutoResolveDescription = LocalizationManager.Instance.GetText("AutoResolveDesc");
-            string localizedManuallyFightDescription = LocalizationManager.Instance.GetText("ManuallyFightDesc");
-            autoResolveTooltipTrigger.SetUpToolTip(_description: localizedAutoResolveDescription, _delay: 0.5f);
-            manuallyFightTooltipTrigger.SetUpToolTip(_description: localizedManuallyFightDescription, _delay: 0.5f);
-            autoResolveButton.interactable = false;
-            startBattleButton.interactable = false;
-
-            TurnOffAllOptionalRewards();
-            consumeSurvivorsButton.onClick.AddListener(() => ConsumeCaptivesButtonClicked());
-            lootBattlefieldButton.onClick.AddListener(() => LootBattlefieldButtonClicked());
-            purgeTheBlightButton.onClick.AddListener(() => PurgeTheBlightButtonClicked());
-            forbiddenRitualsButton.onClick.AddListener(() => ForbiddenRitualsButtonClicked());
-            hourOfDestinyButton.onClick.AddListener(() => HourOfDestinyButtonClicked());
-
-            heavensongButton.onClick.AddListener(HeavensongButtonClicked);
-            heavensongButtonText.text = LocalizationManager.Instance.GetText("Reroll") + " " + LocalizationManager.Instance.GetText("Weather");
-            heavensongTooltip.SetUpToolTip(LocalizationManager.Instance.GetText("Campaign Bonus"), LocalizationManager.Instance.GetText("TaelindorForestBonusDescription"));
 
             //DifficultyMod 20
-            if (DifficultyRules.AutoResolveDisabled(campaignSaveManager.SaveData.difficultyLevel))
-            {
-                autoResolveButton.interactable = false;
-                autoResolveButton.gameObject.SetActive(false);
-            }
+            view.SetAutoResolveAvailable(!DifficultyRules.AutoResolveDisabled(campaignSaveManager.SaveData.difficultyLevel));
 
             //DifficultyMod 3
             if (!DifficultyRules.AutoResolvePreviewHidden(campaignSaveManager.SaveData.difficultyLevel))
             {
-                autoResolvePreview.SetUp(this);
+                view.AutoResolvePreview.SetUp(this);
             }
-        }
-        private void TurnOffAllOptionalRewards()
-        {
-            conscriptSurvivorsButton.gameObject.SetActive(false);
-            conscriptSurvivorsButtonScript.enabled = false;
-
-            raiseDeadButton.enabled = false;
-            raiseDeadButton.SetUp(this);
-            raiseDeadCard1.gameObject.SetActive(false);
-            raiseDeadCard2.gameObject.SetActive(false);
-            raiseDeadCard3.gameObject.SetActive(false);
-
-            consumeSurvivorsButton.gameObject.SetActive(false);
-            lootBattlefieldButton.gameObject.SetActive(false);
-            purgeTheBlightButton.gameObject.SetActive(false);
-            forbiddenRitualsButton.gameObject.SetActive(false);
-            hourOfDestinyButton.gameObject.SetActive(false);
         }
         public void LoadEngagementPanelFromTown()
         {
             garrisonFight = true;
-            string townGarrisonLocalized = LocalizationManager.Instance.GetText("TownGarrison");
-            enemyArmyText.text = townGarrisonLocalized;
             bool isNewGarrisonBattle = !campaignSaveManager.SaveData.battleCompleted;
             campaignSaveManager.StartGarrisonBattle();
             if (isNewGarrisonBattle)
@@ -277,7 +166,6 @@ namespace TJ.Engagement
                 NodeType.Horde => EngagementType.Horde,
                 _ => EngagementType.Skirmish,
             };
-            enemyArmyText.text = LocalizationManager.Instance.GetText(engagementType.ToString());
 
             _engagementRetryCount = 0; // fresh, player-driven entry - not a watchdog retry
             LoadEngagement();
@@ -287,198 +175,224 @@ namespace TJ.Engagement
             int runId = ++_engagementRunId;
             _engagementRunComplete = false;
             _showedEngagementResult = false;
+            runLost = false;
             StartCoroutine(EngagementLoadWatchdog(runId));
 
-            TurnOffAllOptionalRewards();
-            recruitButtonHiddenByConscript = false;
-            raiseDeadHiddenByRecruit = false;
-
-            autoResolveButton.interactable = false;
-            startBattleButton.interactable = false;
-            autoResolveTooltipTrigger.enabled = false;
-            startBattleTooltipTrigger.enabled = false;
+            view.HideResultPopup();
+            view.ClearRows();
+            view.ShowBeforeBattle();
+            view.SetBattleButtonsInteractable(false);
+            view.SetPrediction("");
+            view.ShowHeavensong(false);
+            view.ShowReserveWarning(garrisonFight);
             continueButton.enabled = true;
+            continueButton.gameObject.SetActive(false);
+            lootTownButton.gameObject.SetActive(false);
+            ClearEnemyCards();
 
-            battleOptionsCanvasGroup.CGDisable();
-            claimConsumableButton.gameObject.SetActive(false);
-            goldRewardButton.gameObject.SetActive(false);
-            raiseDeadButton.gameObject.SetActive(false);
-            recruitUnitButton.gameObject.SetActive(false);
-            consumeSurvivorsButton.gameObject.SetActive(false);
-            purgeTheBlightButton.gameObject.SetActive(false);
-            autoresolveResultText.text = "";
-            heavensongButton.gameObject.SetActive(false);
+            // Every line is filled before the card shows; only the enemy cards arrive after it.
+            bool isPostBattleResult = campaignSaveManager.SaveData.battleCompleted;
+            if (isPostBattleResult) ShowBattleFromSave(runId);
+            else PrepareBattle();
 
             StartCoroutine(CampaignManager.Instance.MapCamera.LerpFocusedOnNodeVolume(0.5f, 0.25f));
-            continueButton.gameObject.SetActive(false);
-            engagementPanelCanvasGroup.CGEnable();
-            enemyArmyCanvasGroup.CGEnable();
-            engagementPanelCanvasGroup.interactable = false;
-            openMMFPlayer.PlayFeedbacks();
-            await Task.Delay(500);
+            if (closeFade != null) StopCoroutine(closeFade);
+            closeFade = null;
+            engagementPanelCanvasGroup.FadeInAsync(0.25f, interactable: false);
+            view.PlayOpen();
+            await Task.Delay(Mathf.RoundToInt(view.OpenSeconds * 1000f));
             if (runId != _engagementRunId) return; // superseded by a watchdog retry while we waited
 
-            // Debug.Log($"campaignSaveManager.SaveData.battleCompleted: {campaignSaveManager.SaveData.battleCompleted}");
-
-            bool isPostBattleResult = campaignSaveManager.SaveData.battleCompleted;
             if (isPostBattleResult)
             {
-                // Debug.Log($"battle completed");
-                await LoadEnemyCompany(true, runId);
-                if (runId != _engagementRunId) return; // superseded while loading enemy cards
                 ShowEngagementResult(runId);
+                return;
             }
-            else
-            {
-                int heroID = campaignSaveManager.SaveData.heroID;
-                Race heroRace = HeroData.GetRaceFromHero(heroID);
-                Race race = TabletopTavernData.Instance.GenerateRaceForMap(campaignSaveManager.SaveData.bookNumber, campaignSaveManager.SaveData.seed, heroRace);
-
-                //get race strength
-                // RaceStrengthTier raceStrengthTier = TabletopTavernData.Instance.GetRaceData(race).RaceStrengthTier;
-
-                //check here to get race
-                List<UnitTier> unitsPool = TabletopTavernData.Instance.GetSquadsWithTiersFromRace(race);
-
-                async Task GenerateEnemyArmy()
-                {
-                    SquadToLoad[] enemyArmy;
-                    if (garrisonFight)
-                    {
-                        enemyArmy = campaignSaveManager.SaveData.townData.townGarrisonUnits;
-                    }
-                    else
-                    {
-                        int battlesFought = campaignSaveManager.SaveData.BattlesFought;
-                        Debug.Log($"[battle generation] battles fought: {battlesFought}");
-
-                        // DifficultyMod 7 / 19 / 6 / 10 / 14 all resolve through DifficultyRules
-                        // so the difficulty sim generates the same armies the game does.
-                        TT_Difficulty difficulty = campaignSaveManager.SaveData.difficultyLevel;
-                        battlesFought += DifficultyRules.BattlesFoughtBonus(difficulty);
-
-                        enemyArmy = ArmyCreator.GenerateEnemyArmy(
-                            campaignSaveManager.SaveData.bookNumber,
-                            battlesFought,
-                            campaignSaveManager.GetSeededRandom(),
-                            engagementType == EngagementType.Horde,
-                            unitsPool,
-                            DifficultyRules.HarderFinalBattle(difficulty),
-                            DifficultyRules.EnemyPrestigeEligible(difficulty),
-                            DifficultyRules.EnemyPrestigeEnhanced(difficulty)
-                        );
-
-                        if (CampaignManager.Instance.GearManager.CheckForGear(GearID.BearSpray))
-                        {
-                            enemyArmy = ArmyCreator.ReplaceMonsterUnits(enemyArmy, campaignSaveManager.GetSeededRandom(), unitsPool);
-                        }
-                    }
-                    
-                    if (!garrisonFight
-                        && campaignSaveManager.SaveData.bookNumber == 1
-                        && heroRace == Race.Gruntkin
-                        && engagementType != EngagementType.Horde
-                        && enemyArmy.Length > 1)
-                    {
-                        enemyArmy = enemyArmy.Take(enemyArmy.Length - 1).ToArray();
-                    }
-
-                    campaignSaveManager.SaveData.enemyWarlordHeroID = EnemyWarlord.ResolveHeroID(
-                        campaignSaveManager.SaveData, engagementType == EngagementType.Horde, garrisonFight);
-                    campaignSaveManager.SaveEnemyArmy(enemyArmy);
-                    await LoadEnemyCompany(true, runId);
-                    autoResolveBattleManager.Load(garrisonFight);
-                }
-
-                void GenerateBattlefield()
-                {
-                    System.Random engagementRandom = campaignSaveManager.GetCampaignRandom();
-                    MapRegion mapRegion = MapThemeManager.Instance.GetMapRegion(race);
-                    int campaignSeed = CampaignManager.Instance.CampaignSaveManager.SaveData.seed;
-                    int bookNum = CampaignManager.Instance.CampaignSaveManager.SaveData.bookNumber;
-                    MapNodeData nodeData = CampaignManager.Instance.MapSceneUIManager.MapSceneManager.SelectedNodeData;
-                    Weather weather = CampaignSaveManager.GenerateNodeWeather(nodeData.index, campaignSeed, bookNum, mapRegion);
-                    Biome biome = CampaignSaveManager.GenerateNodeBiome(nodeData.index, campaignSeed, bookNum, mapRegion);
-                    if (garrisonFight) biome = Biome.Plains;
-
-                    // Debug.Log($"Selected Biome: {biome}, Weather: {weather}");
-
-                    // override weather if player has specific gear
-                    if (weather == Weather.Rain && CampaignManager.Instance.GearManager.CheckForGear(GearID.BraceletoftheSunGoddess)) weather = Weather.ClearSkies;
-
-                    string localizedWeather = LocalizationManager.Instance.GetText(weather.ToString());
-                    battlefieldWeatherText.SetText(localizedWeather);
-
-                    battlefieldWeatherTooltip.gameObject.SetActive(weather != Weather.ClearSkies);
-                    string localizedDescription = WeatherInfo.GetDescription(weather);
-                    string tooltipMessage = weather == Weather.ClearSkies ? "" : localizedDescription;
-                    battlefieldWeatherTooltip.SetUpToolTip(localizedWeather, tooltipMessage);
-
-                    LoadWeatherTip(weather);
-
-                    // Display only - the preset still stores Biome.Plains. A garrison is a walled fight
-                    // rather than one of the four biomes, and calling it Plains told the player nothing.
-                    battlefieldBiomeText.text = LocalizationManager.Instance.GetText(garrisonFight ? "Garrison" : biome.ToString());
-
-                    campaignSaveManager.SaveBattlefieldPreset(new BattleFieldPreset()
-                    {
-                        mapRegion = mapRegion,
-                        race = race,
-                        biome = biome,
-                        weather = weather,
-                        timeOfDay = BattleFieldPreset.TimeOfDay.Noon,
-                        seed = campaignSaveManager.SaveData.seed,
-                        useRandomSeed = false
-                    });
-                }
-
-                battleOptionsCanvasGroup.FadeInAsync();
-                postBattleChoicesCanvasGroup.CGDisable();
-                endBattlePanel.SetActive(false);
-                runLostCanvasGroup.CGDisable();
-                GenerateBattlefield();
-                await GenerateEnemyArmy();
-                if (runId != _engagementRunId) return; // superseded by a watchdog retry
-                bool isTaelindorHero = heroID == 7 || heroID == 8;
-                heavensongButton.gameObject.SetActive(isTaelindorHero);
-                if(isTaelindorHero)
-                {
-                    MapRegion region = campaignSaveManager.SaveData.battleFieldPreset.mapRegion;
-                    _cachedWeatherNames = new Dictionary<Weather, string>();
-                    foreach (var w in region.GetPossibleWeathers())
-                        _cachedWeatherNames[w.weather] = LocalizationManager.Instance.GetText(w.weather.ToString());
-                }
-            }
-            if(campaignSaveManager.SaveData != null)
-            {
-                if (!DifficultyRules.AutoResolvePreviewHidden(campaignSaveManager.SaveData.difficultyLevel))
-                {
-                    autoResolvePreview.CheckIfMouseOverTooltip();
-                }
-            }
-            
-            autoResolveButton.interactable = true;
-            startBattleButton.interactable = true;
-            autoResolveTooltipTrigger.enabled = true;
-            startBattleTooltipTrigger.enabled = true;
-            startBattleTooltipTrigger.CheckIfMouseOverTooltip();
-            autoResolveTooltipTrigger.CheckIfMouseOverTooltip();
 
             engagementPanelCanvasGroup.interactable = true;
+            if (!DifficultyRules.AutoResolvePreviewHidden(campaignSaveManager.SaveData.difficultyLevel))
+            {
+                view.AutoResolvePreview.CheckIfMouseOverTooltip();
+            }
+            view.FightTooltip.CheckIfMouseOverTooltip();
+            view.AutoResolveTooltip.CheckIfMouseOverTooltip();
 
-            TutorialManager.Instance.LoadStepsFromRandomSpot(new TutorialStep[1] { TutorialData.Autoresolve});
-
-            // Post-battle results finish asynchronously inside ShowEngagementResult, which signals
-            // completion itself; only the fresh pre-battle setup path is fully done right here.
-            if (!isPostBattleResult && runId == _engagementRunId)
-                _engagementRunComplete = true;
+            await LoadEnemyCompany(true, runId);
+            if (runId != _engagementRunId) return; // superseded by a watchdog retry or a result
+            TutorialManager.Instance.LoadStepsFromRandomSpot(new TutorialStep[1] { TutorialData.Autoresolve });
+            _engagementRunComplete = true;
         }
+        // Header, battlefield, weather, both army lines, Heavensong, the prediction and live buttons.
+        private void PrepareBattle()
+        {
+            int heroID = campaignSaveManager.SaveData.heroID;
+            Race heroRace = HeroData.GetRaceFromHero(heroID);
+            Race race = TabletopTavernData.Instance.GenerateRaceForMap(campaignSaveManager.SaveData.bookNumber, campaignSaveManager.SaveData.seed, heroRace);
+            List<UnitTier> unitsPool = TabletopTavernData.Instance.GetSquadsWithTiersFromRace(race);
+            SetBeforeBattleHeader(race);
+
+            void GenerateEnemyArmy()
+            {
+                SquadToLoad[] enemyArmy;
+                if (garrisonFight)
+                {
+                    enemyArmy = campaignSaveManager.SaveData.townData.townGarrisonUnits;
+                }
+                else
+                {
+                    int battlesFought = campaignSaveManager.SaveData.BattlesFought;
+                    Debug.Log($"[battle generation] battles fought: {battlesFought}");
+
+                    // DifficultyMod 7 / 19 / 6 / 10 / 14 all resolve through DifficultyRules
+                    // so the difficulty sim generates the same armies the game does.
+                    TT_Difficulty difficulty = campaignSaveManager.SaveData.difficultyLevel;
+                    battlesFought += DifficultyRules.BattlesFoughtBonus(difficulty, campaignSaveManager.SaveData.bookNumber) + OrdealRegistry.BattlesFoughtStep(campaignSaveManager.SaveData);
+
+                    enemyArmy = ArmyCreator.GenerateEnemyArmy(
+                        campaignSaveManager.SaveData.bookNumber,
+                        battlesFought,
+                        campaignSaveManager.GetSeededRandom(),
+                        engagementType == EngagementType.Horde,
+                        unitsPool,
+                        DifficultyRules.HarderFinalBattle(difficulty),
+                        DifficultyRules.EnemyPrestigeEligible(difficulty),
+                        OrdealRegistry.EnemyPrestigeEnhanced(campaignSaveManager.SaveData),
+                        campaignSaveManager.SaveData.HasOrdeal(OrdealId.EliteGuard),
+                        OrdealRegistry.DoubleEnemyPrestigeChance(campaignSaveManager.SaveData)
+                    );
+
+                    if (CampaignManager.Instance.GearManager.CheckForGear(GearID.BearSpray))
+                    {
+                        enemyArmy = ArmyCreator.ReplaceMonsterUnits(enemyArmy, campaignSaveManager.GetSeededRandom(), unitsPool);
+                    }
+                }
+
+                if (!garrisonFight
+                    && campaignSaveManager.SaveData.bookNumber == 1
+                    && heroRace == Race.Gruntkin
+                    && engagementType != EngagementType.Horde
+                    && enemyArmy.Length > 1)
+                {
+                    enemyArmy = enemyArmy.Take(enemyArmy.Length - 1).ToArray();
+                }
+
+                campaignSaveManager.SaveData.enemyWarlordHeroID = EnemyWarlord.ResolveHeroID(
+                    campaignSaveManager.SaveData, engagementType == EngagementType.Horde, garrisonFight);
+                campaignSaveManager.SaveEnemyArmy(enemyArmy);
+                autoResolveBattleManager.Load(garrisonFight);
+            }
+
+            void GenerateBattlefield()
+            {
+                MapRegion mapRegion = MapThemeManager.Instance.GetMapRegion(race);
+                int campaignSeed = CampaignManager.Instance.CampaignSaveManager.SaveData.seed;
+                int bookNum = CampaignManager.Instance.CampaignSaveManager.SaveData.bookNumber;
+                MapNodeData nodeData = CampaignManager.Instance.MapSceneUIManager.MapSceneManager.SelectedNodeData;
+                Weather weather = CampaignSaveManager.GenerateNodeWeather(nodeData.index, campaignSeed, bookNum, mapRegion, campaignSaveManager.SaveData.ordealWeather);
+                Biome biome = CampaignSaveManager.GenerateNodeBiome(nodeData.index, campaignSeed, bookNum, mapRegion);
+                if (garrisonFight) biome = Biome.Plains;
+
+                // override weather if player has specific gear
+                if (weather == Weather.Rain && CampaignManager.Instance.GearManager.CheckForGear(GearID.BraceletoftheSunGoddess)) weather = Weather.ClearSkies;
+
+                ShowWeather(weather);
+                LoadWeatherTip(weather);
+
+                // Display only - the preset still stores Biome.Plains. A garrison is a walled fight
+                // rather than one of the four biomes, and calling it Plains told the player nothing.
+                view.SetBattlefield(Text(garrisonFight ? "Garrison" : biome.ToString()), biome, garrisonFight);
+
+                campaignSaveManager.SaveBattlefieldPreset(new BattleFieldPreset()
+                {
+                    mapRegion = mapRegion,
+                    race = race,
+                    biome = biome,
+                    weather = weather,
+                    timeOfDay = BattleFieldPreset.TimeOfDay.Noon,
+                    seed = campaignSaveManager.SaveData.seed,
+                    useRandomSeed = false
+                });
+            }
+
+            GenerateBattlefield();
+            GenerateEnemyArmy();
+            ShowArmies();
+
+            bool isTaelindorHero = (heroID == 7 || heroID == 8) && !campaignSaveManager.SaveData.IsFactionPassiveBlocked(Race.TaelindorForest);
+            view.ShowHeavensong(isTaelindorHero, Text("Campaign Bonus"), Text("TaelindorForestBonusDescription"));
+            if (isTaelindorHero)
+            {
+                MapRegion region = campaignSaveManager.SaveData.battleFieldPreset.mapRegion;
+                _cachedWeatherNames = new Dictionary<Weather, string>();
+                foreach (var w in region.GetPossibleWeathers())
+                    _cachedWeatherNames[w.weather] = Text(w.weather.ToString());
+            }
+
+            view.SetBattleButtonsInteractable(true);
+        }
+        // The card the player left for battle, rebuilt from the save, so the result pop-up has it to grey out.
+        private void ShowBattleFromSave(int runId)
+        {
+            if (campaignSaveManager.SaveData.townData.townInteractionStatus == TownInteractionStatus.GarrisonBattleStarted) garrisonFight = true;
+            BattleFieldPreset preset = campaignSaveManager.SaveData.battleFieldPreset;
+            SetBeforeBattleHeader(preset.race);
+            view.SetBattlefield(Text(garrisonFight ? "Garrison" : preset.biome.ToString()), preset.biome, garrisonFight);
+            ShowWeather(preset.weather);
+            ShowArmies();
+            _ = LoadEnemyCompany(false, runId);
+        }
+        private void SetBeforeBattleHeader(Race enemyRace)
+        {
+            if (garrisonFight)
+            {
+                var town = campaignSaveManager.SaveData.townData;
+                string townLine = string.Format(Text("engagementGarrisonSub"), Text(town.townName), Text(town.townRace.ToString()) + " " + Text(town.townSize.ToString()));
+                view.SetHeader(EngagementPanelView.HeaderKind.Garrison, Text("TownGarrison"), townLine, ColorData.GetRaceDisplayColor(town.townRace));
+                return;
+            }
+            string act = MemoriUI.ConvertNumberToRomanNumeral(campaignSaveManager.SaveData.bookNumber);
+            bool horde = engagementType == EngagementType.Horde;
+            string subtitle = string.Format(Text(horde ? "engagementHordeSub" : "engagementSkirmishSub"), act, Text(enemyRace.ToString()));
+            view.SetHeader(horde ? EngagementPanelView.HeaderKind.Horde : EngagementPanelView.HeaderKind.Skirmish,
+                Text(engagementType.ToString()), subtitle, ColorData.GetRaceDisplayColor(enemyRace));
+        }
+        private void ShowWeather(Weather weather)
+        {
+            string localizedWeather = Text(weather.ToString());
+            string description = weather == Weather.ClearSkies ? "" : WeatherInfo.GetDescription(weather);
+            view.SetWeather(localizedWeather, weather, localizedWeather, description);
+        }
+        // Squads and troops on each side. Only deployed squads fight, so reserves are left out of the player's count.
+        private void ShowArmies()
+        {
+            int squads = 0, troops = 0;
+            foreach (SquadToLoad squad in campaignSaveManager.SaveData.playerArmy)
+            {
+                if (squad.UnitIndex < 0 || squad.UnitIndex >= DeployedSlots || squad.SquadCurrentHealth <= 0) continue;
+                squads++;
+                troops += Troops(squad);
+            }
+            int enemySquads = 0, enemyTroops = 0;
+            foreach (SquadToLoad squad in campaignSaveManager.SaveData.enemyArmy)
+            {
+                enemySquads++;
+                enemyTroops += Troops(squad);
+            }
+            string format = Text("engagementSquadsTroops");
+            string enemyLine = string.Format(format, enemySquads, enemyTroops);
+            view.SetEnemyHost(enemyLine);
+            view.SetArmies(string.Format(format, squads, troops), enemyLine);
+        }
+        // The same count the squad cards show, so the strip adds up to the army bar.
+        private static int Troops(SquadToLoad squad) =>
+            int.TryParse(TabletopTavernData.Instance.GetSquadCurrentUnitCount(squad), out int units) ? units : 0;
+
         // Watches a single LoadEngagement attempt (identified by runId). If it hasn't finished within
         // ENGAGEMENT_WATCHDOG_TIMEOUT real seconds, that attempt is treated as stalled (this is what was
         // silently happening after an alt-tab during the post-battle map reload: the panel stayed visible
         // but permanently locked, with no exception ever logged) and we retry from scratch. WaitForSecondsRealtime
         // ignores timeScale so this still fires even if something upstream paused the game.
-        private System.Collections.IEnumerator EngagementLoadWatchdog(int runId)
+        private IEnumerator EngagementLoadWatchdog(int runId)
         {
             yield return new WaitForSecondsRealtime(ENGAGEMENT_WATCHDOG_TIMEOUT);
 
@@ -503,35 +417,31 @@ namespace TJ.Engagement
                 Debug.LogError("[EngagementPanel] LoadEngagement still stuck after max retries - force-unlocking panel so the player isn't stranded.");
                 _engagementRunId++; // invalidate the stuck attempt permanently
                 isLoadingEnemyCompany = false; // don't leave OnArmyStructureChanged permanently blocked
-                engagementPanelCanvasGroup.interactable = true;
+                engagementPanelCanvasGroup.CGEnable();
                 continueButton.gameObject.SetActive(true);
                 continueButton.enabled = true;
             }
         }
         // Companion check to the stall handling above, for the case where the run *did* complete but the
-        // results screen came up invisible (see _showedEngagementResult). Alpha 0 with the results still
-        // up is never a legitimate state, so snap the group visible rather than leaving the player with a
-        // screen whose only responsive element is the enemy cards.
+        // results came up invisible. Alpha 0 with the results still up is never a legitimate state.
         private void VerifyEngagementResultVisible()
         {
             if (!_showedEngagementResult) return;
+            if (engagementPanelCanvasGroup.alpha > 0f) return;
 
-            // Won runs put the action buttons on endBattleCanvasGroup; lost runs put them on runLostCanvasGroup.
-            MemoriCanvasGroup group = _engagementResultWon ? endBattleCanvasGroup : runLostCanvasGroup;
-            if (group == null) return;
-            if (group.alpha > 0f) return;
-
-            Debug.LogError($"[EngagementPanel] Engagement result is on screen but {group.name} is at alpha 0 - forcing it visible so the player isn't stranded.");
-            group.CGEnable();
+            Debug.LogError("[EngagementPanel] Engagement result is on screen but the panel is at alpha 0 - forcing it visible so the player isn't stranded.");
+            engagementPanelCanvasGroup.CGEnable();
+        }
+        private void ClearEnemyCards()
+        {
+            foreach (Transform child in view.EnemyArmyParent)
+                Destroy(child.gameObject);
+            enemySquadsCards = new();
         }
         public async Task LoadEnemyCompany(bool _playfeedbacks, int runId)
         {
             isLoadingEnemyCompany = true;
-            foreach (Transform child in enemyArmyParent) {
-                Destroy(child.gameObject);
-            }
-
-            enemySquadsCards = new ();
+            ClearEnemyCards();
             if (campaignSaveManager.SaveData.enemyArmy == null || campaignSaveManager.SaveData.enemyArmy.Length == 0)
             {
                 isLoadingEnemyCompany = false; // don't leave OnArmyStructureChanged permanently blocked
@@ -559,9 +469,7 @@ namespace TJ.Engagement
 
             foreach (SquadToLoad squad in campaignSaveManager.SaveData.enemyArmy)
             {
-                // Debug.Log($"squad: {squad.UnitName} - {squad.currentUnitCount}");
-                SquadDisplayCardMenu squadDisplayCardMenu = Instantiate(squadDisplayCardMenuPrefab, enemyArmyParent);
-                // Debug.Log($"loading enemy squad with current unit count: {squad.currentUnitCount}");
+                SquadDisplayCardMenu squadDisplayCardMenu = Instantiate(squadDisplayCardMenuPrefab, view.EnemyArmyParent);
                 if (campaignSaveManager.SaveData.playerWonBattle && campaignSaveManager.SaveData.battleCompleted)
                 {
                     SquadToLoad squadModified = new(squad.UnitName, _modifiedHealthValueByAmount: 0) { UniqueID = squad.UniqueID };
@@ -591,7 +499,7 @@ namespace TJ.Engagement
             isLoadingEnemyCompany = false;
         }
         #endregion
-        
+
         #region Pre Battle
         public void AutoResolveButtonClicked()
         {
@@ -610,7 +518,7 @@ namespace TJ.Engagement
             TutorialManager.Instance.CompleteStepCheck(TutorialStepEnum.Autoresolve);
 
             autoResolved = false;
-            startBattleTooltipTrigger.OnPointerExit(null);
+            view.FightTooltip.OnPointerExit(null);
             //need to override the selected node here
             CampaignManager.Instance.MapSceneUIManager.MapSceneManager.OverrideSelectedNodeBeforeBattle();
             campaignSaveManager.SaveCampaign();
@@ -639,14 +547,20 @@ namespace TJ.Engagement
         }
         public void OnArmyStructureChanged()
         {
-            if (isLoadingEnemyCompany)
-            {
-                // Debug.Log("[EngagementPanel] OnArmyStructureChanged blocked — enemy company is still loading.");
-                return;
-            }
-            if (campaignSaveManager.SaveData.battleCompleted)
-                return;
+            // The army bar rebuilds its cards on every structure change; while the result shows, the slain and lost counts go back on.
+            if (_showedEngagementResult) StartCoroutine(ReshowUnitsSlain());
+            if (isLoadingEnemyCompany) return;
+            if (campaignSaveManager.SaveData.battleCompleted) return;
+            ShowArmies();
             autoResolveBattleManager.Load(garrisonFight);
+        }
+        private IEnumerator ReshowUnitsSlain()
+        {
+            // A frame later the army bar has its new cards.
+            yield return null;
+            // A lost run has erased the save by now, and the counts read from it.
+            if (!_showedEngagementResult || campaignSaveManager.SaveData == null) yield break;
+            ShowUnitsSlain();
         }
         private void HeavensongButtonClicked()
         {
@@ -656,7 +570,7 @@ namespace TJ.Engagement
             var candidates = mapRegion.GetPossibleWeathers().Where(w => w.weather != currentWeather && !(blockRain && w.weather == Weather.Rain)).ToList();
             if (candidates.Count == 0) return;
 
-            heavensongButton.gameObject.SetActive(false);
+            view.ShowHeavensong(false);
 
             float total = candidates.Sum(w => w.likelihood);
             float roll = UnityEngine.Random.Range(0f, total);
@@ -669,7 +583,7 @@ namespace TJ.Engagement
             }
             StartCoroutine(RollWeatherText(newWeather, mapRegion, currentWeather));
         }
-        private System.Collections.IEnumerator RollWeatherText(Weather finalWeather, MapRegion mapRegion, Weather excludeWeather)
+        private IEnumerator RollWeatherText(Weather finalWeather, MapRegion mapRegion, Weather excludeWeather)
         {
             bool blockRain = CampaignManager.Instance.GearManager.CheckForGear(GearID.BraceletoftheSunGoddess);
             var possibleWeathers = mapRegion.GetPossibleWeathers().Where(w => w.weather != excludeWeather && !(blockRain && w.weather == Weather.Rain)).ToList();
@@ -681,20 +595,13 @@ namespace TJ.Engagement
 
             while (elapsed < duration)
             {
-                battlefieldWeatherText.Target.text = _cachedWeatherNames[possibleWeathers[cycleIndex % possibleWeathers.Count].weather];
+                view.SetWeatherText(_cachedWeatherNames[possibleWeathers[cycleIndex % possibleWeathers.Count].weather]);
                 cycleIndex++;
                 yield return new WaitForSeconds(interval);
                 elapsed += interval;
             }
 
-            string localizedWeather = _cachedWeatherNames[finalWeather];
-            battlefieldWeatherText.SetText(localizedWeather);
-            battlefieldWeatherTooltip.gameObject.SetActive(finalWeather != Weather.ClearSkies);
-            if (finalWeather != Weather.ClearSkies)
-            {
-                string localizedDescription = LocalizationManager.Instance.GetText(finalWeather.ToString() + "Desc");
-                battlefieldWeatherTooltip.SetUpToolTip(localizedWeather, localizedDescription);
-            }
+            ShowWeather(finalWeather);
 
             BattleFieldPreset preset = campaignSaveManager.SaveData.battleFieldPreset;
             preset.weather = finalWeather;
@@ -721,8 +628,8 @@ namespace TJ.Engagement
         {
             if (DifficultyRules.AutoResolveDisabled(campaignSaveManager.SaveData.difficultyLevel)) return;
 
-            string autoResolveResultLocalized = LocalizationManager.Instance.GetText("Autoresolve Result") + $": <color={(playerWon ? ColorData.Green : ColorData.Error)}>" + (playerWon ? LocalizationManager.Instance.GetText("Victory") : LocalizationManager.Instance.GetText("Defeat")) + "</color>";
-            autoresolveResultText.text = autoResolveResultLocalized;
+            string result = $"<color={(playerWon ? ColorData.Positive : ColorData.Negative)}>{Text(playerWon ? "Victory" : "Defeat")}</color>";
+            view.SetPrediction(string.Format(Text("engagementPredicts"), result));
         }
         #endregion
 
@@ -733,179 +640,47 @@ namespace TJ.Engagement
             return Mathf.Min(TabletopTavernConstants.ENDLESS_GOLD_CAP,
                 TabletopTavernConstants.EndlessActs(campaignSaveManager.SaveData.bookNumber) * TabletopTavernConstants.ENDLESS_GOLD_PER_ACT);
         }
+        // The same +0 / +2 / +4 / +6 bands by battles fought pay out on the bounty and the ransom.
+        private int BattlesFoughtBonus()
+        {
+            int fought = campaignSaveManager.SaveData.BattlesFought;
+            if (fought < 3) return 0;
+            if (fought < 6) return 2;
+            if (fought < 9) return 4;
+            return 6;
+        }
         public void GenerateBattleRewards()
         {
-            //gold
             goldRewardAmount = engagementType == EngagementType.Skirmish ? TabletopTavernConstants.GetSkirmishReward() : TabletopTavernConstants.GetHordeReward();
+            goldRewardAmount += BattlesFoughtBonus() + EndlessGoldBonus();
 
-            if(campaignSaveManager.SaveData.BattlesFought < 3)
-            {
-                //same reward for first 3 battles to help player get started
-            }
-            else if (campaignSaveManager.SaveData.BattlesFought < 6)
-            {
-                goldRewardAmount += 2;
-            }
-            else if (campaignSaveManager.SaveData.BattlesFought < 9)
-            {
-                goldRewardAmount += 4;
-            }
-            else
-            {
-                goldRewardAmount += 6;
-            }
-            goldRewardAmount += EndlessGoldBonus();
-
-            //consumable
             // Both the drop roll and the pick come off the campaign seed, so re-opening the results panel
             // (exiting to the main menu and back) can't reroll the consumable reward.
             System.Random rewardRandom = campaignSaveManager.GetCampaignRandom();
             generateConsumable = rewardRandom.Next(0, 100) < CampaignManager.Instance.GoldManager.PotionRewardsOdds;
-
-            if(SaveDataHandler.IsMetaprogressionNodeUnlocked(_postBattleConsumableMetaprogressionModel)) {
-                generateConsumable = true;
-            }
-
+            if (SaveDataHandler.IsMetaprogressionNodeUnlocked(_postBattleConsumableMetaprogressionModel)) generateConsumable = true;
             if (generateConsumable)
             {
                 bool hasLuckyHorseshoe = CampaignManager.Instance.GearManager.CheckForGear(GearID.LuckyHorseshoe);
-                int bookNumber = campaignSaveManager.SaveData.bookNumber;
-                consumableEnum = ConsumableData.GetWeightedConsumable(bookNumber, rewardRandom, hasLuckyHorseshoe);
-                Consumable consumableData = ConsumableData.GetConsumable(consumableEnum);
-                string consumableNameLocalized = LocalizationManager.Instance.GetText(consumableData.ConsumableEnum.ToString() + "Name");
-                consumableText.text = consumableNameLocalized;
-                consumableIcon.sprite = SpriteData.GetSprite(consumableEnum.ToString());
-                
-                string consumableDescriptionLocalized = CampaignManager.Instance.ConsumableManager.GetConsumableDescription(consumableData.ConsumableEnum);
-                consumableTooltip.SetUpToolTip(consumableNameLocalized, consumableDescriptionLocalized);
+                consumableEnum = ConsumableData.GetWeightedConsumable(campaignSaveManager.SaveData.bookNumber, rewardRandom, hasLuckyHorseshoe);
             }
 
-            //ransom captives
-            campaignSaveManager.RegisterRansomOffered();
-            ransomAmount = TabletopTavernConstants.GetRansomCaptivesReward();
+            if (!campaignSaveManager.SaveData.HasOrdeal(OrdealId.NoQuarter)) campaignSaveManager.RegisterRansomOffered();
+            ransomAmount = TabletopTavernConstants.GetRansomCaptivesReward() + BattlesFoughtBonus() + EndlessGoldBonus();
+            if (SaveDataHandler.IsMetaprogressionNodeUnlocked(_postBattleGoldMetaprogressionModel)) ransomAmount += _postBattleGoldMetaprogressionModel.NodeValue;
+            //The Skull Harvest: +2 Gold from ransoming captives
+            if (HeroBonusManager.Instance.ActiveHeroID == 5) ransomAmount += 2;
 
-            if(campaignSaveManager.SaveData.BattlesFought < 3)
-            {
-                //same reward for first 3 battles to help player get started
-            }
-            else if (campaignSaveManager.SaveData.BattlesFought < 6)
-            {
-                ransomAmount += 2;
-            }
-            else if (campaignSaveManager.SaveData.BattlesFought < 9)
-            {
-                ransomAmount += 4;
-            }
-            else
-            {
-                ransomAmount += 6;
-            }
-            ransomAmount += EndlessGoldBonus();
+            recruitsRarity = campaignSaveManager.SaveData.bookNumber == 1 ? UnitRarity.Common : UnitRarity.Uncommon;
+            if (engagementType == EngagementType.Horde)
+                recruitsRarity = campaignSaveManager.SaveData.bookNumber == 1 ? UnitRarity.Uncommon : UnitRarity.Rare;
 
-            if(SaveDataHandler.IsMetaprogressionNodeUnlocked(_postBattleGoldMetaprogressionModel)) {
-                ransomAmount += _postBattleGoldMetaprogressionModel.NodeValue;
-            }
-
-            //The Skull Harvest: +2 Gold from battle rewards
-            if(HeroBonusManager.Instance.ActiveHeroID == 5) {
-                ransomAmount += 2;
-            }           
-
-            //conscript survivors
+            conscriptedUnitNames = null;
             if (campaignSaveManager.SaveData.enemyArmy == null || campaignSaveManager.SaveData.enemyArmy.Length == 0) return;
-            int maxTier = 0; //get highest tier unit in enemy army
-            foreach (SquadToLoad squad in campaignSaveManager.SaveData.enemyArmy) {
-                int tier = TabletopTavernData.Instance.GetUnitTierFromUnitName(squad.UnitName);
-                if(tier > maxTier) {
-                    maxTier = tier;
-                }
-            }
-            SquadToLoad squadToConscript = new (
-                campaignSaveManager.SaveData.enemyArmy[0].UnitName
-            );
-            for(int i = 0; i < campaignSaveManager.SaveData.enemyArmy.Length; i++) 
-            {
-                //get random unit from enemy army with same tier
-                if(TabletopTavernData.Instance.GetUnitTierFromUnitName(campaignSaveManager.SaveData.enemyArmy[i].UnitName) == maxTier) {
-                    float conscriptedHealth = CampaignManager.Instance.CampaignSaveManager.CheckForGear(GearID.RiverTrout) ? 1 : TabletopTavernConstants.CONSCRIPT_SURVIVORS_HEALTH_PERCENTAGE;
-                    if(SaveDataHandler.IsMetaprogressionNodeUnlocked(_postBattleRecruitMetaprogressionModel)) {
-                        conscriptedHealth *= 2;
-                    }
-                    //clamp to 1
-                    conscriptedHealth = Mathf.Clamp(conscriptedHealth, 0, 1);
-                    squadToConscript = new (
-                        campaignSaveManager.SaveData.enemyArmy[i].UnitName, 
-                        _modifiedHealthValueByAmount: conscriptedHealth
-                    );
-                    break;
-                }
-            }
-
             //get 3 random units from enemy army
             UnityEngine.Random.InitState(campaignSaveManager.SaveData.seed);
             var shuffled = campaignSaveManager.SaveData.enemyArmy.OrderBy(_ => UnityEngine.Random.value).ToList();
-            var selected = shuffled.Take(Mathf.Min(3, shuffled.Count)).ToList();
-            conscriptedUnitNames = selected.Select(s => s.UnitName).ToArray();
-
-            string conscriptSurvivorsTitleLocalized = LocalizationManager.Instance.GetText("ConscriptSurvivorsTitle");
-            string conscriptSurvivorsDescLocalized = LocalizationManager.Instance.GetText("ConscriptSurvivorsDesc");
-            // add all unit names to description
-            for(int i = 0; i < campaignSaveManager.SaveData.enemyArmy.Length; i++) {
-                int tier = TabletopTavernData.Instance.GetUnitTierFromUnitName(campaignSaveManager.SaveData.enemyArmy[i].UnitName);
-                string unitNameLocalized = LocalizationManager.Instance.GetText(campaignSaveManager.SaveData.enemyArmy[i].UnitName.ToString());
-                conscriptSurvivorsDescLocalized += $"\n- <color={ColorData.GetRarityTierColorString((UnitRarity)(tier-1))}>" + MemoriUI.AddSpacesToSentence(unitNameLocalized) + "</color>";
-            }
-            conscriptSurvivorsTooltip.SetUpToolTip(conscriptSurvivorsTitleLocalized, conscriptSurvivorsDescLocalized);
-
-            // squadToConscriptName = squadToConscript.UnitName;
-            squadDisplayCardConscript.enabled = true;
-            squadDisplayCardConscript.SetUp(squadToConscript, false, mapSceneUIManager.HUDPanel, true);
-            squadDisplayCardConscript.enabled = false;
-            conscriptSurvivorsImage.sprite = conscriptSurvivorsImageSprite;
-            
-            //rest army
-            // restArmyHealAmount = TabletopTavernConstants.REST_ARMY_HEAL_AMOUNT;
-            // if (campaignSaveManager.SaveData.difficultyLevel >= TT_Difficulty.Imperator)
-            // {
-            //     restArmyHealAmount *= 0.5f;
-            // }
-
-            // if(SaveDataHandler.IsMetaprogressionNodeUnlocked(_postBattleHealthMetaprogressionModel)) {
-            //     restArmyHealAmount *= _postBattleHealthMetaprogressionModel.NodeValue;
-            // }
-            recruitsRarity = campaignSaveManager.SaveData.bookNumber == 1 ? UnitRarity.Common : UnitRarity.Uncommon;
-            if(engagementType == EngagementType.Horde) {
-                recruitsRarity = campaignSaveManager.SaveData.bookNumber == 1 ? UnitRarity.Uncommon : UnitRarity.Rare;
-            }
-            Color color = ColorData.GetRarityTierColor(recruitsRarity);
-            recruitUnitIcon.color = color;
-            string text = LocalizationManager.Instance.GetText("Recruit") + LocalizationManager.Instance.GetText(recruitsRarity.ToString()) +  LocalizationManager.Instance.GetText("Unit");
-            recruitUnitText.text = text;
-
-            recruitUnitTooltip.SetUpToolTip(
-                LocalizationManager.Instance.GetText("Recruit Units"),
-                LocalizationManager.Instance.GetText("Recruit Unit Reward Desc")
-            );
-        }
-        public void DisplayBattleRewards()
-        {
-            campaignSaveManager.RemoveZeroHealthSquads();
-            ransomAmountText.text = "+ "+ ransomAmount.ToString();
-            // restArmyText.text = $"+{restArmyHealAmount * 100}% " + LocalizationManager.Instance.GetText("UnitHealth");
-            goldRewardText.text = LocalizationManager.Instance.GetText("Claim Bounty") + "  ( + " + goldRewardAmount.ToString() + " )";
-
-            foreach (Transform child in enemyArmyParent) {
-                Destroy(child.gameObject);
-            }
-
-            postBattleChoicesCanvasGroup.FadeInAsync();
-
-            goldRewardButton.gameObject.SetActive(true);
-            claimConsumableButton.gameObject.SetActive(generateConsumable);
-            squadDisplayCardConscript.gameObject.SetActive(true);
-            recruitUnitButton.gameObject.SetActive(true);
-            continueButton.gameObject.SetActive(true);
-            postBattleChoicesClaimed = false;
+            conscriptedUnitNames = shuffled.Take(Mathf.Min(3, shuffled.Count)).Select(s => s.UnitName).ToArray();
         }
         private async void ShowEngagementResult(int runId)
         {
@@ -918,22 +693,15 @@ namespace TJ.Engagement
             await LoadEnemyCompany(false, runId);
             if (runId != _engagementRunId) return; // superseded by a watchdog retry
 
-            int squadCount = 0;
-            for(int i = 0; i < CampaignManager.Instance.CampaignSaveManager.SaveData.playerArmy.Length; i++) {
-                if(CampaignManager.Instance.CampaignSaveManager.SaveData.playerArmy[i].UnitIndex != -1) {
-                    squadCount++;
-                }
-            }
-
-            battleOptionsCanvasGroup.CGDisable();
+            view.SetBattleButtonsInteractable(false);
             campaignSaveManager.CorrectHealthOfWithdrawnSquads();
 
             ShowUnitsSlain();
-            
+
             if(!garrisonFight)
             {
                 campaignSaveManager.HealTroopsInReserve();
-            }          
+            }
             else
             {
                 campaignSaveManager.NonHealReserves();
@@ -945,73 +713,75 @@ namespace TJ.Engagement
 
             HideAutoResolvePrediction();
             campaignSaveManager.PrestigeUnitsOnKills();
-            
-            string townGarrisonLocalized = LocalizationManager.Instance.GetText("TownGarrison");
-            string companyShatteredLocalized = LocalizationManager.Instance.GetText("CompanyShattered");
-            string enemyHostLocalized = LocalizationManager.Instance.GetText("EnemyHost");
-            string victoryLocalized = LocalizationManager.Instance.GetText("Victory");
-            string defeatLocalized = LocalizationManager.Instance.GetText("Defeat");
-            string defeatedLocalized = LocalizationManager.Instance.GetText("Defeated");
 
             bool battleWon = campaignSaveManager.SaveData.playerWonBattle;
-            _engagementResultWon = battleWon; // a lost run erases SaveData below, so the watchdog cannot re-read it
-            if(garrisonFight)
+            CaptureReport();
+            view.SetReport(ReportCells());
+            view.SetDetailedStats(BuildDamageTooltip);
+
+            Color colour = ParseColour(battleWon ? ColorData.Positive : ColorData.Negative);
+            string title = Text(battleWon ? "Victory" : "Defeat");
+            string outcome = battleWon ? Text(garrisonFight ? "engagementOutcomeGarrison" : "engagementOutcomeHost") : Text("CompanyShattered");
+            string subtitle = battleWon
+                ? string.Format(Text("engagementResultSub"), outcome, Text(garrisonFight ? "TownGarrison" : engagementType.ToString()))
+                : outcome;
+            reportSubtitle = subtitle;
+            bool withRewards = battleWon && !garrisonFight && !mapSceneUIManager.MapSceneManager.WillCompleteLayerEndInGameOver();
+            if (withRewards) GenerateBattleRewards();
+            if (!battleWon)
             {
-                battleOutcomeText.text = battleWon ? townGarrisonLocalized + " " + defeatedLocalized : companyShatteredLocalized;
-                if(battleWon) {
-                    lootTownButton.gameObject.SetActive(true);
-                    mapSceneUIManager.HUDPanel.ShowConsumablesBlocker();
-                } else {
-                    runLostCanvasGroup.FadeInAsync();
-                    mapSceneUIManager.GameOverPanel.RecordGameOver(false);
-                }
-            } else {
-                battleOutcomeText.text = battleWon ? enemyHostLocalized + " " + defeatedLocalized : companyShatteredLocalized;
-                if(battleWon) {
-                    if(mapSceneUIManager.MapSceneManager.WillCompleteLayerEndInGameOver()) {
-                        continueButton.gameObject.SetActive(true);
-                    }
-                    else {
-                        GenerateBattleRewards();
-                        claimRewardsButton.gameObject.SetActive(true);
-                        mapSceneUIManager.HUDPanel.ShowConsumablesBlocker();
-                    }
-                } else {
-                    runLostCanvasGroup.FadeInAsync();
-                    mapSceneUIManager.GameOverPanel.RecordGameOver(false);
-                    claimRewardsButton.gameObject.SetActive(false);
-                }
+                runLost = true;
+                // Records renown and erases the campaign save, so everything the panel shows is read above.
+                mapSceneUIManager.GameOverPanel.RecordGameOver(false);
             }
 
-            battleVictoryOrDefeatText.text = battleWon ? victoryLocalized : defeatLocalized;
-            endBattlePanel.SetActive(true);
             IAudioRequester.Instance.PlaySFX(battleWon ? SFXData.Cheer : SFXData.Boo);
             IAudioRequester.Instance.PlaySFX(battleWon ? SFXData.BattleWin : SFXData.BattleLoss);
             if(battleWon)
                 IAudioRequester.Instance.PlaySFX(SFXData.Trumpet);
 
-            // Snap rather than fade: this group carries the only actionable buttons on the results screen
-            // (Claim Rewards / Continue / Loot Town), and FadeInAsync sets blocksRaycasts up front while
-            // lerping alpha across awaited frames. If that continuation is ever dropped the player is left
-            // staring at an invisible screen that still eats clicks. endBattlePanel's Animator still juices.
-            endBattleCanvasGroup.CGEnable();
-            TutorialManager.Instance.LoadStepsFromRandomSpot(new TutorialStep[1] { TutorialData.HealthRecovery });
-            HideEndBattlePanel();
-
+            engagementPanelCanvasGroup.CGEnable();
             _showedEngagementResult = true;
             if (runId == _engagementRunId)
                 _engagementRunComplete = true;
+
+            // The card keeps the battle it came from, greyed under the end-of-battle banner; the result replaces it once the banner has gone.
+            view.PlayResultPopup(title, outcome, () =>
+            {
+                if (runId == _engagementRunId) RevealResult(battleWon, withRewards, title, subtitle, colour);
+            });
+        }
+        private void RevealResult(bool battleWon, bool withRewards, string title, string subtitle, Color colour)
+        {
+            view.SetHeader(battleWon ? EngagementPanelView.HeaderKind.Victory : EngagementPanelView.HeaderKind.Defeat, title, subtitle, colour);
+            view.SetPill(battleWon ? title : Text("engagementRunOver"), colour);
+            if (!battleWon)
+            {
+                view.ShowResult(false, Text("engagementDefeatLine"), enemySquadsCards.Count);
+                continueButton.gameObject.SetActive(true);
+            }
+            else if (garrisonFight)
+            {
+                view.ShowResult(false, Text("engagementGarrisonWonLine"), enemySquadsCards.Count);
+                lootTownButton.gameObject.SetActive(true);
+                mapSceneUIManager.HUDPanel.ShowConsumablesBlocker();
+            }
+            else if (!withRewards)
+            {
+                view.ShowResult(false, null, enemySquadsCards.Count);
+                continueButton.gameObject.SetActive(true);
+            }
+            else
+            {
+                view.ShowResult(true, null, enemySquadsCards.Count);
+                ShowRewards();
+            }
+            TutorialManager.Instance.LoadStepsFromRandomSpot(new TutorialStep[1] { TutorialData.HealthRecovery });
         }
         public void ShowUnitsSlain()
         {
             if(autoResolved)
             {
-                // UnitsAlive is ceiling-rounded from pooled health (see AutoResolveBattleManager), so it can
-                // read as 1 even when only a sliver of a unit's health is left - which undercounts losses by
-                // 1 in that case. Floor-dividing the same finalHealth avoids that without touching the sim's
-                // own UnitsAlive value (still used elsewhere for targeting/combat resolution).
-                int EndingUnits(AutoResolveSquad squad) => squad.healthPerKill > 0 ? squad.finalHealth / squad.healthPerKill : squad.UnitsAlive;
-
                 AutoResolveSquad[] aRSS = autoResolveBattleManager.PlayerAutoResolveStats;
                 foreach (SquadDisplayCardMenu squadDisplayCardMenu in mapSceneUIManager.HUDPanel.PlayerSquadsCards) {
                     for(int i = 0; i < aRSS.Length; i++) {
@@ -1062,6 +832,11 @@ namespace TJ.Engagement
                 }
             }
         }
+        // UnitsAlive is ceiling-rounded from pooled health (see AutoResolveBattleManager), so it can
+        // read as 1 even when only a sliver of a unit's health is left - which undercounts losses by
+        // 1 in that case. Floor-dividing the same finalHealth avoids that without touching the sim's
+        // own UnitsAlive value (still used elsewhere for targeting/combat resolution).
+        private static int EndingUnits(AutoResolveSquad squad) => squad.healthPerKill > 0 ? squad.finalHealth / squad.healthPerKill : squad.UnitsAlive;
         public void HideUnitsSlain()
         {
             foreach (SquadDisplayCardMenu squadDisplayCardMenu in mapSceneUIManager.HUDPanel.PlayerSquadsCards) {
@@ -1069,141 +844,486 @@ namespace TJ.Engagement
                 squadDisplayCardMenu.HideUnitsLost();
             }
             foreach (SquadDisplayCardMenu squadDisplayCardMenu in enemySquadsCards) {
+                if (squadDisplayCardMenu == null) continue;
                 squadDisplayCardMenu.HideUnitsSlain();
                 squadDisplayCardMenu.HideUnitsLost();
             }
         }
         #endregion
 
-        #region Post Battle Options
-        public void ClaimConsumableButtonClicked()
+        #region Battle report
+        // Reads damage, kills and losses for both armies, from the stores both battle paths write.
+        private void CaptureReport()
         {
-            if(campaignSaveManager.HasRoomForConsumable()) {
-                campaignSaveManager.AquireConsumable(consumableEnum);
-            } else {
-                string noRoomLocalized = LocalizationManager.Instance.GetText("NoRoomForConsumable");
-                NotificationManager.Instance.ErrorNotification(noRoomLocalized);
-                return;
+            var data = campaignSaveManager.SaveData;
+            reportHeroRace = HeroData.GetRaceFromHero(data.heroID);
+            var damage = new Dictionary<string, int>();
+            var kills = new Dictionary<string, int>();
+            var losses = new Dictionary<string, int>();
+            if (data.SquadDamageStore != null) foreach (SquadDamageStored entry in data.SquadDamageStore) damage[entry.SquadGUID] = entry.Damage;
+            if (data.SquadKillsStore != null) foreach (SquadKillsStored entry in data.SquadKillsStore) kills[entry.SquadGUID] = entry.Kills;
+            if (data.SquadLossesStore != null) foreach (SquadLossesStored entry in data.SquadLossesStore) losses[entry.SquadGUID] = entry.Losses;
+
+            squadReports.Clear();
+            reportSlain = reportTroopsLost = reportSquadsLost = 0;
+            foreach (SquadToLoad squad in data.playerArmy)
+            {
+                if (squad.UnitIndex < 0) continue;
+                string id = squad.UniqueID;
+                bool fought = damage.ContainsKey(id) || kills.ContainsKey(id) || losses.ContainsKey(id);
+                if (!fought) continue;
+                var report = new SquadReport
+                {
+                    Unit = squad.UnitName,
+                    Damage = damage.TryGetValue(id, out int d) ? d : 0,
+                    Kills = kills.TryGetValue(id, out int k) ? k : 0,
+                    Lost = losses.TryGetValue(id, out int l) ? l : 0,
+                };
+                squadReports.Add(report);
+                reportSlain += report.Kills;
+                reportTroopsLost += report.Lost;
+                if (squad.SquadCurrentHealth <= 0) reportSquadsLost++;
             }
-            claimConsumableButton.gameObject.SetActive(false);
-            claimConsumableButton.GetComponent<MemoriButtonV2>().OnPointerExit(null);
-            ForceContinueIfAllRewardsClaimed();
+            squadReports.Sort((a, b) => b.Damage.CompareTo(a.Damage));
+
+            reportEnemyTotal = data.enemyArmy?.Length ?? 0;
+            reportEnemyDestroyed = 0;
+            if (data.enemyArmy != null)
+                foreach (SquadToLoad squad in data.enemyArmy)
+                    if (squad.SquadCurrentHealth <= 0) reportEnemyDestroyed++;
+
+            // Auto-resolve saves enemy damage only; its enemy kills and losses live in the sim's stats, as the enemy card badges read them.
+            AutoResolveSquad[] enemyStats = autoResolved ? autoResolveBattleManager.EnemyAutoResolveStats : null;
+            enemyReports.Clear();
+            if (data.enemyArmy != null)
+                foreach (SquadToLoad squad in data.enemyArmy)
+                {
+                    string id = squad.UniqueID;
+                    if (string.IsNullOrEmpty(id)) continue;
+                    var report = new SquadReport
+                    {
+                        Unit = squad.UnitName,
+                        Damage = damage.TryGetValue(id, out int d) ? d : 0,
+                        Kills = kills.TryGetValue(id, out int k) ? k : -1,
+                        Lost = losses.TryGetValue(id, out int l) ? l : -1,
+                    };
+                    if (enemyStats != null)
+                        foreach (AutoResolveSquad stats in enemyStats)
+                        {
+                            if (stats.UniqueID != id) continue;
+                            if (report.Kills < 0) report.Kills = stats.UnitsSlain;
+                            if (report.Lost < 0) report.Lost = Mathf.Max(0, stats.maxUnits - EndingUnits(stats));
+                        }
+                    enemyReports.Add(report);
+                }
+            enemyReports.Sort((a, b) => b.Damage.CompareTo(a.Damage));
         }
+        private List<(string, string)> ReportCells()
+        {
+            string negative = ColorData.Negative;
+            return new List<(string, string)>
+            {
+                (Text("engagementCellDestroyed"), string.Format(Text("engagementOfCount"), reportEnemyDestroyed, reportEnemyTotal)),
+                (Text("engagementCellSlain"), reportSlain.ToString("N0")),
+                (Text("engagementCellLosses"), Warn(string.Format(Text("engagementTroopsCount"), reportTroopsLost), reportTroopsLost > 0, negative)),
+                (Text("engagementCellSquadsLost"), reportSquadsLost == 0 ? Text("engagementNone") : Warn(reportSquadsLost.ToString(), true, negative)),
+            };
+        }
+        private static string Warn(string text, bool warn, string colour) => warn ? $"<color={colour}>{text}</color>" : text;
+
+        private TooltipContent BuildDamageTooltip()
+        {
+            bool bothSides = enemyReports.Count > 0;
+            var content = new TooltipContent
+            {
+                Title = Text("engagementDamageTitle"),
+                Subtitle = bothSides ? reportSubtitle : Text("engagementDamageSub"),
+                Icon = view.DamageIcon,
+                IconColor = ParseColour("#E9C06A"),
+                Accent = ColorData.GetRaceDisplayColor(reportHeroRace),
+                Detail = Text("engagementDamageFooter"),
+                Width = bothSides ? DamageTooltipBothWidth : DamageTooltipWidth,
+                RowCaptions = new[] { Text(bothSides ? "engagementYourArmy" : "engagementColSquad"), Text("engagementDamageTitle"), Text("engagementColKills"), Text("engagementColLost") },
+                SideRowCaptions = new[] { Text("engagementEnemyHost"), Text("engagementDamageTitle"), Text("engagementColKills"), Text("engagementColLost") },
+            };
+            int total = 0, top = 1;
+            foreach (SquadReport report in squadReports)
+            {
+                total += report.Damage;
+                top = Mathf.Max(top, report.Damage);
+            }
+            // One scale for both armies, so the bars compare across the two tables.
+            foreach (SquadReport report in enemyReports) top = Mathf.Max(top, report.Damage);
+            content.Stats.Add(new TooltipStat { Value = total.ToString("N0"), Label = Text("engagementTotalDamage"), IconColor = Color.white });
+            content.Stats.Add(new TooltipStat { Value = reportSlain.ToString("N0"), Label = Text("engagementCellSlain"), IconColor = Color.white });
+            content.Stats.Add(new TooltipStat { Value = reportTroopsLost.ToString("N0"), Label = Text("engagementTroopsLost"), Warn = reportTroopsLost > 0, IconColor = Color.white });
+            content.Stats.Add(new TooltipStat { Value = reportSquadsLost == 0 ? Text("engagementNone") : reportSquadsLost.ToString(), Label = Text("engagementCellSquadsLost"), Warn = reportSquadsLost > 0, IconColor = Color.white });
+
+            string negative = ColorData.Negative;
+            foreach (SquadReport report in squadReports)
+            {
+                content.Rows.Add(new TooltipRow
+                {
+                    Icon = TabletopTavernData.Instance.GetUnitIcon(report.Unit),
+                    Label = Text(report.Unit.ToString()),
+                    Bar = (float)report.Damage / top,
+                    Value = report.Damage.ToString("N0"),
+                    ColumnA = report.Kills.ToString(),
+                    ColumnB = report.Lost > 0 ? $"<color={negative}>-{report.Lost}</color>" : "0",
+                });
+            }
+            foreach (SquadReport report in enemyReports)
+            {
+                content.SideRows.Add(new TooltipRow
+                {
+                    Icon = TabletopTavernData.Instance.GetUnitIcon(report.Unit),
+                    Label = Text(report.Unit.ToString()),
+                    Bar = (float)report.Damage / top,
+                    Value = report.Damage.ToString("N0"),
+                    ColumnA = report.Kills < 0 ? "-" : report.Kills.ToString(),
+                    ColumnB = report.Lost < 0 ? "-" : report.Lost > 0 ? $"-{report.Lost}" : "0",
+                });
+            }
+            return content;
+        }
+        private static Color ParseColour(string hex) => ColorUtility.TryParseHtmlString(hex, out Color colour) ? colour : Color.white;
+        #endregion
+
+        #region Spoils
+        // Everything the win pays out shows with the result: the spoils to take and the spoils of war to choose from.
+        private void ShowRewards()
+        {
+            mapSceneUIManager.HUDPanel.HideConsumablesBlocker();
+            // Dead enemies stay in the save until the layer completes, so a reloaded result still shows and conscripts them.
+            campaignSaveManager.RemoveZeroHealthSquads(includeEnemies: false);
+            view.ClearRows();
+            choiceKeys.Clear();
+            choiceMade = false;
+            choiceOffered = false;
+            autoContinueQueued = false;
+            openPicker = Picker.None;
+            offeredRecruits = null;
+            consumableRow = null;
+            conscriptRow = null;
+            TutorialManager.Instance.LoadStepsFromRandomSpot(new TutorialStep[1] { TutorialData.PostBattleChoices });
+
+            bountyRow = view.AddSpoil();
+            bountyRow.Set(view.Icon(EngagementPanelView.RewardIcon.Gold), ParseColour(ColorData.Gold), Text("Claim Bounty"), Text("engagementBountyDetail"));
+            bountyRow.SetValue("+" + goldRewardAmount, true);
+            bountyRow.SetTaken(WasTaken(SpoilBounty));
+            bountyRow.Button.onClick.AddListener(ClaimGoldRewardButtonClicked);
+
+            if (generateConsumable)
+            {
+                Consumable consumableData = ConsumableData.GetConsumable(consumableEnum);
+                string name = Text(consumableData.ConsumableEnum + "Name");
+                string description = CampaignManager.Instance.ConsumableManager.GetConsumableDescription(consumableData.ConsumableEnum);
+                consumableRow = view.AddSpoil();
+                consumableRow.Set(SpriteData.GetSprite(consumableEnum.ToString()), Color.white, name, KeywordText.Render(description, false));
+                consumableRow.SetTooltip(name, KeywordText.ForTooltip(description));
+                consumableRow.SetTaken(WasTaken(SpoilConsumable));
+                consumableRow.Button.onClick.AddListener(ClaimConsumableButtonClicked);
+            }
+
+            Color rarityColour = ColorData.GetRarityTierColor(recruitsRarity);
+            recruitRow = view.AddSpoil();
+            recruitRow.Set(view.Icon(EngagementPanelView.RewardIcon.Recruit), rarityColour, Text("Recruit Unit"), Text("Recruit Unit Reward Desc"));
+            recruitRow.SetTag(Text(recruitsRarity.ToString()), rarityColour);
+            recruitRow.SetTaken(WasTaken(SpoilRecruit));
+            recruitRow.Button.onClick.AddListener(ClaimRecruitUnitButtonClicked);
+
+            ShowChoices();
+            continueButton.gameObject.SetActive(true);
+        }
+        private void ShowChoices()
+        {
+            // No Quarter: defeated enemies pay no ransom, so the choice is not offered.
+            if (!campaignSaveManager.SaveData.HasOrdeal(OrdealId.NoQuarter))
+            {
+                EngagementChoiceRow ransom = AddChoice(EngagementPanelView.RewardIcon.Ransom, "Ransom Captives", Text("engagementRansomDetail"));
+                ransom.SetValue("+" + ransomAmount, true);
+                ransom.Button.onClick.AddListener(() => RansomCaptivesButtonClicked(ransom));
+            }
+
+            if (conscriptedUnitNames != null && conscriptedUnitNames.Length > 0)
+            {
+                conscriptRow = AddChoice(EngagementPanelView.RewardIcon.Conscript, "Conscript Survivors", ConscriptLine());
+                conscriptRow.SetTooltip(Text("Conscript Survivors"), ConscriptTooltip());
+                conscriptRow.Button.onClick.AddListener(ConscriptSurvivorsButtonClicked);
+            }
+
+            int heroID = HeroBonusManager.Instance.ActiveHeroID;
+            if (heroID == 10) AddRaiseDead();
+            else if (heroID == 3 || heroID == 4)
+            {
+                //Endless Hordes
+                campaignSaveManager.ModifyGruntkinTroopHealth(TabletopTavernConstants.ENDLESS_HORDES_HEAL_AMOUNT);
+            }
+            else if (heroID == 15 || heroID == 16)
+            {
+                EngagementChoiceRow consume = AddChoice(EngagementPanelView.RewardIcon.Consume, "Consume Survivors", Text("Consume Survivors Desc"));
+                consume.SetTag(Text("engagementHeroOption"));
+                consume.Button.onClick.AddListener(() => ConsumeCaptivesButtonClicked(consume));
+            }
+            else if (heroID == 7)
+            {
+                EngagementChoiceRow purge = AddChoice(EngagementPanelView.RewardIcon.Purge, "Purge Blight Title", Text("Purge Blight Desc"));
+                purge.SetTag(Text("engagementHeroOption"));
+                purge.Button.onClick.AddListener(() => PurgeTheBlightButtonClicked(purge));
+            }
+            else if (heroID == 9)
+            {
+                AddRaiseDead();
+                AddForbiddenRituals();
+            }
+            else if (heroID == 11)
+            {
+                EngagementChoiceRow hour = AddChoice(EngagementPanelView.RewardIcon.HourOfDestiny, "Hour of Destiny",
+                    Text("HourOfDestinyTitle") + ". " + Text("HourOfDestinyDesc"));
+                hour.SetTag(Text("engagementHeroOption"));
+                hour.Button.onClick.AddListener(() => HourOfDestinyButtonClicked(hour));
+            }
+            else if (heroID == 13 || heroID == 14)
+            {
+                AddLootBattlefield();
+            }
+            view.ShowNoChoices(!choiceOffered);
+
+            foreach (KeyValuePair<EngagementChoiceRow, string> choice in choiceKeys)
+            {
+                if (!WasTaken(SpoilChoice + choice.Value)) continue;
+                choiceMade = true;
+                view.ChooseRow(choice.Key, quiet: true);
+                break;
+            }
+        }
+        private EngagementChoiceRow AddChoice(EngagementPanelView.RewardIcon icon, string titleKey, string detail) => AddChoice(view.Icon(icon), titleKey, detail);
+        private EngagementChoiceRow AddChoice(Sprite icon, string titleKey, string detail)
+        {
+            choiceOffered = true;
+            EngagementChoiceRow row = view.AddChoice();
+            row.Set(icon, Color.white, Text(titleKey), detail);
+            choiceKeys[row] = titleKey;
+            return row;
+        }
+        // The percent comes from the picker's own rule, so the line matches the health the unit joins at.
+        private string ConscriptLine() => string.Format(Text("ConscriptSurvivorsTitle"), Mathf.RoundToInt(recruitPanel.ConscriptHealth() * 100f));
+        private string ConscriptTooltip()
+        {
+            string description = ConscriptLine() + "\n\n" + Text("ConscriptSurvivorsDesc");
+            foreach (SquadToLoad squad in campaignSaveManager.SaveData.enemyArmy)
+            {
+                int tier = TabletopTavernData.Instance.GetUnitTierFromUnitName(squad.UnitName);
+                string unitNameLocalized = Text(squad.UnitName.ToString());
+                description += $"\n- <color={ColorData.GetRarityTierColorString((UnitRarity)(tier - 1))}>" + MemoriUI.AddSpacesToSentence(unitNameLocalized) + "</color>";
+            }
+            return description;
+        }
+        private void AddRaiseDead()
+        {
+            raiseDeadUnitList.Clear();
+            System.Random random = campaignSaveManager.GetCampaignRandom();
+            int bookNumber = campaignSaveManager.SaveData.bookNumber;
+            UnitName[] pool;
+            int count;
+            if (bookNumber <= 1)
+            {
+                pool = new[] { UnitName.BoneclatterSpears, UnitName.UndeadLevies, UnitName.GravestoneImps, UnitName.FeralHounds };
+                count = 3;
+            }
+            else if (bookNumber == 2)
+            {
+                pool = new[] { UnitName.DeathhavenFiends, UnitName.Nightriders, UnitName.BoneshardArchers, UnitName.MistWraiths };
+                count = 2;
+            }
+            else
+            {
+                pool = new[] { UnitName.BlackWardens, UnitName.Bloodsworn, UnitName.CorpseClaws, UnitName.BloodswornKnights };
+                count = 1;
+            }
+            for (int i = 0; i < count; i++)
+                raiseDeadUnitList.Add(pool[random.Next(pool.Length)]);
+
+            string names = string.Join(", ", raiseDeadUnitList.Select(unit => Text(unit.ToString())));
+            EngagementChoiceRow row = AddChoice(EngagementPanelView.RewardIcon.RaiseDead, "Raise Dead", names);
+            row.SetUnits(raiseDeadUnitList.Select(unit => TabletopTavernData.Instance.GetUnitIcon(unit)).ToArray());
+            row.SetTag(Text("engagementHeroOption"));
+            row.Button.onClick.AddListener(() => RaiseDeadButtonClicked(row));
+        }
+        private void AddForbiddenRituals()
+        {
+            // Campaign-seeded so it is repeatable on re-entry. Advance one draw first rather than
+            // offsetting the seed - System.Random diffuses adjacent seeds poorly, so seed+1 would risk
+            // tracking the drop roll GenerateBattleRewards takes off the same stream.
+            System.Random consumableRandom = campaignSaveManager.GetCampaignRandom();
+            consumableRandom.Next();
+            _generatedConsumbale = ConsumableData.GetRandomConsumable(consumableRandom);
+            Consumable consumableData = ConsumableData.GetConsumable(_generatedConsumbale);
+            string name = Text(consumableData.ConsumableEnum + "Name");
+            string description = CampaignManager.Instance.ConsumableManager.GetConsumableDescription(consumableData.ConsumableEnum);
+            EngagementChoiceRow row = AddChoice(SpriteData.GetSprite(_generatedConsumbale.ToString()), "Forbidden Rituals", name);
+            row.SetTooltip(name, KeywordText.ForTooltip(description));
+            row.SetTag(Text("engagementHeroOption"));
+            row.Button.onClick.AddListener(() => ForbiddenRitualsButtonClicked(row));
+        }
+        private void AddLootBattlefield()
+        {
+            List<GearID> gearList = campaignSaveManager.DrawRandomGear(1);
+            gearID = gearList[0];
+            Gear gear = GearData.GetGear(gearID);
+            string gearNameLocalized = Text(gearID + "Name");
+            string gearDescLocalized = string.Format(Text(gearID + "Desc"), gear.GearModifierValue);
+            string gearFlavorLocalized = Text(gearID + "Flavor");
+
+            // With no free gear slot the line says so, in the warning colour, instead of naming the item.
+            bool gearFull = !campaignSaveManager.CanAquireGear();
+            EngagementChoiceRow row = AddChoice(SpriteData.GetSprite(gear.GearName), "Loot Battlefield", gearFull ? Text("No space for gear") : gearNameLocalized);
+            if (gearFull) row.SetDetailColour(ParseColour(ColorData.Negative));
+            row.SetTooltip(gearNameLocalized, KeywordText.ForTooltip(gearDescLocalized), gearFlavorLocalized);
+            row.SetTag(Text("engagementHeroOption"));
+            row.Button.onClick.AddListener(() => LootBattlefieldButtonClicked(row));
+        }
+        #endregion
+
+        #region Taking spoils
         public void ClaimGoldRewardButtonClicked()
         {
-            string goldRewardLocalized = LocalizationManager.Instance.GetText("Loot Gold");
-            CampaignManager.Instance.GoldManager.ModifyGold(goldRewardAmount, goldRewardLocalized);
-            goldRewardButton.gameObject.SetActive(false);
-            goldRewardButton.GetComponent<MemoriButtonV2>().OnPointerExit(null);
-            ForceContinueIfAllRewardsClaimed();
+            if (bountyRow.IsTaken) return;
+            MarkTaken(SpoilBounty);
+            CampaignManager.Instance.GoldManager.ModifyGold(goldRewardAmount, Text("Loot Gold"));
+            bountyRow.SetTaken(true, true);
+            QueueAutoContinue();
+        }
+        public void ClaimConsumableButtonClicked()
+        {
+            if (consumableRow == null || consumableRow.IsTaken) return;
+            if (!campaignSaveManager.HasRoomForConsumable())
+            {
+                NotificationManager.Instance.ErrorNotification(Text("NoRoomForConsumable"));
+                return;
+            }
+            MarkTaken(SpoilConsumable);
+            campaignSaveManager.AquireConsumable(consumableEnum);
+            consumableRow.SetTaken(true, true);
+            QueueAutoContinue();
         }
         public void ClaimRecruitUnitButtonClicked()
         {
+            if (recruitRow.IsTaken || openPicker != Picker.None) return;
             IAudioRequester.Instance.PlaySFX(SFXData.FocusNode);
-            recruitPanel.LoadRecruitPanelFromBattle(HeroData.GetRaceFromHero(campaignSaveManager.SaveData.heroID), recruitsRarity);
-            recruitUnitButton.gameObject.SetActive(false);
-            recruitUnitButton.GetComponent<MemoriButtonV2>().OnPointerExit(null);
-            conscriptSurvivorsButton.gameObject.SetActive(false);
-            conscriptSurvivorsButtonScript.enabled = false;
-            if (raiseDeadButton.gameObject.activeSelf)
+            // The first open rolls the three units; closing without a pick and reopening shows the same three, so skipping is no reroll.
+            if (offeredRecruits == null)
             {
-                raiseDeadHiddenByRecruit = true;
-                raiseDeadButton.enabled = false;
-                raiseDeadButton.gameObject.SetActive(false);
-                raiseDeadCard1.gameObject.SetActive(false);
-                raiseDeadCard2.gameObject.SetActive(false);
-                raiseDeadCard3.gameObject.SetActive(false);
+                recruitPanel.LoadRecruitPanelFromBattle(HeroData.GetRaceFromHero(campaignSaveManager.SaveData.heroID), recruitsRarity);
+                offeredRecruits = campaignSaveManager.SaveData.recruitableUnits?.ToArray();
             }
+            else
+            {
+                recruitPanel.ReopenRecruitPanelFromBattle(offeredRecruits);
+            }
+            openPicker = Picker.Recruit;
             HidePanel();
         }
-        public void RansomCaptivesButtonClicked()
+        #endregion
+
+        #region Spoils of war
+        private void Choose(EngagementChoiceRow row)
         {
-            HidePostBattleOptionalRewards();
+            choiceMade = true;
+            if (choiceKeys.TryGetValue(row, out string key)) MarkTaken(SpoilChoice + key);
+            view.ChooseRow(row);
+        }
+        // Taken spoils go in the save, so quitting and continuing shows them taken instead of paying again.
+        private bool WasTaken(string spoil) => campaignSaveManager.SaveData.spoilsTaken != null && campaignSaveManager.SaveData.spoilsTaken.Contains(spoil);
+        private void MarkTaken(string spoil)
+        {
+            (campaignSaveManager.SaveData.spoilsTaken ??= new List<string>()).Add(spoil);
+            campaignSaveManager.SaveCampaign();
+        }
+        public void RansomCaptivesButtonClicked(EngagementChoiceRow row)
+        {
+            if (choiceMade) return;
             campaignSaveManager.RegisterRansomChosen();
-            string ransomLocalized = LocalizationManager.Instance.GetText("Ransom Captives");
-            CampaignManager.Instance.GoldManager.ModifyGold(ransomAmount, ransomLocalized);
-            ForceContinueIfAllRewardsClaimed();
+            CampaignManager.Instance.GoldManager.ModifyGold(ransomAmount, Text("Ransom Captives"));
+            Choose(row);
+            QueueAutoContinue();
         }
         public void ConscriptSurvivorsButtonClicked()
         {
-            HidePostBattleOptionalRewards();
-            if (recruitUnitButton.gameObject.activeSelf)
-            {
-                recruitButtonHiddenByConscript = true;
-                recruitUnitButton.gameObject.SetActive(false);
-                recruitUnitButton.GetComponent<MemoriButtonV2>().OnPointerExit(null);
-            }
+            if (choiceMade || openPicker != Picker.None) return;
             recruitPanel.LoadRecruitPanelForConscript(conscriptedUnitNames);
+            openPicker = Picker.Conscript;
             HidePanel();
         }
         public void HidePanel()
         {
             engagementPanelCanvasGroup.FadeOutAsync(0.25f);
         }
-        public void ConsumeCaptivesButtonClicked()
+        public void ConsumeCaptivesButtonClicked(EngagementChoiceRow row)
         {
-            HidePostBattleOptionalRewards();
+            if (choiceMade) return;
             campaignSaveManager.ModifyTroopHealth(TabletopTavernConstants.CONSUME_CAPTIVES_HEAL_AMOUNT, Race.DrakosaurBrood);
-            ForceContinueIfAllRewardsClaimed();
+            Choose(row);
+            QueueAutoContinue();
         }
-        public void PurgeTheBlightButtonClicked()
+        public void PurgeTheBlightButtonClicked(EngagementChoiceRow row)
         {
-            HidePostBattleOptionalRewards();
+            if (choiceMade) return;
             CampaignManager.Instance.CampaignSaveManager.HealRandomUnitToFull();
-            ForceContinueIfAllRewardsClaimed();
+            Choose(row);
+            QueueAutoContinue();
         }
-        public void ForbiddenRitualsButtonClicked()
+        public void ForbiddenRitualsButtonClicked(EngagementChoiceRow row)
         {
+            if (choiceMade) return;
             if(!campaignSaveManager.HasRoomForConsumable())
             {
-                string noRoomLocalized = LocalizationManager.Instance.GetText("NoRoomForConsumable");
-                NotificationManager.Instance.ErrorNotification(noRoomLocalized);
+                NotificationManager.Instance.ErrorNotification(Text("NoRoomForConsumable"));
                 return;
             }
 
             IAudioRequester.Instance.PlaySFX(SFXData.CollectItem);
             CampaignManager.Instance.CampaignSaveManager.AquireConsumable(_generatedConsumbale);
-            HidePostBattleOptionalRewards();
-            ForceContinueIfAllRewardsClaimed();
+            Choose(row);
+            QueueAutoContinue();
         }
-        public void HourOfDestinyButtonClicked()
+        public void HourOfDestinyButtonClicked(EngagementChoiceRow row)
         {
-            if(!CampaignManager.Instance.CampaignSaveManager.CheckForRoomToRecruit()) 
+            if (choiceMade) return;
+            if(!CampaignManager.Instance.CampaignSaveManager.CheckForRoomToRecruit())
             {
-                string errorLocalized = LocalizationManager.Instance.GetText("Max Units Recruited");
-                NotificationManager.Instance.ErrorNotification(errorLocalized);
+                NotificationManager.Instance.ErrorNotification(Text("Max Units Recruited"));
                 return;
             }
-            string hourOfDestinyLocalized = LocalizationManager.Instance.GetText("Hour of Destiny");
-            CampaignManager.Instance.GoldManager.ModifyGold(-CampaignManager.Instance.GoldManager.CurrentGoldAmount, hourOfDestinyLocalized);
+            if (CampaignManager.Instance.GoldManager.CurrentGoldAmount >= AchievementRules.ALL_IN_GOLD) SteamAchievements.Unlock(AchievementId.AllIn);
+            CampaignManager.Instance.GoldManager.ModifyGold(-CampaignManager.Instance.GoldManager.CurrentGoldAmount, Text("Hour of Destiny"));
 
             UnitName[] unitNames = TabletopTavernData.Instance.GetSquadsToRecruitBasedOnReputation(0, 1, CampaignManager.Instance.CampaignSaveManager.GetSeededRandom(), CampaignManager.Instance.CampaignSaveManager.GetHeroID());
             CampaignManager.Instance.CampaignSaveManager.RecruitSquad(TabletopTavernData.Instance.GetSquadStats(unitNames[0]));
             IAudioRequester.Instance.PlaySFX(SFXData.RecruitUnit);
 
-            HidePostBattleOptionalRewards();
-            ForceContinueIfAllRewardsClaimed();
+            Choose(row);
+            QueueAutoContinue();
         }
-        public void LootBattlefieldButtonClicked()
+        public void LootBattlefieldButtonClicked(EngagementChoiceRow row)
         {
+            if (choiceMade) return;
             if(!campaignSaveManager.CanAquireGear())
             {
-                string errorLocalized = LocalizationManager.Instance.GetText("No space for gear");
-                NotificationManager.Instance.ErrorNotification(errorLocalized);
+                NotificationManager.Instance.ErrorNotification(Text("No space for gear"));
                 return;
             }
 
-            HidePostBattleOptionalRewards();
             CampaignManager.Instance.CampaignSaveManager.AquireGear(gearID);
-            lootBattlefieldButton.gameObject.SetActive(false);
-            ForceContinueIfAllRewardsClaimed();
+            Choose(row);
+            QueueAutoContinue();
         }
-        public void RaiseDeadButtonClicked()
+        public void RaiseDeadButtonClicked(EngagementChoiceRow row)
         {
+            if (choiceMade) return;
             if (!campaignSaveManager.CheckForRoomToRecruit())
             {
-                string notEnoughGoldLocalized = LocalizationManager.Instance.GetText("NoRoomForUnit");
-                NotificationManager.Instance.ErrorNotification(notEnoughGoldLocalized);
+                NotificationManager.Instance.ErrorNotification(Text("NoRoomForUnit"));
                 return;
             }
 
@@ -1215,204 +1335,46 @@ namespace TJ.Engagement
             }
 
             IAudioRequester.Instance.PlaySFX(SFXData.RecruitUnit);
-            raiseDeadButton.enabled = false;
-            raiseDeadCard1.gameObject.SetActive(false);
-            raiseDeadCard2.gameObject.SetActive(false);
-            raiseDeadCard3.gameObject.SetActive(false);
-            HidePostBattleOptionalRewards();
+            Choose(row);
+            QueueAutoContinue();
         }
-        public void ShowRaiseDeadButton()
-        {
-            raiseDeadButton.enabled = true;
-            raiseDeadUnitList.Clear();
-
-            System.Random random = campaignSaveManager.GetCampaignRandom();
-            int bookNumber = campaignSaveManager.SaveData.bookNumber;
-
-            if (bookNumber <= 1)
-            {
-                UnitName[] pool = new UnitName[] {
-                    UnitName.BoneclatterSpears,
-                    UnitName.UndeadLevies,
-                    UnitName.GravestoneImps,
-                    UnitName.FeralHounds
-                };
-                for (int i = 0; i < 3; i++)
-                    raiseDeadUnitList.Add(pool[random.Next(pool.Length)]);
-
-                raiseDeadCard1.gameObject.SetActive(true);
-                raiseDeadCard2.gameObject.SetActive(true);
-                raiseDeadCard3.gameObject.SetActive(true);
-                raiseDeadCard1.SetUp(new SquadToLoad(raiseDeadUnitList[0]), false, mapSceneUIManager.HUDPanel, true);
-                raiseDeadCard2.SetUp(new SquadToLoad(raiseDeadUnitList[1]), false, mapSceneUIManager.HUDPanel, true);
-                raiseDeadCard3.SetUp(new SquadToLoad(raiseDeadUnitList[2]), false, mapSceneUIManager.HUDPanel, true);
-            }
-            else if (bookNumber == 2)
-            {
-                UnitName[] pool = new UnitName[] {
-                    UnitName.DeathhavenFiends,
-                    UnitName.Nightriders,
-                    UnitName.BoneshardArchers,
-                    UnitName.MistWraiths
-                };
-                for (int i = 0; i < 2; i++)
-                    raiseDeadUnitList.Add(pool[random.Next(pool.Length)]);
-
-                raiseDeadCard1.gameObject.SetActive(true);
-                raiseDeadCard2.gameObject.SetActive(true);
-                raiseDeadCard3.gameObject.SetActive(false);
-                raiseDeadCard1.SetUp(new SquadToLoad(raiseDeadUnitList[0]), false, mapSceneUIManager.HUDPanel, true);
-                raiseDeadCard2.SetUp(new SquadToLoad(raiseDeadUnitList[1]), false, mapSceneUIManager.HUDPanel, true);
-            }
-            else
-            {
-                UnitName[] pool = new UnitName[] {
-                    UnitName.BlackWardens,
-                    UnitName.Bloodsworn,
-                    UnitName.CorpseClaws,
-                    UnitName.BloodswornKnights
-                };
-                raiseDeadUnitList.Add(pool[random.Next(pool.Length)]);
-
-                raiseDeadCard1.gameObject.SetActive(true);
-                raiseDeadCard2.gameObject.SetActive(false);
-                raiseDeadCard3.gameObject.SetActive(false);
-                raiseDeadCard1.SetUp(new SquadToLoad(raiseDeadUnitList[0]), false, mapSceneUIManager.HUDPanel, true);
-            }
-
-            raiseDeadButton.gameObject.SetActive(true);
-        }
-        public void ShowConsumeCaptivesButton()
-        {
-            consumeSurvivorsButton.gameObject.SetActive(true);
-        }
-        public void ShowPurgeTheBlightButton()
-        {
-            purgeTheBlightButton.gameObject.SetActive(true);
-        }
-        public void ShowLootBattlefieldButton()
-        {
-            lootBattlefieldButton.gameObject.SetActive(true);
-        }
-        public void ShowForbiddenRitualsButton()
-        {
-            forbiddenRitualsButton.gameObject.SetActive(true);
-        }
-        public void ShowHourOfDestinyButton()
-        {
-            hourOfDestinyButton.gameObject.SetActive(true);
-        }
-        public void ShowPostBattleOptions()
-        {
-            claimRewardsButton.gameObject.SetActive(false);
-            mapSceneUIManager.HUDPanel.HideConsumablesBlocker();
-
-            DisplayBattleRewards();
-            postBattleChoicesCanvasGroup.FadeInAsync(0.25f);
-            postBattleTotalCanvasGroup.FadeInAsync(0.25f);
-            conscriptSurvivorsButton.gameObject.SetActive(true);
-            conscriptSurvivorsButtonScript.enabled = true;
-            TutorialManager.Instance.LoadStepsFromRandomSpot(new TutorialStep[1] { TutorialData.PostBattleChoices });
-
-            if(HeroBonusManager.Instance.ActiveHeroID == 10) {
-                ShowRaiseDeadButton();
-            } 
-            else if(HeroBonusManager.Instance.ActiveHeroID == 3 
-                || HeroBonusManager.Instance.ActiveHeroID == 4) {
-                //Endless Hordes
-                campaignSaveManager.ModifyGruntkinTroopHealth(TabletopTavernConstants.ENDLESS_HORDES_HEAL_AMOUNT);
-            }
-            else if(HeroBonusManager.Instance.ActiveHeroID == 15 
-                || HeroBonusManager.Instance.ActiveHeroID == 16) {
-                ShowConsumeCaptivesButton();
-            }
-            else if(HeroBonusManager.Instance.ActiveHeroID == 7) {
-                ShowPurgeTheBlightButton();
-            }
-            else if(HeroBonusManager.Instance.ActiveHeroID == 9) {
-                // Campaign-seeded so it is repeatable on re-entry. Advance one draw first rather than
-                // offsetting the seed - System.Random diffuses adjacent seeds poorly, so seed+1 would risk
-                // tracking the drop roll GenerateBattleRewards takes off the same stream.
-                System.Random consumableRandom = campaignSaveManager.GetCampaignRandom();
-                consumableRandom.Next();
-                _generatedConsumbale = ConsumableData.GetRandomConsumable(consumableRandom);
-                Consumable consumableData = ConsumableData.GetConsumable(_generatedConsumbale);
-                string consumableNameLocalized = LocalizationManager.Instance.GetText(consumableData.ConsumableEnum.ToString() + "Name");
-                _generatedConsumbaleText.text = consumableNameLocalized;
-                _generatedConsumbaleImage.sprite = SpriteData.GetSprite(_generatedConsumbale.ToString());
-                string consumableDescriptionLocalized = CampaignManager.Instance.ConsumableManager.GetConsumableDescription(consumableData.ConsumableEnum);
-                _generatedConsumbaleTooltip.SetUpToolTip(consumableNameLocalized, consumableDescriptionLocalized);
-                ShowRaiseDeadButton();
-                ShowForbiddenRitualsButton();
-            }
-            else if(HeroBonusManager.Instance.ActiveHeroID == 11) {
-                ShowHourOfDestinyButton();
-            }
-            else if(HeroBonusManager.Instance.ActiveHeroID == 13 
-                || HeroBonusManager.Instance.ActiveHeroID == 14) {
-
-                List<GearID> gearList = campaignSaveManager.DrawRandomGear(1);
-                gearID = gearList[0];
-                Gear gear = GearData.GetGear(gearID);
-
-                string gearNameLocalized = LocalizationManager.Instance.GetText(gearID+"Name");
-                string gearDescLocalized = LocalizationManager.Instance.GetText(gearID+"Desc");
-                gearDescLocalized = string.Format(gearDescLocalized, gear.GearModifierValue);
-                string gearFlavorLocalized = LocalizationManager.Instance.GetText(gearID+"Flavor");
-
-                lootBattlefieldText.text = gearNameLocalized;
-                lootBattlefieldImage.sprite = SpriteData.GetSprite(gear.GearName);
-                lootBattlefieldTooltip.SetUpToolTip(gearNameLocalized, KeywordText.ForTooltip(gearDescLocalized), gearFlavorLocalized);
-                lootBattlefieldGearFull.SetActive(!campaignSaveManager.CanAquireGear());
-
-                ShowLootBattlefieldButton();
-            }
-        }
-        private void HidePostBattleOptionalRewards()
-        {
-            postBattleChoicesClaimed = true;
-            postBattleChoicesCanvasGroup.FadeOutAsync(0.25f);
-            squadDisplayCardConscript.gameObject.SetActive(false);
-            raiseDeadButton.enabled = false;
-            raiseDeadCard1.gameObject.SetActive(false);
-            raiseDeadCard2.gameObject.SetActive(false);
-            raiseDeadCard3.gameObject.SetActive(false);
-        }
-        public void ReturnFromRecruitPanel()
+        // RecruitPanel calls this when its picker closes. A spoil or a choice counts as taken only when a unit was recruited.
+        public void ReturnFromRecruitPanel(bool unitTaken)
         {
             engagementPanelCanvasGroup.FadeInAsync(0.25f);
-            if (!postBattleChoicesClaimed)
+            Picker closed = openPicker;
+            openPicker = Picker.None;
+            if (unitTaken && closed == Picker.Recruit)
             {
-                conscriptSurvivorsButton.gameObject.SetActive(true);
-                conscriptSurvivorsButtonScript.enabled = true;
+                MarkTaken(SpoilRecruit);
+                recruitRow.SetTaken(true, true);
             }
-            if (recruitButtonHiddenByConscript)
-            {
-                recruitButtonHiddenByConscript = false;
-                recruitUnitButton.gameObject.SetActive(true);
-            }
-            if (raiseDeadHiddenByRecruit && !postBattleChoicesClaimed)
-            {
-                raiseDeadHiddenByRecruit = false;
-                raiseDeadButton.gameObject.SetActive(true);
-                raiseDeadButton.enabled = true;
-                int bookNumber = campaignSaveManager.SaveData.bookNumber;
-                raiseDeadCard1.gameObject.SetActive(true);
-                raiseDeadCard2.gameObject.SetActive(bookNumber <= 2);
-                raiseDeadCard3.gameObject.SetActive(bookNumber <= 1);
-            }
-            ForceContinueIfAllRewardsClaimed();
+            if (unitTaken && closed == Picker.Conscript && conscriptRow != null) Choose(conscriptRow);
+            QueueAutoContinue();
         }
-        private void ForceContinueIfAllRewardsClaimed()
+        // Closes the panel once every spoil is taken and a spoil of war chosen, after the last row has popped.
+        private void QueueAutoContinue()
         {
-            if (!claimConsumableButton.gameObject.activeSelf && !goldRewardButton.gameObject.activeSelf && !recruitUnitButton.gameObject.activeSelf && !lootBattlefieldButton.gameObject.activeSelf && postBattleChoicesClaimed)
-            {
-                CompleteEngagement(false);
-            }
+            if (autoContinueQueued || openPicker != Picker.None) return;
+            bool spoilsDone = bountyRow.IsTaken && recruitRow.IsTaken && (consumableRow == null || consumableRow.IsTaken);
+            if (!spoilsDone || (choiceOffered && !choiceMade)) return;
+            autoContinueQueued = true;
+            StartCoroutine(AutoContinue());
+        }
+        private IEnumerator AutoContinue()
+        {
+            // Long enough to see the last spoil pop before the card flies away.
+            yield return new WaitForSecondsRealtime(0.5f);
+            CompleteEngagement(false);
         }
         #endregion
 
         #region Closing
+        private void ContinueClicked()
+        {
+            if (runLost) LoseRun();
+            else CompleteEngagement(false);
+        }
         public void CompleteEngagement(bool garrisonEngagement)
         {
             _showedEngagementResult = false; // player is on their way out; visibility check no longer applies
@@ -1448,17 +1410,12 @@ namespace TJ.Engagement
             mapSceneUIManager.LoseRunFromTown();
             ClosePanel();
         }
-        public void ClosePanelPostJuice()
+        // The card slides up and off; the panel fades only over the last 30%, so the player sees the slide, not a fade.
+        private IEnumerator FadeOutWhileLeaving()
         {
-            engagementPanelCanvasGroup.FadeOutAsync(0.25f);
-            enemyArmyCanvasGroup.FadeOutAsync();
-        }
-        public async void HideEndBattlePanel()
-        {
-            await Task.Delay(2000);
-            if(endBattlePanel != null) {
-                endBattlePanel.GetComponent<Animator>().SetBool("Active", false);
-            }
+            yield return new WaitForSecondsRealtime(view.CloseSeconds * 0.7f);
+            engagementPanelCanvasGroup.FadeOutAsync(view.CloseSeconds * 0.3f);
+            closeFade = null;
         }
         public override void ClosePanel()
         {
@@ -1466,24 +1423,21 @@ namespace TJ.Engagement
             _showedEngagementResult = false;
             mapSceneUIManager.HUDPanel.HideConsumablesBlocker();
             StartCoroutine(CampaignManager.Instance.MapCamera.LerpFocusedOnNodeVolume(0f, 0.25f));
-            battleOptionsCanvasGroup.CGDisable();
-            postBattleChoicesCanvasGroup.CGDisable();
-            postBattleTotalCanvasGroup.CGDisable();
-            runLostCanvasGroup.CGDisable();
-            squadDisplayCardConscript.gameObject.SetActive(false);
-
-            closeMMFPlayer.PlayFeedbacks();
+            view.PlayClose();
+            closeFade = StartCoroutine(FadeOutWhileLeaving());
+            continueButton.gameObject.SetActive(false);
 
             HideUnitsSlain();
             campaignSaveManager.MarkEngagementComplete(garrisonFight);
 
-            foreach (Transform child in enemyArmyParent) {
+            foreach (Transform child in view.EnemyArmyParent) {
                 Destroy(child.gameObject);
             }
+            enemySquadsCards.Clear();
         }
-        private void OnDestroy() 
+        private void OnDestroy()
         {
-            if(campaignSaveManager != null) 
+            if(campaignSaveManager != null)
             {
                 campaignSaveManager.OnArmyStructureChanged -= OnArmyStructureChanged;
             }

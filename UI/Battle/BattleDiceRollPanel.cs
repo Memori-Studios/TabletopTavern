@@ -45,6 +45,8 @@ namespace TJ
         public async Task<int> ShowAndRoll()
         {
             CampaignSaveData saveData = SaveDataHandler.Load();
+            // Ambush loses every roll; it comes first so an armed Fateshine Elixir is kept, not spent.
+            if (saveData.HasOrdeal(OrdealId.Ambush)) return await AutoRoll(1);
             bool armed = saveData.fateshineElixirArmed;
             bool hasFateshineElixir = saveData.consumables.Contains(ConsumableEnum.FateshineElixir);
 

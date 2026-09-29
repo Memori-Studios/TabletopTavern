@@ -41,28 +41,6 @@ namespace TJ
             tooltipTrigger = GetComponent<MemoriTooltipTrigger>();
             tooltipTrigger.SetUpToolTip(_description: KeywordText.ForTooltip(localizedDescription, unitCondition.ToString()));
         }
-        /// <summary>
-        /// A lasting spell on the squad, e.g. Dread: the badge reads "Dread 8s" (just the name for a zone,
-        /// which re-stamps its entry every tick), the icon is the spell's in its race colour, and the tooltip
-        /// is the spell's own description. Safe to call repeatedly - SquadBattleInfo refreshes it on its ammo tick.
-        /// </summary>
-        public void LoadSpell(TJ.Spells.SpellData spell, float secondsRemaining, bool showCountdown)
-        {
-            string localizedName = LocalizationManager.Instance.GetText(spell.Spell.ToString());
-            attributeText.text = showCountdown ? $"{localizedName} {Mathf.CeilToInt(secondsRemaining)}s" : localizedName;
-            tooltipTrigger = GetComponent<MemoriTooltipTrigger>();
-            tooltipTrigger.enabled = true;
-            tooltipTrigger.SetUpToolTip(_title: localizedName, _description: KeywordText.ForTooltip(spell.GetLocalizedSpellDescription()));
-
-            if (_icon == null)
-                foreach (Image image in GetComponentsInChildren<Image>(true))
-                    if (image.name == "Icon") { _icon = image; break; }
-            if (_icon != null)
-            {
-                _icon.sprite = spell.SpellSprite;
-                _icon.color = ColorData.GetRaceDisplayColor(spell.Race);
-            }
-        }
         #region Colorblind Mode
 
         private Image _icon;

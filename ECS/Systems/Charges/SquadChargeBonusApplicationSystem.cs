@@ -69,7 +69,17 @@ partial struct SquadChargeBonusApplicationSystem : ISystem
             }
 
             if (empowered)
+            {
                 bonus += (int)SystemAPI.GetComponent<ChargeEmpoweredTag>(squad.SelfEntity).BonusImpact;
+                entityCommandBuffer.AddComponent<EmpoweredChargeTag>(squad.SelfEntity);
+            }
+            // A charge that won no boost clears a mark that an earlier, cancelled charge left behind.
+            else if (SystemAPI.HasComponent<EmpoweredChargeTag>(squad.SelfEntity))
+                entityCommandBuffer.RemoveComponent<EmpoweredChargeTag>(squad.SelfEntity);
+
+            // Blunted Charge: the player's whole charge bonus is halved, Rally the Banners included.
+            if (squad.Team == Team.Player && !campaignSaveDataHolder.IsCustomBattle && OrdealMask.Has(campaignSaveDataHolder.OrdealMask, OrdealId.BluntedCharge))
+                bonus /= 2;
 
             //apply bonus
             BattlefieldBonusBufferElement.Add(new BattlefieldBonusBufferElement { 

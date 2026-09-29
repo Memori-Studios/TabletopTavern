@@ -51,6 +51,13 @@ namespace TJ
         private bool _isRiverCrossing;
         private bool _flanksReleased;
 
+        // Stall watchdog: every targeting system skips a CavalryFlankingTag squad, so one that stops
+        // mid-flank would otherwise stand idle until a player squad came within 20u.
+        private const float FlankStallSeconds = 5f;
+        private readonly HashSet<Entity>            _flankingSquads   = new();
+        private readonly Dictionary<Entity, float>  _flankStillSince  = new();
+        private readonly Dictionary<Entity, float3> _flankLastCenter  = new();
+
         #region Lifecycle
 
         public void SetUp()
@@ -79,6 +86,9 @@ namespace TJ
             }
             _pendingFlankSquads.Clear();
             _cachedCavalrySpeeds.Clear();
+            _flankingSquads.Clear();
+            _flankStillSince.Clear();
+            _flankLastCenter.Clear();
         }
 
         #endregion
@@ -149,6 +159,7 @@ namespace TJ
         /// </summary>
         public void Tick()
         {
+            WatchForStalledFlanks();
             if (_flanksReleased || _pendingFlankSquads.Count == 0) return;
             MarchCavalryWithInfantry();
             CheckForFlankRelease();
@@ -169,6 +180,7 @@ namespace TJ
             float3 widePosition = new(sideX, 0f, movement.SquadCenter.z - 10f);
             float3 farPosition  = new(sideX, 0f, -75f);
 
+            _flankingSquads.Add(squadEntity.SelfEntity);
             orders.Clear();
 
             if (!_isRiverCrossing)
@@ -350,6 +362,95 @@ namespace TJ
                 return UnityEngine.Random.value >= 0.5f ? rightFlankX : leftFlankX;
 
             return cavalryCurrentX >= 0f ? rightFlankX : leftFlankX;
+        }
+
+        #endregion
+
+        #region Stall Watchdog
+
+        private void WatchForStalledFlanks()
+        {
+            if (_flankingSquads.Count == 0) return;
+            float now = Time.time;
+
+            foreach (Entity entity in new List<Entity>(_flankingSquads))
+            {
+                if (!_entityManager.Exists(entity)
+                    || !_entityManager.HasComponent<CavalryFlankingTag>(entity)
+                    || _entityManager.HasComponent<BrokenSquadTag>(entity))
+                {
+                    ForgetFlank(entity);
+                    continue;
+                }
+
+                float3 center = _entityManager.GetComponentData<SquadMovementComponent>(entity).SquadCenter;
+                bool moved = !_flankLastCenter.TryGetValue(entity, out float3 anchor) || math.distancesq(center, anchor) > 1f;
+                if (moved || _entityManager.HasComponent<InCombat>(entity))
+                {
+                    _flankLastCenter[entity] = center;
+                    _flankStillSince[entity] = now;
+                    continue;
+                }
+
+                float stalledFor = now - _flankStillSince[entity];
+                if (stalledFor < FlankStallSeconds) continue;
+
+                Debug.LogWarning(DescribeStalledFlank(entity, stalledFor, center));
+                ReleaseStalledFlank(entity);
+                ForgetFlank(entity);
+            }
+        }
+
+        private void ForgetFlank(Entity entity)
+        {
+            _flankingSquads.Remove(entity);
+            _flankStillSince.Remove(entity);
+            _flankLastCenter.Remove(entity);
+        }
+
+        // Same exit CavalryFlankingJob takes, so the squad rejoins normal melee targeting.
+        private void ReleaseStalledFlank(Entity entity)
+        {
+            _entityManager.RemoveComponent<CavalryFlankingTag>(entity);
+            if (_entityManager.HasComponent<SquadMoveOverrideTag>(entity))
+                _entityManager.AddComponent<CancelSquadMoveOverrideTag>(entity);
+            _entityManager.SetComponentEnabled<WaitingForCommand>(entity, false);
+            _entityManager.GetBuffer<QueuedOrder>(entity).Clear();
+        }
+
+        private string DescribeStalledFlank(Entity entity, float stalledFor, float3 center)
+        {
+            SquadEntity squad = _entityManager.GetComponentData<SquadEntity>(entity);
+            SquadMovementComponent movement = _entityManager.GetComponentData<SquadMovementComponent>(entity);
+
+            DynamicBuffer<QueuedOrder> orders = _entityManager.GetBuffer<QueuedOrder>(entity);
+            string queue = orders.Length == 0
+                ? "empty"
+                : $"{orders[0].Type}/{orders[0].Status} to ({orders[0].Goal.x:F0},{orders[0].Goal.z:F0}) (+{orders.Length - 1})";
+
+            string moveTag = _entityManager.HasComponent<SquadMoveOverrideTag>(entity)
+                ? $"DistanceGoal {_entityManager.GetComponentData<SquadMoveOverrideTag>(entity).DistanceGoal:F1}"
+                : "none";
+
+            float nearestPlayer = float.MaxValue;
+            float lowestPlayerZ = float.MaxValue;
+            NativeArray<Entity> playerEntities = _playerSquadQuery.ToEntityArray(Allocator.Temp);
+            foreach (Entity player in playerEntities)
+            {
+                float3 playerCenter = _entityManager.GetComponentData<SquadMovementComponent>(player).SquadCenter;
+                nearestPlayer = math.min(nearestPlayer, math.distance(playerCenter, center));
+                lowestPlayerZ = math.min(lowestPlayerZ, playerCenter.z);
+            }
+            playerEntities.Dispose();
+
+            int alive = 0;
+            DynamicBuffer<EntityReferenceBufferElement> units = _entityManager.GetBuffer<EntityReferenceBufferElement>(entity);
+            for (int i = 0; i < units.Length; i++) if (_entityManager.Exists(units[i].Entity)) alive++;
+
+            return $"[EnemyCavalryWatchdog] squad {squad.SquadId} ({squad.UnitName}) stalled {stalledFor:F0}s mid-flank, released. " +
+                   $"queue {queue}, move tag {moveTag}, command {squad.SquadCommand}, units {alive}, " +
+                   $"centre ({center.x:F1},{center.z:F1}), goal ({movement.GoalPosition.x:F1},{movement.GoalPosition.z:F1}) " +
+                   $"dist {math.distance(center, movement.GoalPosition):F1}, nearest player {nearestPlayer:F0}, lowest player z {lowestPlayerZ:F0}";
         }
 
         #endregion

@@ -111,6 +111,8 @@ public class GameOverPanel : MonoBehaviour
 
         renownEarnedText.text = $"<color={ColorData.Tier4}>{renownAward.total}</color>";
         renownBreakdownText.text = $"{renownAward.chaptersCompleted} {chaptersLocalized}  |  {renownAward.actsCompleted} {actsLocalized} (+{renownAward.actRenown})  |  {difficultyNamestring} (x{renownAward.difficultyMultiplier:0.00})";
+        if (renownAward.ordealCount > 0)
+            renownBreakdownText.text += $"  |  {renownAward.ordealCount} {LocalizationManager.Instance.GetText("Ordeals")} (x{renownAward.ordealMultiplier:0.00})";
 
         // A banked victory already reported its win when act 3 fell; closing it reports the endless march, if any.
         string endReason = _beatDemo

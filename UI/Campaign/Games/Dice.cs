@@ -122,6 +122,8 @@ namespace TJ.Games
 
             while (elapsed < spinTime)
             {
+                // A quit to the menu mid-roll destroys the die while this loop is still running.
+                if (model == null) return;
                 model.Rotate(spinAxis * (_spinSpeed * Time.unscaledDeltaTime), Space.World);
                 elapsed += Time.unscaledDeltaTime;
                 await Task.Yield();
@@ -131,11 +133,13 @@ namespace TJ.Games
             elapsed = 0f;
             while (elapsed < settleTime)
             {
+                if (model == null) return;
                 model.rotation = Quaternion.Lerp(preSettleRotation, targetRotation, elapsed / settleTime);
                 elapsed += Time.unscaledDeltaTime;
                 await Task.Yield();
             }
 
+            if (model == null) return;
             model.rotation = targetRotation;
         }
         public async void PulseOutline()
@@ -147,6 +151,7 @@ namespace TJ.Games
 
             while (elapsed < halfDuration)
             {
+                if (_outline == null) return;
                 _outline.OutlineWidth = Mathf.Lerp(0f, targetWidth, elapsed / halfDuration);
                 elapsed += Time.unscaledDeltaTime;
                 await Task.Yield();
@@ -155,11 +160,13 @@ namespace TJ.Games
             elapsed = 0f;
             while (elapsed < halfDuration)
             {
+                if (_outline == null) return;
                 _outline.OutlineWidth = Mathf.Lerp(targetWidth, 0f, elapsed / halfDuration);
                 elapsed += Time.unscaledDeltaTime;
                 await Task.Yield();
             }
 
+            if (_outline == null) return;
             _outline.OutlineWidth = 0f;
         }
 

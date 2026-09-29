@@ -1,6 +1,8 @@
 using Unity.Burst;
 using Unity.Entities;
 using Unity.Mathematics;
+using GPUECSAnimationBaker.Engine.AnimatorSystem;
+using ProjectDawn.Navigation;
 
 // Ticks each mage squad's cast cooldown and, when it fires, appends a request to the
 // MageCastRequestBufferElement singleton for EntityWatcher to turn into a real ActiveSpell.
@@ -80,6 +82,10 @@ partial struct MageCastSystem : ISystem
             // is on the entity like every other unit, so that needs nothing from this system.
             if (entityManager.HasComponent<InCombat>(self)) continue;
 
+            // WalkRunJob replaces any clip with walk or run above WalkSpeedThreshold, so a cast waits until the mage has stopped.
+            if (SystemAPI.HasComponent<AgentBody>(unitEntity) && SystemAPI.HasComponent<AnimationDataHolder>(unitEntity)
+                && SystemAPI.GetComponent<AgentBody>(unitEntity).Speed > SystemAPI.GetComponent<AnimationDataHolder>(unitEntity).WalkSpeedThreshold) continue;
+
             if (!_squadMovementLookup.HasComponent(self)) continue;
             float3 selfCenter = _squadMovementLookup[self].SquadCenter;
 
@@ -108,6 +114,7 @@ partial struct MageCastSystem : ISystem
                 mageCast.ValueRW.Timer = mageCast.ValueRO.Cooldown;
                 entityCommandBuffer.AddComponent<AmmuntionSpent>(unitEntity);
                 _manualCastLookup.SetComponentEnabled(self, false);
+                PlayCastAnimation(ref state, unitEntity);
                 continue;
             }
             #endregion
@@ -149,6 +156,25 @@ partial struct MageCastSystem : ISystem
             // raised here instead. Safe against double-spending: the cooldown was just reset above,
             // so the tag is always consumed long before the next cast.
             entityCommandBuffer.AddComponent<AmmuntionSpent>(unitEntity);
+            PlayCastAnimation(ref state, unitEntity);
         }
+    }
+
+    // The animator indexes its clip buffer by slot, so a baked set without the cast slot must be skipped.
+    private void PlayCastAnimation(ref SystemState state, Entity unitEntity)
+    {
+        if (SystemAPI.HasComponent<ThrowUnit>(unitEntity)) return;
+        if (!SystemAPI.HasComponent<AnimationDataHolder>(unitEntity)) return;
+
+        Entity animatorEntity = SystemAPI.GetComponent<AnimationDataHolder>(unitEntity).gpuEcsAnimatorEntity;
+        if (!SystemAPI.HasComponent<GpuEcsAnimatorControlComponent>(animatorEntity)) return;
+        if (!SystemAPI.HasBuffer<GpuEcsAnimationDataBufferElement>(animatorEntity)) return;
+        if (SystemAPI.GetBuffer<GpuEcsAnimationDataBufferElement>(animatorEntity).Length <= TabletopTavernConstants.MAGE_CAST_ANIMATION_ID) return;
+
+        RefRW<GpuEcsAnimatorControlComponent> controlComp = SystemAPI.GetComponentRW<GpuEcsAnimatorControlComponent>(animatorEntity);
+        controlComp.ValueRW.animatorInfo.animationID = TabletopTavernConstants.MAGE_CAST_ANIMATION_ID;
+
+        if (SystemAPI.HasComponent<GpuEcsAnimatorControlStateComponent>(animatorEntity))
+            SystemAPI.GetComponentRW<GpuEcsAnimatorControlStateComponent>(animatorEntity).ValueRW.state = GpuEcsAnimatorControlStates.Start;
     }
 }

@@ -108,7 +108,7 @@ namespace TJ.Map
                 MapRegion mapRegion = MapThemeManager.Instance.GetMapRegion(_race);
                 int campaignSeed = CampaignManager.Instance.CampaignSaveManager.SaveData.seed;
                 int bookNum = CampaignManager.Instance.CampaignSaveManager.SaveData.bookNumber;
-                _weather = CampaignSaveManager.GenerateNodeWeather(_mapNodeData.index, campaignSeed, bookNum, mapRegion);
+                _weather = CampaignSaveManager.GenerateNodeWeather(_mapNodeData.index, campaignSeed, bookNum, mapRegion, CampaignManager.Instance.CampaignSaveManager.SaveData.ordealWeather);
                 _biome = CampaignSaveManager.GenerateNodeBiome(_mapNodeData.index, campaignSeed, bookNum, mapRegion);
             }
             if (surprise)

@@ -184,8 +184,10 @@ partial struct UnitSetUpSystem : ISystem
                 {
                     weaponStrength += GearData.GetGear(GearID.JoustingLances).GearModifierValue;
                 }
-                if(Contains(GearID.GnomishArmorers) && squadStats.RarityTier == UnitRarity.Rare)
-                    meleeDefense += GearData.GetGear(GearID.GnomishArmorers).GearModifierValue;
+                if(Contains(GearID.GnomishArmorers) && squadStats.RarityTier == UnitRarity.Uncommon)
+                    armor += GearData.GetGear(GearID.GnomishArmorers).GearModifierValue;
+                if(Contains(GearID.Shungite) && squadStats.RarityTier == UnitRarity.Uncommon)
+                    meleeAttack += GearData.GetGear(GearID.Shungite).GearModifierValue;
                 if(Contains(GearID.WellHonedAxes) && unitAttributes.ArmorPiercing) //must be after diamond tipped arrows
                     meleeAttack += GearData.GetGear(GearID.WellHonedAxes).GearModifierValue;
                 if(Contains(GearID.RavensEye) && squadStats.RarityTier != UnitRarity.Common && squadStats.unitType == UnitType.Ranged)

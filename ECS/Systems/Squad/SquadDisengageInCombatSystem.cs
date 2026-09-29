@@ -11,6 +11,7 @@ partial struct SquadDisengageInCombatSystem : ISystem
     private ComponentLookup<FormationEngagedInRangedCombat> _formationLookup;
     private ComponentLookup<BrokenSquadTag> _brokenSquadLookup;
     private ComponentLookup<InCombat> _inCombatLookup;
+    private ComponentLookup<FormationEngagedInCombat> _engagingLookup;
 
     [BurstCompile]
     public void OnCreate(ref SystemState state)
@@ -26,6 +27,7 @@ partial struct SquadDisengageInCombatSystem : ISystem
         _formationLookup = state.GetComponentLookup<FormationEngagedInRangedCombat>(true);
         _brokenSquadLookup = state.GetComponentLookup<BrokenSquadTag>(true);
         _inCombatLookup = state.GetComponentLookup<InCombat>(true);
+        _engagingLookup = state.GetComponentLookup<FormationEngagedInCombat>(true);
     }
 
     [BurstCompile]
@@ -36,6 +38,7 @@ partial struct SquadDisengageInCombatSystem : ISystem
         _formationLookup.Update(ref state);
         _brokenSquadLookup.Update(ref state);
         _inCombatLookup.Update(ref state);
+        _engagingLookup.Update(ref state);
 
         var allSquadData = _nonBrokenSquadQuery.ToComponentDataArray<SquadEntity>(Allocator.TempJob);
         var ecb = SystemAPI.GetSingleton<EndSimulationEntityCommandBufferSystem.Singleton>()
@@ -50,6 +53,7 @@ partial struct SquadDisengageInCombatSystem : ISystem
             FormationLookup = _formationLookup,
             BrokenSquadLookup = _brokenSquadLookup,
             InCombatLookup = _inCombatLookup,
+            EngagingLookup = _engagingLookup,
             Ecb = ecb
         }.ScheduleParallel(state.Dependency);
 
@@ -68,6 +72,7 @@ partial struct SquadDisengageJob : IJobEntity
     [ReadOnly] public ComponentLookup<FormationEngagedInRangedCombat> FormationLookup;
     [ReadOnly] public ComponentLookup<BrokenSquadTag> BrokenSquadLookup;
     [ReadOnly] public ComponentLookup<InCombat> InCombatLookup;
+    [ReadOnly] public ComponentLookup<FormationEngagedInCombat> EngagingLookup;
     public EntityCommandBuffer.ParallelWriter Ecb;
 
     public void Execute([ChunkIndexInQuery] int sortKey, Entity entity,
@@ -89,7 +94,9 @@ partial struct SquadDisengageJob : IJobEntity
         if (FormationLookup.HasComponent(squad.SelfEntity))
             Ecb.RemoveComponent<FormationEngagedInRangedCombat>(sortKey, squad.SelfEntity);
 
-        for (int i = 0; i < entityBuffer.Length; i++)
+        // SquadEngageInCombatSystem engages this squad later this frame; a queued OnDisengage would overwrite its OnEngage and leave MoveOverride on, making every model untargetable.
+        bool engagingThisFrame = EngagingLookup.HasComponent(squad.SelfEntity) && !InCombatLookup.HasComponent(squad.SelfEntity);
+        for (int i = 0; i < entityBuffer.Length && !engagingThisFrame; i++)
         {
             Entity unitEntity = entityBuffer[i].Entity;
             if (!UnitLookup.HasComponent(unitEntity)) continue;

@@ -31,6 +31,9 @@ namespace TJ.MainMenu.EditorTools
         const float PreviewFieldOfView = 30f;
         // Height of the shared baseline above the page header's rule. Every text in that row sits on it.
         const float HeaderBaseline = 22f;
+        const float RailRowMinHeight = 42f;
+        // Just under the label's natural height (39), so it never grows at 100%.
+        const float RailSectionMinHeight = 38f;
 
         #region Style
         static readonly Color Ground = Hex("121B1D");
@@ -50,6 +53,8 @@ namespace TJ.MainMenu.EditorTools
 
         static TMP_FontAsset displayDrop, display, body;
         static Sprite panel, shadow, keyCap, fadeRule, roundedFill, roundedOutline, edgeFade, lockIcon, arrow, gearIcon, potionIcon;
+        static Sprite circle, questsIcon, runsIcon, boardsIcon;
+        static QuestCatalogSO questCatalog;
 
         static void LoadAssets()
         {
@@ -71,6 +76,11 @@ namespace TJ.MainMenu.EditorTools
             arrow = Load<Sprite>("Assets/ImportedPackages/InterfaceFantasyWarriorHUD/Sprites/HUD/SPR_HUD_FantasyWarrior_Arrow02.png");
             gearIcon = Load<Sprite>("Assets/Art/Icons/UnitTypes/Melee.png");
             potionIcon = Load<Sprite>("Assets/Art/Icons/Consumables/MajorHealth.png");
+            circle = Load<Sprite>("Assets/Art/Icons/UI/Circle.png");
+            questsIcon = Load<Sprite>("Assets/Art/Icons/Map/Event.png");
+            runsIcon = Load<Sprite>("Assets/Art/Icons/Map/EndTurn.png");
+            boardsIcon = Load<Sprite>("Assets/Art/Icons/Stats/Leadership.png");
+            questCatalog = Load<QuestCatalogSO>("Assets/Data/SOs/Achievements/QuestCatalog.asset");
         }
 
         static T Load<T>(string path) where T : Object
@@ -283,6 +293,10 @@ namespace TJ.MainMenu.EditorTools
             ("Turn Button", null, TurnButtonPart),
             ("Scroll View", null, ScrollPart),
             ("Close Button", null, CloseButtonPart),
+            ("Quest Row", null, QuestRowPart),
+            ("Run Row", null, RunRowPart),
+            ("Board Row", null, BoardRowPart),
+            ("Filter Toggle", null, FilterTogglePart),
         };
 
         static string PartPath(string name) => $"{PartFolder}/{name}.prefab";
@@ -632,12 +646,15 @@ namespace TJ.MainMenu.EditorTools
             section.fontStyle = FontStyles.UpperCase;
             section.characterSpacing = 12f;
             section.margin = new Vector4(14f, 18f, 0f, 8f);
+            go.AddComponent<LayoutElement>().minHeight = RailSectionMinHeight;
         }
 
         static void RailRowPart(GameObject go)
         {
             RectTransform rect = (RectTransform)go.transform;
             Fixed(go, -1f, 50f);
+            // Rows give up a little height when the rail runs short (UI Scale 125%), so section labels keep theirs.
+            go.GetComponent<LayoutElement>().minHeight = RailRowMinHeight;
             Image background = Img(Stretch(Rect("Background", rect)), roundedFill, Color.clear, Image.Type.Sliced, 76f / 4f);
             background.raycastTarget = true;
             background.gameObject.AddComponent<LayoutElement>().ignoreLayout = true;
@@ -860,6 +877,213 @@ namespace TJ.MainMenu.EditorTools
             capText.alignment = TextAlignmentOptions.Center;
         }
 
+        static void QuestRowPart(GameObject go)
+        {
+            RectTransform rect = (RectTransform)go.transform;
+            Fixed(go, -1f, 76f);
+            Image background = Img(Stretch(Rect("Background", rect)), roundedFill, Hex("1C2729", 0.55f), Image.Type.Sliced, 76f / 4f);
+            background.gameObject.AddComponent<LayoutElement>().ignoreLayout = true;
+            HLayout(rect, 14f, TextAnchor.MiddleLeft, new RectOffset(8, 14, 0, 0));
+            Image icon = Img(Rect("Icon", rect), null, Color.white);
+            icon.preserveAspect = true;
+            Fixed(icon.gameObject, 60f, 60f);
+            RectTransform text = Rect("Text", rect);
+            VLayout(text, 2f, new RectOffset()).childAlignment = TextAnchor.MiddleLeft;
+            LayoutElement textElement = Flexible(text.gameObject, 1f);
+            textElement.minWidth = 0f;
+            CanvasGroup textGroup = text.gameObject.AddComponent<CanvasGroup>();
+            TMP_Text name = Text("Name", text, displayDrop, 18f, Cream, "Quest");
+            name.overflowMode = TextOverflowModes.Ellipsis;
+            TMP_Text description = Text("Description", text, body, 14f, Sub, "Description");
+            Wrap(description, TextAlignmentOptions.TopLeft);
+            description.overflowMode = TextOverflowModes.Ellipsis;
+            description.maxVisibleLines = 2;
+            description.lineSpacing = -8f;
+            // Two lines at most, so a long description ends in an ellipsis instead of pushing the name out of the row.
+            Fixed(description.gameObject, -1f, 36f);
+            RectTransform state = Rect("State", rect);
+            VerticalLayoutGroup stateLayout = VLayout(state, 4f, new RectOffset());
+            stateLayout.childAlignment = TextAnchor.MiddleRight;
+            stateLayout.childForceExpandWidth = false;
+            Fixed(state.gameObject, 96f, -1f);
+            TMP_Text status = Text("Status", state, body, 14f, Muted, "Locked");
+            status.fontStyle = FontStyles.Bold;
+            status.alignment = TextAlignmentOptions.MidlineRight;
+            TMP_Text date = Text("Date", state, body, 12.5f, Muted, "01/01/2026");
+            date.alignment = TextAlignmentOptions.MidlineRight;
+            RectTransform bar = Rect("Bar", state);
+            Fixed(bar.gameObject, 84f, 4f);
+            Img(Stretch(Rect("Track", bar)), null, HeaderFill);
+            RectTransform fill = Rect("Fill", bar);
+            Anchor(fill, Vector2.zero, new Vector2(0.5f, 1f), Vector2.zero, Vector2.zero);
+            Img(fill, null, Stat);
+            RecordsQuestRow row = go.AddComponent<RecordsQuestRow>();
+            var so = new SerializedObject(row);
+            Ref(so, "background", background);
+            Ref(so, "icon", icon);
+            Ref(so, "textGroup", textGroup);
+            Ref(so, "questName", name);
+            Ref(so, "description", description);
+            Ref(so, "status", status);
+            Ref(so, "date", date);
+            Ref(so, "progressBar", bar.gameObject);
+            Ref(so, "progressFill", fill);
+            so.ApplyModifiedPropertiesWithoutUndo();
+        }
+
+        static void RunRowPart(GameObject go)
+        {
+            RectTransform rect = (RectTransform)go.transform;
+            Fixed(go, -1f, 74f);
+            Image background = Img(Stretch(Rect("Background", rect)), roundedFill, Hex("1C2729", 0.55f), Image.Type.Sliced, 76f / 4f);
+            background.raycastTarget = true;
+            background.gameObject.AddComponent<LayoutElement>().ignoreLayout = true;
+            Image border = Img(Stretch(Rect("Border", rect)), roundedOutline, Line, Image.Type.Sliced, 76f / 4f);
+            border.gameObject.AddComponent<LayoutElement>().ignoreLayout = true;
+            Image accent = Img(Rect("Accent", rect), null, Gold);
+            Anchor(accent.rectTransform, new Vector2(0f, 0.12f), new Vector2(0f, 0.88f), Vector2.zero, new Vector2(3f, 0f));
+            accent.gameObject.AddComponent<LayoutElement>().ignoreLayout = true;
+            Button button = go.AddComponent<Button>();
+            button.targetGraphic = background;
+            button.transition = Selectable.Transition.None;
+            HoverSound(go, button);
+            HLayout(rect, 14f, TextAnchor.MiddleLeft, new RectOffset(12, 18, 0, 0));
+            Image frame = Portrait(rect, 56f, out Image portrait);
+            RectTransform text = Rect("Text", rect);
+            VLayout(text, 2f, new RectOffset()).childAlignment = TextAnchor.MiddleLeft;
+            Flexible(text.gameObject, 1f).minWidth = 0f;
+            TMP_Text heroName = Text("Name", text, displayDrop, 19f, Cream, "Hero");
+            heroName.overflowMode = TextOverflowModes.Ellipsis;
+            TMP_Text meta = Text("Meta", text, body, 14f, Sub, "Difficulty · Act · Date");
+            meta.overflowMode = TextOverflowModes.Ellipsis;
+            TMP_Text time = Text("Time", rect, body, 15f, Parchment, "0:00");
+            time.alignment = TextAlignmentOptions.MidlineRight;
+            Fixed(time.gameObject, 90f, -1f);
+            TMP_Text gold = Text("Gold", rect, body, 15f, Stat, "0");
+            gold.fontStyle = FontStyles.Bold;
+            gold.alignment = TextAlignmentOptions.MidlineRight;
+            Fixed(gold.gameObject, 70f, -1f);
+            TMP_Text outcome = Text("Outcome", rect, displayDrop, 17f, Cream, "Victory");
+            outcome.alignment = TextAlignmentOptions.MidlineRight;
+            outcome.overflowMode = TextOverflowModes.Ellipsis;
+            Fixed(outcome.gameObject, 130f, -1f);
+            RecordsRunRow row = go.AddComponent<RecordsRunRow>();
+            var so = new SerializedObject(row);
+            Ref(so, "button", button);
+            Ref(so, "background", background);
+            Ref(so, "border", border);
+            Ref(so, "accent", accent);
+            Ref(so, "portraitFrame", frame);
+            Ref(so, "portrait", portrait);
+            Ref(so, "heroName", heroName);
+            Ref(so, "meta", meta);
+            Ref(so, "time", time);
+            Ref(so, "gold", gold);
+            Ref(so, "outcome", outcome);
+            so.ApplyModifiedPropertiesWithoutUndo();
+        }
+
+        static void BoardRowPart(GameObject go)
+        {
+            RectTransform rect = (RectTransform)go.transform;
+            Fixed(go, -1f, 44f);
+            Image background = Img(Stretch(Rect("Background", rect)), roundedFill, Color.clear, Image.Type.Sliced, 76f / 4f);
+            background.gameObject.AddComponent<LayoutElement>().ignoreLayout = true;
+            Image border = Img(Stretch(Rect("Border", rect)), roundedOutline, A(Gold, 0.55f), Image.Type.Sliced, 76f / 4f);
+            border.gameObject.AddComponent<LayoutElement>().ignoreLayout = true;
+            HLayout(rect, 16f, TextAnchor.MiddleLeft, new RectOffset(10, 20, 0, 0));
+            RectTransform rank = Rect("Rank", rect);
+            Fixed(rank.gameObject, 44f, 30f);
+            Image medal = Img(Rect("Medal", rank), null, A(Gold, 0.18f));
+            Centre(medal.rectTransform, 21f, 21f);
+            medal.rectTransform.localEulerAngles = new Vector3(0f, 0f, 45f);
+            TMP_Text place = Text("Place", rank, body, 15f, Muted, "1");
+            Stretch(place.rectTransform);
+            place.alignment = TextAlignmentOptions.Center;
+            place.fontStyle = FontStyles.Bold;
+            TMP_Text name = Text("Name", rect, displayDrop, 18f, Cream, "Player");
+            name.overflowMode = TextOverflowModes.Ellipsis;
+            // Keeps a hero or player name readable when the row sits in the narrow side panel.
+            Flexible(name.gameObject, 1f).minWidth = 150f;
+            TMP_Text second = Text("Second", rect, body, 15f, Muted, "#1");
+            second.alignment = TextAlignmentOptions.MidlineRight;
+            Fixed(second.gameObject, 110f, -1f);
+            TMP_Text score = Text("Score", rect, displayDrop, 18f, Parchment, "0:00");
+            score.alignment = TextAlignmentOptions.MidlineRight;
+            score.overflowMode = TextOverflowModes.Ellipsis;
+            // Shrinks toward its minimum in the narrow side panel, so the name keeps some room.
+            LayoutElement scoreElement = score.gameObject.AddComponent<LayoutElement>();
+            scoreElement.minWidth = 110f;
+            scoreElement.preferredWidth = 240f;
+            RecordsBoardRow row = go.AddComponent<RecordsBoardRow>();
+            var so = new SerializedObject(row);
+            Ref(so, "background", background);
+            Ref(so, "border", border);
+            Ref(so, "medal", medal);
+            Ref(so, "place", place);
+            Ref(so, "playerName", name);
+            Ref(so, "second", second);
+            Ref(so, "score", score);
+            so.ApplyModifiedPropertiesWithoutUndo();
+        }
+
+        static void FilterTogglePart(GameObject go)
+        {
+            RectTransform rect = (RectTransform)go.transform;
+            rect.sizeDelta = new Vector2(232f, 34f);
+            Image edge = Img(Stretch(Rect("Border", rect)), roundedOutline, Line, Image.Type.Sliced, 76f / 4f);
+            edge.gameObject.AddComponent<LayoutElement>().ignoreLayout = true;
+            HorizontalLayoutGroup row = HLayout(rect, 0f, TextAnchor.MiddleCenter, new RectOffset(1, 1, 1, 1));
+            row.childForceExpandWidth = true;
+            row.childForceExpandHeight = true;
+            Button first = Segment(rect, "Everyone", out Image firstFill, out TMP_Text firstLabel);
+            Button second = Segment(rect, "Friends", out Image secondFill, out TMP_Text secondLabel);
+            RecordsFilterToggle toggle = go.AddComponent<RecordsFilterToggle>();
+            var so = new SerializedObject(toggle);
+            Ref(so, "first", first);
+            Ref(so, "second", second);
+            Ref(so, "firstFill", firstFill);
+            Ref(so, "secondFill", secondFill);
+            Ref(so, "firstLabel", firstLabel);
+            Ref(so, "secondLabel", secondLabel);
+            so.ApplyModifiedPropertiesWithoutUndo();
+        }
+
+        static Button Segment(RectTransform parent, string name, out Image fill, out TMP_Text label)
+        {
+            RectTransform segment = Rect(name, parent);
+            Flexible(segment.gameObject, 1f, 1f);
+            fill = Img(Stretch(Rect("Fill", segment)), roundedFill, Color.clear, Image.Type.Sliced, 76f / 4f);
+            fill.raycastTarget = true;
+            Button button = segment.gameObject.AddComponent<Button>();
+            button.targetGraphic = fill;
+            button.transition = Selectable.Transition.None;
+            HoverSound(segment.gameObject, button);
+            label = Text("Label", segment, body, 14f, Muted, name);
+            Stretch(label.rectTransform);
+            label.alignment = TextAlignmentOptions.Center;
+            label.fontStyle = FontStyles.Bold;
+            return button;
+        }
+
+        // A hero portrait cropped to its head: the tall art is anchored to the top of a square mask.
+        static Image Portrait(RectTransform parent, float size, out Image portrait)
+        {
+            RectTransform face = Rect("Portrait", parent);
+            Fixed(face.gameObject, size, size);
+            Image frame = Img(Stretch(Rect("Frame", face)), roundedFill, Brass, Image.Type.Sliced, 76f / 6f);
+            RectTransform mask = Stretch(Rect("Mask", face), 2f, 2f, 2f, 2f);
+            mask.gameObject.AddComponent<RectMask2D>();
+            Img(Stretch(Rect("Back", mask)), null, Hex("0E1416"));
+            portrait = Img(Rect("Image", mask), null, Color.white);
+            Anchor(portrait.rectTransform, new Vector2(0f, 1f), new Vector2(1f, 1f), Vector2.zero, Vector2.zero);
+            portrait.rectTransform.pivot = new Vector2(0.5f, 1f);
+            AspectRatioFitter fit = portrait.gameObject.AddComponent<AspectRatioFitter>();
+            fit.aspectMode = AspectRatioFitter.AspectMode.WidthControlsHeight;
+            fit.aspectRatio = 512f / 768f;
+            return frame;
+        }
+
         static GameObject Lock(RectTransform parent)
         {
             Image image = Img(Rect("Lock", parent), lockIcon, Color.white);
@@ -970,8 +1194,16 @@ namespace TJ.MainMenu.EditorTools
             CollectionTab unitsTab = PageTab(tabs, "Units");
             CollectionTab heroesTab = PageTab(tabs, "Heroes");
             CollectionTab loreTab = PageTab(tabs, "Lore");
+            RectTransform boardTabs = Rect("Board Tabs", headRow);
+            HLayout(boardTabs, 30f, TextAnchor.MiddleLeft, new RectOffset(18, 0, 0, 0)).childForceExpandHeight = true;
+            CollectionTab godkingTab = PageTab(boardTabs, "Fastest Godking");
+            CollectionTab deepestTab = PageTab(boardTabs, "Deepest March");
             RectTransform headSpacer = Rect("Spacer", headRow);
             Flexible(headSpacer.gameObject, 1f);
+            RectTransform filterSlot = Rect("Filter Slot", headRow);
+            Fixed(filterSlot.gameObject, 232f, -1f);
+            RecordsFilterToggle filter = Part<RecordsFilterToggle>("Filter Toggle", filterSlot);
+            Centre((RectTransform)filter.transform, 232f, 34f);
             RectTransform effects = Rect("Effects", headRow);
             HLayout(effects, 22f, TextAnchor.MiddleRight, new RectOffset()).childForceExpandHeight = true;
             TMP_Text battleEffect = HeaderEffect(effects, "Battle", out MemoriTooltipTrigger battleTooltip);
@@ -1060,6 +1292,8 @@ namespace TJ.MainMenu.EditorTools
             VLayout(loreContent, 0f, new RectOffset(0, 24, 6, 30)).childForceExpandWidth = false;
             TMP_Text lore = Paragraph(loreContent, 20f, 780f);
 
+            CollectionRecords records = Records(bodyArea, boardTabs.gameObject, godkingTab, deepestTab, filterSlot.gameObject, filter);
+
             var so = new SerializedObject(panel);
             Ref(so, "closeButton", close);
             Ref(so, "closeLabel", closeLabel);
@@ -1071,6 +1305,10 @@ namespace TJ.MainMenu.EditorTools
             Ref(so, "railRowTemplate", PartAsset<CollectionRailRow>("Rail Row"));
             Ref(so, "gearRailIcon", gearIcon);
             Ref(so, "potionRailIcon", potionIcon);
+            Ref(so, "questsRailIcon", questsIcon);
+            Ref(so, "runsRailIcon", runsIcon);
+            Ref(so, "boardsRailIcon", boardsIcon);
+            Ref(so, "records", records);
             Ref(so, "headerMarker", marker);
             Ref(so, "headerTitle", pageTitle);
             Ref(so, "headerSubtitle", pageSubtitle);
@@ -1303,7 +1541,7 @@ namespace TJ.MainMenu.EditorTools
             return view;
         }
 
-        static void Strip(Transform parent, int cells, out TMP_Text[] values, out TMP_Text[] labels)
+        static RectTransform Strip(Transform parent, int cells, out TMP_Text[] values, out TMP_Text[] labels)
         {
             RectTransform strip = Part<RectTransform>("Stat Strip", parent);
             values = new TMP_Text[cells];
@@ -1320,6 +1558,7 @@ namespace TJ.MainMenu.EditorTools
                 used++;
             }
             if (used < cells) Debug.LogError($"CollectionCodexBuilder: the Stat Strip prefab has {used} cells; the detail panel needs {cells}.");
+            return strip;
         }
 
         static RectTransform SpellRow(Transform parent, string name, float tileSize, out Image icon, out TMP_Text label, out TMP_Text spellName)
@@ -1331,6 +1570,304 @@ namespace TJ.MainMenu.EditorTools
             label = Child<TMP_Text>(row, "Text/Label");
             spellName = Child<TMP_Text>(row, "Text/Name");
             return row;
+        }
+        #endregion
+
+        #region Records
+        // Quests, Run History and Leaderboards: three body pages in the same column as the grid, and one side panel in
+        // the detail panel's place.
+        static CollectionRecords Records(RectTransform bodyArea, GameObject boardTabs, CollectionTab godkingTab, CollectionTab deepestTab,
+            GameObject filterSlot, RecordsFilterToggle filter)
+        {
+            RectTransform root = Stretch(Rect("Records", bodyArea));
+            CollectionRecords records = root.gameObject.AddComponent<CollectionRecords>();
+            var so = new SerializedObject(records);
+
+            // Quests page
+            ScrollRect questScroll = Scroll(root, "Quests Page", out RectTransform questContent);
+            Stretch((RectTransform)questScroll.transform, 0f, 472f, 0f, 0f);
+            VLayout(questContent, 10f, new RectOffset(0, 20, 0, 24)).childForceExpandWidth = true;
+            TMP_Text offline = Text("Steam Offline", questContent, body, 16f, Stat, "Steam is not connected.");
+            Wrap(offline, TextAlignmentOptions.TopLeft);
+            RectTransform columns = Rect("Columns", questContent);
+            HorizontalLayoutGroup columnRow = HLayout(columns, 12f, TextAnchor.UpperLeft, new RectOffset());
+            columnRow.childForceExpandWidth = true;
+            RectTransform leftColumn = QuestColumn(columns, "Left");
+            RectTransform rightColumn = QuestColumn(columns, "Right");
+            Ref(so, "catalog", questCatalog);
+            Ref(so, "questsPage", questScroll.gameObject);
+            Ref(so, "questsScroll", questScroll);
+            Refs(so, "questColumns", new Object[] { leftColumn, rightColumn });
+            Ref(so, "questRowTemplate", PartAsset<RecordsQuestRow>("Quest Row"));
+            Ref(so, "steamOffline", offline);
+
+            // Run History page
+            ScrollRect runScroll = Scroll(root, "Runs Page", out RectTransform runContent);
+            Stretch((RectTransform)runScroll.transform, 0f, 472f, 0f, 0f);
+            VLayout(runContent, 8f, new RectOffset(0, 20, 2, 24)).childForceExpandWidth = true;
+            RectTransform runHeads = Rect("Columns", runContent);
+            HLayout(runHeads, 14f, TextAnchor.MiddleLeft, new RectOffset(82, 18, 0, 0));
+            Fixed(runHeads.gameObject, -1f, 26f);
+            TMP_Text commanderHead = SectionLabel(runHeads, "Commander");
+            Flexible(commanderHead.gameObject, 1f).minWidth = 0f;
+            TMP_Text timeHead = Column(runHeads, "Time", 90f);
+            TMP_Text goldHead = Column(runHeads, "Gold", 70f);
+            TMP_Text outcomeHead = Column(runHeads, "Outcome", 130f);
+            RectTransform runList = Rect("List", runContent);
+            VLayout(runList, 8f, new RectOffset()).childForceExpandWidth = true;
+            TMP_Text runsEmpty = Text("Empty", runContent, display, 19f, Sub, "No runs recorded yet.");
+            Wrap(runsEmpty, TextAlignmentOptions.Top);
+            runsEmpty.margin = new Vector4(0f, 60f, 0f, 0f);
+            Ref(so, "runsPage", runScroll.gameObject);
+            Ref(so, "runsScroll", runScroll);
+            Ref(so, "runColumns", runHeads.gameObject);
+            Refs(so, "runColumnLabels", new Object[] { commanderHead, timeHead, goldHead, outcomeHead });
+            Ref(so, "runList", runList);
+            Ref(so, "runRowTemplate", PartAsset<RecordsRunRow>("Run Row"));
+            Ref(so, "runsEmpty", runsEmpty.gameObject);
+            Ref(so, "runsEmptyText", runsEmpty);
+
+            // Leaderboards page
+            ScrollRect boardScroll = Scroll(root, "Boards Page", out RectTransform boardContent);
+            Stretch((RectTransform)boardScroll.transform, 0f, 472f, 0f, 0f);
+            VLayout(boardContent, 4f, new RectOffset(0, 20, 4, 24)).childForceExpandWidth = true;
+            TMP_Text boardSubtitle = Text("Subtitle", boardContent, body, 16f, Sub, "Subtitle");
+            Wrap(boardSubtitle, TextAlignmentOptions.TopLeft);
+            boardSubtitle.margin = new Vector4(0f, 0f, 0f, 10f);
+            RectTransform boardHeads = Rect("Columns", boardContent);
+            HLayout(boardHeads, 16f, TextAnchor.MiddleLeft, new RectOffset(10, 20, 0, 0));
+            Fixed(boardHeads.gameObject, -1f, 26f);
+            TMP_Text rankHead = Column(boardHeads, "Rank", 44f);
+            rankHead.alignment = TextAlignmentOptions.Center;
+            TMP_Text nameHead = SectionLabel(boardHeads, "Commander");
+            Flexible(nameHead.gameObject, 1f).minWidth = 0f;
+            TMP_Text secondHead = Column(boardHeads, "World rank", 110f);
+            TMP_Text scoreHead = Column(boardHeads, "Time", 240f);
+            TMP_Text boardStatus = Text("Status", boardContent, body, 16f, Muted, "Fetching times from Steam...");
+            Wrap(boardStatus, TextAlignmentOptions.TopLeft);
+            boardStatus.margin = new Vector4(10f, 12f, 0f, 0f);
+            RectTransform boardList = Rect("List", boardContent);
+            VLayout(boardList, 4f, new RectOffset()).childForceExpandWidth = true;
+            TMP_Text gap = Text("Gap", root, body, 18f, Muted, "···");
+            gap.alignment = TextAlignmentOptions.Center;
+            gap.characterSpacing = 20f;
+            Fixed(gap.gameObject, -1f, 24f);
+            gap.gameObject.SetActive(false);
+            Ref(so, "boardsPage", boardScroll.gameObject);
+            Ref(so, "boardsScroll", boardScroll);
+            Ref(so, "boardHeader", boardTabs);
+            Ref(so, "boardFilterSlot", filterSlot);
+            Ref(so, "godkingTab", godkingTab);
+            Ref(so, "deepestTab", deepestTab);
+            Ref(so, "filter", filter);
+            Ref(so, "boardSubtitle", boardSubtitle);
+            Ref(so, "rankColumn", rankHead);
+            Ref(so, "nameColumn", nameHead);
+            Ref(so, "secondColumn", secondHead);
+            Ref(so, "scoreColumn", scoreHead);
+            Ref(so, "boardList", boardList);
+            Ref(so, "boardRowTemplate", PartAsset<RecordsBoardRow>("Board Row"));
+            Ref(so, "boardGapTemplate", gap);
+            Ref(so, "boardStatus", boardStatus);
+
+            // Side panel, in the detail panel's frame and place
+            RectTransform frame = Rect("Side", root);
+            Anchor(frame, new Vector2(1f, 0f), new Vector2(1f, 1f), new Vector2(-440f, 0f), Vector2.zero);
+            Image frameShadow = Img(Rect("Shadow", frame), shadow, A(Color.white, 0.8f), Image.Type.Sliced, 1f);
+            Stretch(frameShadow.rectTransform, -30f, -30f, -18f, -42f);
+            Img(Stretch(Rect("Panel", frame)), panel, Color.white, Image.Type.Sliced, 1f).raycastTarget = true;
+            ScrollRect sideScroll = Scroll(frame, "Scroll", out RectTransform sideContent);
+            Stretch((RectTransform)sideScroll.transform, 6f, 6f, 6f, 6f);
+            VLayout(sideContent, 0f, new RectOffset(26, 26, 26, 26)).childForceExpandWidth = true;
+            Ref(so, "side", frame.gameObject);
+            Ref(so, "sideScroll", sideScroll);
+
+            QuestSide(sideContent, so);
+            RunSide(sideContent, so);
+            BoardSide(sideContent, so);
+
+            so.ApplyModifiedPropertiesWithoutUndo();
+            return records;
+        }
+
+        static RectTransform QuestColumn(Transform parent, string name)
+        {
+            RectTransform column = Rect(name, parent);
+            VLayout(column, 8f, new RectOffset()).childForceExpandWidth = true;
+            // No preferred width, so the two columns split the page evenly whatever their rows hold.
+            LayoutElement element = Flexible(column.gameObject, 1f);
+            element.minWidth = 0f;
+            element.preferredWidth = 0f;
+            return column;
+        }
+
+        static TMP_Text Column(Transform parent, string text, float width)
+        {
+            TMP_Text label = SectionLabel(parent, text);
+            label.alignment = TextAlignmentOptions.MidlineRight;
+            Fixed(label.gameObject, width, -1f);
+            return label;
+        }
+
+        static void QuestSide(RectTransform parent, SerializedObject so)
+        {
+            RectTransform view = View(parent, "Quest View", 14f, TextAnchor.UpperLeft);
+            RectTransform summary = Rect("Summary", view);
+            HLayout(summary, 22f, TextAnchor.MiddleLeft, new RectOffset()).childForceExpandWidth = false;
+            RectTransform ring = Rect("Ring", summary);
+            Fixed(ring.gameObject, 112f, 112f);
+            Img(Stretch(Rect("Track", ring)), circle, Hex("223032"));
+            Image fill = Img(Stretch(Rect("Fill", ring)), circle, Gold);
+            fill.type = Image.Type.Filled;
+            fill.fillMethod = Image.FillMethod.Radial360;
+            fill.fillOrigin = (int)Image.Origin360.Top;
+            fill.fillClockwise = true;
+            fill.fillAmount = 0.38f;
+            Img(Stretch(Rect("Hole", ring), 9f, 9f, 9f, 9f), circle, Slate);
+            RectTransform ringText = Stretch(Rect("Text", ring));
+            VerticalLayoutGroup ringLayout = VLayout(ringText, -4f, new RectOffset());
+            ringLayout.childAlignment = TextAnchor.MiddleCenter;
+            TMP_Text count = Text("Count", ringText, displayDrop, 34f, Gold, "0");
+            count.alignment = TextAlignmentOptions.Center;
+            TMP_Text of = Text("Of", ringText, body, 13f, Muted, "of 50");
+            of.alignment = TextAlignmentOptions.Center;
+            RectTransform words = Rect("Words", summary);
+            VLayout(words, 4f, new RectOffset()).childAlignment = TextAnchor.MiddleLeft;
+            Flexible(words.gameObject, 1f).minWidth = 0f;
+            TMP_Text label = SectionLabel(words, "Quests");
+            TMP_Text percent = Text("Percent", words, displayDrop, 28f, Cream, "0% unlocked");
+            Wrap(percent, TextAlignmentOptions.TopLeft);
+
+            RectTransform closest = SideGroup(view, "Closest", out TMP_Text closestLabel, out RectTransform closestList);
+            RectTransform latest = SideGroup(view, "Latest", out TMP_Text latestLabel, out RectTransform latestList);
+
+            Ref(so, "questSide", view.gameObject);
+            Ref(so, "ringFill", fill);
+            Ref(so, "ringCount", count);
+            Ref(so, "ringOf", of);
+            Ref(so, "questsLabel", label);
+            Ref(so, "percentText", percent);
+            Ref(so, "closestGroup", closest.gameObject);
+            Ref(so, "closestLabel", closestLabel);
+            Ref(so, "closestList", closestList);
+            Ref(so, "latestGroup", latest.gameObject);
+            Ref(so, "latestLabel", latestLabel);
+            Ref(so, "latestList", latestList);
+        }
+
+        // A ruled group with a label and a list: the side panel's repeated section.
+        static RectTransform SideGroup(Transform parent, string name, out TMP_Text label, out RectTransform list)
+        {
+            RectTransform group = Rect(name, parent);
+            VLayout(group, 10f, new RectOffset(0, 0, 8, 0)).childForceExpandWidth = true;
+            Part<RectTransform>("Rule", group);
+            label = SectionLabel(group, name);
+            list = Rect("List", group);
+            VLayout(list, 8f, new RectOffset()).childForceExpandWidth = true;
+            return group;
+        }
+
+        static void RunSide(RectTransform parent, SerializedObject so)
+        {
+            RectTransform view = View(parent, "Run View", 14f, TextAnchor.UpperLeft);
+            RectTransform head = Rect("Head", view);
+            HLayout(head, 16f, TextAnchor.MiddleLeft, new RectOffset()).childForceExpandWidth = false;
+            Portrait(head, 76f, out Image portrait);
+            RectTransform words = Rect("Words", head);
+            VLayout(words, 2f, new RectOffset()).childAlignment = TextAnchor.MiddleLeft;
+            Flexible(words.gameObject, 1f).minWidth = 0f;
+            TMP_Text eyebrow = SectionLabel(words, "Date");
+            eyebrow.color = Sub;
+            TMP_Text name = Text("Name", words, displayDrop, 26f, Gold, "Hero");
+            Wrap(name, TextAlignmentOptions.TopLeft);
+            TMP_Text line = Text("Line", words, body, 16f, Parchment, "Difficulty · Outcome");
+            Strip(view, 3, out TMP_Text[] firstValues, out TMP_Text[] firstLabels);
+            Strip(view, 3, out TMP_Text[] secondValues, out TMP_Text[] secondLabels);
+
+            RectTransform army = Rect("Army", view);
+            VLayout(army, 8f, new RectOffset()).childForceExpandWidth = true;
+            TMP_Text armyLabel = SectionLabel(army, "Army");
+            RectTransform armyGrid = Grid(army, "Grid", 64f, 72f, 8f, 5);
+            RectTransform reserve = Rect("Reserve", view);
+            VLayout(reserve, 8f, new RectOffset()).childForceExpandWidth = true;
+            TMP_Text reserveLabel = SectionLabel(reserve, "Reserve");
+            RectTransform reserveGrid = Grid(reserve, "Grid", 64f, 72f, 8f, 5);
+
+            RectTransform kit = Rect("Kit", view);
+            HLayout(kit, 26f, TextAnchor.UpperLeft, new RectOffset()).childForceExpandWidth = false;
+            RectTransform gear = Rect("Gear", kit);
+            VLayout(gear, 8f, new RectOffset()).childForceExpandWidth = true;
+            TMP_Text gearLabel = SectionLabel(gear, "Gear");
+            RectTransform gearGrid = Grid(gear, "Grid", 52f, 52f, 6f, 3);
+            RectTransform spells = Rect("Spells", kit);
+            VLayout(spells, 8f, new RectOffset()).childForceExpandWidth = true;
+            TMP_Text spellsLabel = SectionLabel(spells, "Spells");
+            RectTransform spellsGrid = Grid(spells, "Grid", 52f, 52f, 6f, 3);
+
+            Ref(so, "runSide", view.gameObject);
+            Ref(so, "cardPortrait", portrait);
+            Ref(so, "cardEyebrow", eyebrow);
+            Ref(so, "cardName", name);
+            Ref(so, "cardLine", line);
+            Refs(so, "cardValues", firstValues.Concat(secondValues).ToArray<Object>());
+            Refs(so, "cardLabels", firstLabels.Concat(secondLabels).ToArray<Object>());
+            Ref(so, "armyLabel", armyLabel);
+            Ref(so, "armyGrid", armyGrid);
+            Ref(so, "reserveGroup", reserve.gameObject);
+            Ref(so, "reserveLabel", reserveLabel);
+            Ref(so, "reserveGrid", reserveGrid);
+            Ref(so, "gearGroup", gear.gameObject);
+            Ref(so, "gearLabel", gearLabel);
+            Ref(so, "gearGrid", gearGrid);
+            Ref(so, "spellsGroup", spells.gameObject);
+            Ref(so, "spellsLabel", spellsLabel);
+            Ref(so, "spellsGrid", spellsGrid);
+            Ref(so, "miniUnitTemplate", PartAsset<CollectionMiniUnit>("Mini Unit"));
+            Ref(so, "itemTileTemplate", PartAsset<CollectionTile>("Item Tile"));
+        }
+
+        static void BoardSide(RectTransform parent, SerializedObject so)
+        {
+            RectTransform view = View(parent, "Board View", 12f, TextAnchor.UpperLeft);
+            TMP_Text standing = SectionLabel(view, "Your standing");
+            TMP_Text rank = Text("Rank", view, displayDrop, 60f, Gold, "#0");
+            TMP_Text of = Text("Of", view, body, 16f, Muted, "of 0 commanders");
+            Wrap(of, TextAlignmentOptions.TopLeft);
+            RectTransform strip = Strip(view, 2, out TMP_Text[] values, out TMP_Text[] labels);
+            RectTransform next = SideGroup(view, "Next up", out TMP_Text nextLabel, out RectTransform nextList);
+            RecordsBoardRow nextRow = Part<RecordsBoardRow>("Board Row", nextList, "Next Row");
+            RectTransform yours = SideGroup(view, "Yours", out TMP_Text yoursLabel, out RectTransform yoursList);
+            TMP_Text yoursNote = Text("Note", yours, body, 13f, Muted, "From Run History");
+            yoursNote.transform.SetSiblingIndex(yoursLabel.transform.GetSiblingIndex() + 1);
+
+            Ref(so, "boardSide", view.gameObject);
+            Ref(so, "standingLabel", standing);
+            Ref(so, "rankText", rank);
+            Ref(so, "ofText", of);
+            Ref(so, "standingStrip", strip.gameObject);
+            Refs(so, "standingValues", values);
+            Refs(so, "standingLabels", labels);
+            Ref(so, "nextGroup", next.gameObject);
+            Ref(so, "nextLabel", nextLabel);
+            Ref(so, "nextRow", nextRow);
+            Ref(so, "yoursGroup", yours.gameObject);
+            Ref(so, "yoursLabel", yoursLabel);
+            Ref(so, "yoursNote", yoursNote);
+            Ref(so, "yoursList", yoursList);
+        }
+
+        static RectTransform Grid(Transform parent, string name, float width, float height, float spacing, int columns)
+        {
+            RectTransform rect = Rect(name, parent);
+            GridLayoutGroup grid = rect.gameObject.AddComponent<GridLayoutGroup>();
+            grid.cellSize = new Vector2(width, height);
+            grid.spacing = new Vector2(spacing, spacing);
+            grid.constraint = GridLayoutGroup.Constraint.FixedColumnCount;
+            grid.constraintCount = columns;
+            grid.childAlignment = TextAnchor.UpperLeft;
+            // A fixed-column grid reports every column as its minimum width; zero lets it sit in a narrower column.
+            rect.gameObject.AddComponent<LayoutElement>().minWidth = 0f;
+            return rect;
         }
         #endregion
 

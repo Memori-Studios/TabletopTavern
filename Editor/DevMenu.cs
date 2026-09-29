@@ -18,6 +18,7 @@ namespace TJ.EditorTools
         private const string Warlords = Root + "Force Enemy Warlords";
         private const string CustomSave = Root + "Boot Loads Custom Battle Save";
         private const string CampaignBattle = Root + "Boot Loads Campaign Battle";
+        private const string ActThreeVictory = Root + "Boot Into Act III Victory (Hard)";
         private const string BootNone = Root + "Editor Boot/Normal (main menu)";
         private const string BootMap = Root + "Editor Boot/Map";
         private const string BootBattle = Root + "Editor Boot/Tavern Battle";
@@ -47,6 +48,12 @@ namespace TJ.EditorTools
         private static void ToggleCampaignBattle() => Announce("Boot Loads Campaign Battle", DevOverrides.LoadCampaignBattle = !DevOverrides.LoadCampaignBattle);
         [MenuItem(CampaignBattle, true)]
         private static bool ValidateCampaignBattle() => Check(CampaignBattle, DevOverrides.LoadCampaignBattle);
+
+        // Saves go to Library/DevSaves/ActThreeVictory, rebuilt every Play; see ActThreeVictoryTestSave.
+        [MenuItem(ActThreeVictory, priority = 22)]
+        private static void ToggleActThreeVictory() => Announce("Boot Into Act III Victory (Hard)", DevOverrides.BootIntoActThreeVictory = !DevOverrides.BootIntoActThreeVictory);
+        [MenuItem(ActThreeVictory, true)]
+        private static bool ValidateActThreeVictory() => Check(ActThreeVictory, DevOverrides.BootIntoActThreeVictory);
         #endregion
 
         #region Editor boot (one of three)

@@ -5,6 +5,7 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using TJ;
 using TJ.Spells;
+using TJ.Achievements;
 using System;
 using Memori.Steamworks;
 using Memori.Metaprogression;
@@ -49,13 +50,23 @@ namespace Memori.SaveData
         public List<SquadKillsStored> SquadKillsStore;
         public List<SquadKillsStored> HistoricalKillStore;
         public List<SquadLossesStored> SquadLossesStore;
+        // Last battle only. Null in older saves: read it as no damage recorded.
+        public List<SquadDamageStored> SquadDamageStore;
+        // Spoils taken after the last won battle, so a reloaded result cannot pay twice. Null in older saves: none taken.
+        public List<string> spoilsTaken;
         public List<UnitNameOverrides> unitNameOverrides;
         public RunStats RunStats;
         public BattleFieldPreset battleFieldPreset;
         public int turnsSincePotato;
         public int Rolls;
         public List<SquadToLoad> withdrawnSquads;
+        // Legacy shuffled event order: EventPanel turns what an old save still holds into seenEvents once, then empties it.
         public List<int> eventOrdering;
+        // TableKeys of events drawn since the pool last emptied.
+        public List<string> seenEvents = new();
+        // One "TableKey/choice/outcome" per resolved event; story-chain events require entries from it.
+        public List<string> eventHistory = new();
+        public EventBattleEffects eventBattleEffects = new();
         public int BattlesFought;
         public TT_Difficulty difficultyLevel;
         public bool snapShot;
@@ -80,6 +91,8 @@ namespace Memori.SaveData
         // Recorded with the selected node so the battle scene can tell a Horde from a Skirmish or a garrison.
         public TJ.Map.NodeType selectedNodeType;
         public NodeVisit nodeVisit;
+        // A roll the player has seen at the current node; Continue reopens the node on it instead of letting the pick be redone.
+        public NodeResume nodeResume;
         /// <summary>Seconds of real play on this run (Map and campaign battles). See RunClock.</summary>
         public double playTimeSeconds;
         // Set when the act 3 win is recorded while the run marches on into endless acts. From then on the
@@ -90,6 +103,35 @@ namespace Memori.SaveData
         public bool victoryWasFirstHeroCompletion;
         // Hero leading the saved enemy army with his bonus rules (see EnemyWarlord), or 0 for none.
         public int enemyWarlordHeroID;
+        // Ordeals taken on the endless march, in the order taken. One is due per endless act. See OrdealRegistry.
+        public List<OrdealId> ordeals = new();
+        // Gear broken by Rusted Arms. It stays in Gear, keeping its slot, but no longer works.
+        public List<GearID> brokenGear = new();
+        // Long Night's weather for every battle; ClearSkies means the card is not held.
+        public Weather ordealWeather;
+        // Sealed Page's slot; 0 means none, since slot 0 is the signature spell and is never sealed.
+        public int sealedSpellSlot;
+
+        public bool HasOrdeal(OrdealId id) => ordeals != null && ordeals.Contains(id);
+        public bool IsGearBroken(GearID gear) => brokenGear != null && brokenGear.Contains(gear);
+        // Owned but switched off: broken by Rusted Arms, or cancelled by a held Ordeal.
+        public bool IsGearInactive(GearID gear) => IsGearBroken(gear) || OrdealRegistry.CounteringOrdeal(ordeals, gear) != OrdealId.None;
+        public bool IsConsumableBlocked(ConsumableEnum consumable) => OrdealRegistry.CounteringOrdeal(ordeals, consumable) != OrdealId.None;
+        public bool IsFactionPassiveBlocked(Race race) => OrdealRegistry.CounteringOrdeal(ordeals, race) != OrdealId.None;
+        public bool HasWorkingGear(GearID gear) => Gear != null && Gear.Contains(gear) && !IsGearInactive(gear);
+        // The last act whose Ordeal start ran (pick and per-act cards), so each endless act starts exactly once.
+        public int ordealActStarted;
+        public bool OrdealPickDue => TabletopTavernConstants.EndlessActs(bookNumber) > 0 && ordealActStarted < bookNumber;
+        public ulong OrdealBits
+        {
+            get
+            {
+                ulong bits = 0;
+                if (ordeals != null)
+                    foreach (OrdealId id in ordeals) bits |= OrdealMask.Bit(id);
+                return bits;
+            }
+        }
 
         /// <summary>runId, or a stable stand-in built from fields that never change mid-run for a run saved before runId existed.</summary>
         public string RunId => string.IsNullOrEmpty(runId) ? $"legacy-{seed}-{heroID}-{(int)difficultyLevel}" : runId;
@@ -118,13 +160,13 @@ namespace Memori.SaveData
             SquadKillsStore = new List<SquadKillsStored>();
             HistoricalKillStore = new List<SquadKillsStored>();
             SquadLossesStore = new List<SquadLossesStored>();
+            SquadDamageStore = new List<SquadDamageStored>();
             unitNameOverrides = new List<UnitNameOverrides>();
             RunStats = new RunStats();
             withdrawnSquads = new List<SquadToLoad>();
             difficultyLevel = _difficulty;
             selectedNodeIndex = -1;
             bookNumber = 1;
-            eventOrdering = EventData.GetEventOrdering(new System.Random(seed));//order in which events will be generated
             playerSquadBattlePositions = new List<SquadBattlePosition>();
         }
         public int GetSelectedNodeIndex()
@@ -170,6 +212,11 @@ namespace Memori.SaveData
         public bool pauseUsed;        // true once the pause button was used this run (UhPause)
         public bool gainedUnitOutsideRaiseDead; // true once a unit was gained by any means but Raise Dead (DeadShallServe)
         public List<SpellCastStored> spellsCast; // player casts this run per spell, hotbar and mage alike; reported on runEnded
+        public List<string> startingSquadIds;    // squads the run began with; a merge passes the mark on (BandOfBrothers, FromLevyToLegend)
+        public List<string> conscriptedSquadIds; // squads gained through Conscript Survivors; a merge passes the mark on (OneOfUs)
+        public bool heldMage;                    // true once the army ever held a mage (SteelOverSorcery)
+        public int campfireTrainings;            // squads trained at campfires this run (DrillSergeant)
+        public List<TJ.Map.NodeType> nodeTypesVisited; // kinds of node picked this run (GrandTour)
     }
     [System.Serializable] public struct SpellCastStored
     {
@@ -185,6 +232,26 @@ namespace Memori.SaveData
         public int goldOnEntry;
         public List<OfferedNode> offered;
     }
+    /// <summary>A dice result locked in at a Games or Event node, written to the snapshot so a quit to the menu cannot undo it.</summary>
+    [System.Serializable] public struct NodeResume
+    {
+        public bool active;
+        public int nodeIndex;
+        public TJ.Map.NodeType nodeType;
+        // Games node: which table, its stake, the dice and where the game stands (GamesPanel's constants).
+        public int tableGame;
+        public int stake;
+        public int playerFace;
+        public int houseFace;
+        public int wins;
+        public int phase;
+        public bool callHigher;
+        public int goldChange;
+        // Event node: the drawn event, the chosen choice and its d20.
+        public string eventKey;
+        public int choiceIndex;
+        public int roll;
+    }
     [System.Serializable] public struct OfferedNode
     {
         public int index;
@@ -199,6 +266,8 @@ namespace Memori.SaveData
         public int actRenown;
         public TT_Difficulty difficulty;
         public float difficultyMultiplier;
+        public int ordealCount;
+        public float ordealMultiplier;
         public int total;
     }
     [System.Serializable] public struct UnitNameOverrides
@@ -256,6 +325,12 @@ namespace Memori.SaveData
         public List<UnitNameKillsStored> UnitNameHistoricalKillStore = new();
         /// <summary>Every finished campaign, newest last. See <see cref="RunRecord"/>.</summary>
         public List<RunRecord> runHistory = new();
+        // Spells cast in fought campaign battles, ever (GrandGrimoire).
+        public List<Spell> spellsEverCast = new();
+        // Harsh weathers the player has won a fought battle in, ever (AllWeathers).
+        public List<Weather> weathersWonIn = new();
+        // Achievements earned while Steam could not take them; AchievementSync sends them once it can.
+        public List<string> pendingAchievements = new();
     }
     [System.Serializable] public struct SquadKillsStored
     {
@@ -266,6 +341,11 @@ namespace Memori.SaveData
     {
         public string SquadGUID;
         public int Losses;
+    }
+    [System.Serializable] public struct SquadDamageStored
+    {
+        public string SquadGUID;
+        public int Damage;
     }
     [System.Serializable] public struct UnitNameKillsStored
     {
@@ -334,7 +414,9 @@ namespace Memori.SaveData
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
         static void ApplyDevSaveRoot()
         {
-            string root = Memori.Scenes.DevOverrides.SaveRoot;
+            string root = Memori.Scenes.DevOverrides.BootIntoActThreeVictory
+                ? ActThreeVictoryTestSave.PrepareFolder()
+                : Memori.Scenes.DevOverrides.SaveRoot;
             SetSaveRoot(string.IsNullOrEmpty(root) ? null : root);
             if (!string.IsNullOrEmpty(root)) UnityEngine.Debug.LogWarning($"[SaveDataHandler] Dev save root: {root}");
         }
@@ -347,7 +429,8 @@ namespace Memori.SaveData
 
         public static GearIDsSerialized GetGearCollected()
         {
-            List<GearID> gearIDs = Load().Gear;
+            CampaignSaveData run = Load();
+            List<GearID> gearIDs = run.Gear.FindAll(gear => !run.IsGearInactive(gear));
             GearIDsSerialized gearIDsSerialized = new GearIDsSerialized();
             for(int i = 0; i < gearIDs.Count; i++) {
                 switch(i) {
@@ -481,6 +564,18 @@ namespace Memori.SaveData
             }
             return _historicalKills;
         }
+        public const int SLAUGHTERS_CHAMPION_KILLS = 250;
+        // Checked at battle end, so it no longer waits for the squad's card to be drawn on the map.
+        public static void CheckSlaughtersChampion(List<SquadKillsStored> _historicalKills, ICollection<string> _playerSquadGuids)
+        {
+            if (_historicalKills == null) return;
+            foreach (SquadKillsStored entry in _historicalKills)
+            {
+                if (entry.Kills < SLAUGHTERS_CHAMPION_KILLS || !_playerSquadGuids.Contains(entry.SquadGUID)) continue;
+                SteamAchievements.Unlock(AchievementId.HighKill);
+                return;
+            }
+        }
         private static List<UnitNameKillsStored> AddToUnitNameHistoricalKills(List<UnitNameKillsStored> _historicalKills, List<UnitNameKillsStored> _currentKills)
         {
             _historicalKills ??= new List<UnitNameKillsStored>();
@@ -552,7 +647,7 @@ namespace Memori.SaveData
         /// <param name="_playerWon"></param>
         /// <param name="_squadIdKillCounter"></param>
         /// <param name="_squadIdLossCounter"></param>
-        public static void SaveSquadsPostBattle(SquadToLoad[] _playerSquads, SquadToLoad[] _enemySquads, bool _playerWon, List<SquadKillsStored> _squadIdKillCounter, List<SquadLossesStored> _squadIdLossCounter, int _spellKills = 0, AnalyticsBattleReport _report = null)
+        public static void SaveSquadsPostBattle(SquadToLoad[] _playerSquads, SquadToLoad[] _enemySquads, bool _playerWon, List<SquadKillsStored> _squadIdKillCounter, List<SquadLossesStored> _squadIdLossCounter, List<SquadDamageStored> _squadDamage, int _spellKills = 0, AnalyticsBattleReport _report = null)
         {
             UnityEngine.Debug.Log($"SaveDataHandler SaveSquadsPostBattle: player won: {_playerWon}");
             CampaignSaveData saveData = Load();
@@ -575,11 +670,14 @@ namespace Memori.SaveData
             saveData.enemyArmy = _enemySquads;
             saveData.battleCompleted = true;
             saveData.playerWonBattle = _playerWon;
+            saveData.spoilsTaken = null;
             saveData.manaDraughtsArmed = 0;
+            saveData.eventBattleEffects = new EventBattleEffects();
             saveData.SquadKillsStore = _squadIdKillCounter;
 
             saveData.HistoricalKillStore = AddToHistoricalKills(saveData.HistoricalKillStore, _squadIdKillCounter);
             saveData.SquadLossesStore = _squadIdLossCounter;
+            saveData.SquadDamageStore = _squadDamage;
             if(saveData.townData == null) {
                 saveData.townData = new TownSaveData();
                 UnityEngine.Debug.Log($"Created new TownSaveData in SaveSquadsPostBattle");
@@ -615,8 +713,8 @@ namespace Memori.SaveData
             {
                 if (saveData.playerArmy[i].UnitIndex == -1) continue;
 
-                // Hybrids shoot, so they disqualify the No Archers run just like a dedicated shooter.
-                if (TabletopTavernConstants.FightsAtRange(TabletopTavernData.Instance.GetSquadStats(saveData.playerArmy[i].UnitName).unitType))
+                // Only the Ranged class breaks the No Archers run; Hybrids count as melee.
+                if (TabletopTavernData.Instance.GetSquadStats(saveData.playerArmy[i].UnitName).unitType == UnitType.Ranged)
                 {
                     saveData.archerUsedInBattle = true;
                     break;
@@ -637,6 +735,7 @@ namespace Memori.SaveData
                 if (index < 0) saveData.RunStats.spellsCast.Add(new SpellCastStored { Spell = cast.Key, Casts = cast.Value });
                 else saveData.RunStats.spellsCast[index] = new SpellCastStored { Spell = cast.Key, Casts = saveData.RunStats.spellsCast[index].Casts + cast.Value };
             }
+            List<Spell> spellsCastThisBattle = new(SpellsCastThisBattle.Keys);
             SpellsCastThisBattle.Clear();
 
             // The battle result goes to disk before any stats or achievement work so a failure below
@@ -685,6 +784,9 @@ namespace Memori.SaveData
                 if (ArmyLossesSufferedThisBattle) SteamAchievements.Unlock(AchievementId.AgainstAllOdds);
             }
             ArmyLossesSufferedThisBattle = false;
+
+            CheckSlaughtersChampion(saveData.HistoricalKillStore, playerSquadGuids);
+            BattleAchievements.Evaluate(saveData, _playerWon, _squadIdKillCounter, _spellKills, _report, _enemySquads, spellsCastThisBattle);
         }
         public static void SavePlayerSaveData(PlayerSaveData toSave)
         {
@@ -790,7 +892,7 @@ namespace Memori.SaveData
         public static TT_Difficulty GetHeroLastDifficulty(int heroID)
         {
             PlayerSaveData saveData = LoadPlayerSaveData();
-            TT_Difficulty maxAvailable = DifficultyRules.HighestUnlocked(saveData.MaxDifficultyOverall);
+            TT_Difficulty highestUnlocked = DifficultyRules.HighestUnlocked(saveData.MaxDifficultyOverall);
 
             for (int i = 0; i < saveData.HeroLastDifficulties.Count; i++)
             {
@@ -803,7 +905,7 @@ namespace Memori.SaveData
                 }
             }
 
-            return maxAvailable;
+            return highestUnlocked;
         }
         public static void SaveHeroLastDifficulty(int heroID, TT_Difficulty difficulty)
         {
@@ -928,7 +1030,17 @@ namespace Memori.SaveData
         {
             CampaignSaveData campaignSaveData = Load();
             Spell[] sanitized = SpellLoadout.Sanitize(campaignSaveData.selectedSpells, campaignSaveData.heroID);
+            // After Sanitize, which would refill an empty unlocked slot; selectedSpells itself is never changed.
+            int sealedSlot = campaignSaveData.sealedSpellSlot;
+            if (sealedSlot > 0 && sealedSlot < sanitized.Length) sanitized[sealedSlot] = Spell.None;
             return SpellRegistry.Resolve(sanitized);
+        }
+        /// <summary>A campaign hotbar slot is locked when Renown has not opened it, or Sealed Page sealed it.</summary>
+        public static bool IsCampaignSlotLocked(int slotIndex)
+        {
+            if (SpellLoadout.IsSlotLocked(slotIndex)) return true;
+            int sealedSlot = Load().sealedSpellSlot;
+            return sealedSlot > 0 && slotIndex == sealedSlot;
         }
         /// <summary>
         /// The spell mana budget for one battle. Static because the battle scene has no
@@ -952,9 +1064,13 @@ namespace Memori.SaveData
             int act = Math.Max(1, save.bookNumber);
             int actPool = Math.Min(TabletopTavernConstants.SPELL_MANA_POOL_CAP,
                 TabletopTavernConstants.SPELL_MANA_POOL_BASE + (act - 1) * TabletopTavernConstants.SPELL_MANA_POOL_PER_ACT);
-            return actPool
+            int pool = actPool
                  + SpellLoadout.GetManaBonus()
-                 + save.manaDraughtsArmed * TabletopTavernConstants.SPELL_MANA_POOL_DRAUGHT;
+                 + save.manaDraughtsArmed * TabletopTavernConstants.SPELL_MANA_POOL_DRAUGHT
+                 + (save.eventBattleEffects == null ? 0 : save.eventBattleEffects.mana);
+            // Arcane Drought shrinks the whole pool, Renown and Mana Draughts included.
+            if (save.HasOrdeal(OrdealId.ArcaneDrought)) pool = (int)Math.Ceiling(pool * OrdealRegistry.ARCANE_DROUGHT_MANA);
+            return pool;
         }
         public static Race GetEnemyRace()
         {
@@ -1017,6 +1133,8 @@ namespace Memori.SaveData
 
             int seed = UnityEngine.Random.Range(0, 1000000);
             CampaignSaveData campaignSaveData = new (seed, hero.HeroID, startingGold, playerArmy, _difficultyLevelSelected, _startingGear, _runUUID, _selectedSpells);
+            campaignSaveData.RunStats.startingSquadIds = new List<string>(squadsToLoad.Length);
+            for (int i = 0; i < squadsToLoad.Length; i++) campaignSaveData.RunStats.startingSquadIds.Add(playerArmy[i].UniqueID);
 
             RunClock.Reset();
             SaveCampaign(campaignSaveData);
@@ -1153,7 +1271,7 @@ namespace Memori.SaveData
             int renownEarned = 0;
             if (abandonedRun.victoryBanked)
             {
-                RenownAward award = ComputeRenownReward(abandonedRun.RunStats, Mathf.Max(abandonedRun.bookNumber - 1, 0), abandonedRun.difficultyLevel);
+                RenownAward award = ComputeRenownReward(abandonedRun.RunStats, Mathf.Max(abandonedRun.bookNumber - 1, 0), abandonedRun.difficultyLevel, abandonedRun.ordeals?.Count ?? 0);
                 saveData.renown += award.total;
                 renownEarned = award.total;
                 outcome = RunOutcome.Win;
@@ -1232,7 +1350,23 @@ namespace Memori.SaveData
                 if (recruited.Contains(roster[i])) collectedCount++;
             }
 
-            if (collectedCount >= roster.Length) SteamAchievements.Unlock(achievementId);
+            if (collectedCount < roster.Length) return;
+            SteamAchievements.Unlock(achievementId);
+            if (AllRaceCollectionsComplete()) SteamAchievements.Unlock(AchievementId.GrandCollector);
+        }
+
+        // An emptied roster cannot be completed, so a mod that empties one also blocks Grand Collector.
+        private static bool AllRaceCollectionsComplete()
+        {
+            List<UnitName> recruited = GetTroopsIDsCollected();
+            foreach (Race race in RaceCollectionAchievements.Keys)
+            {
+                UnitName[] roster = TabletopTavernData.Instance.GetUnitsOfRace(race);
+                if (roster.Length == 0) return false;
+                foreach (UnitName unit in roster)
+                    if (!recruited.Contains(unit)) return false;
+            }
+            return true;
         }
 
         public static void EvaluateGearCollection()
@@ -1273,13 +1407,14 @@ namespace Memori.SaveData
         // Endless acts pay less so lifetime Renown does not run away on a long march.
         private const int RENOWN_PER_ENDLESS_ACT = 25;
 
-        private static RenownAward ComputeRenownReward(RunStats runStats, int bookNumber, TT_Difficulty difficulty)
+        private static RenownAward ComputeRenownReward(RunStats runStats, int bookNumber, TT_Difficulty difficulty, int ordealCount)
         {
             int chapterRenown = runStats.chaptersCompleted * RENOWN_PER_CHAPTER;
             int storyActs = Mathf.Min(bookNumber, TabletopTavernConstants.FINAL_STORY_ACT);
             int actRenown = storyActs * RENOWN_PER_ACT_COMPLETED + (bookNumber - storyActs) * RENOWN_PER_ENDLESS_ACT;
             float difficultyMultiplier = DifficultyRules.RenownMultiplier(difficulty);
-            int total = Mathf.RoundToInt((chapterRenown + actRenown) * difficultyMultiplier);
+            float ordealMultiplier = OrdealRegistry.RenownMultiplier(ordealCount);
+            int total = Mathf.RoundToInt((chapterRenown + actRenown) * difficultyMultiplier * ordealMultiplier);
 
             return new RenownAward
             {
@@ -1289,6 +1424,8 @@ namespace Memori.SaveData
                 actRenown = actRenown,
                 difficulty = difficulty,
                 difficultyMultiplier = difficultyMultiplier,
+                ordealCount = ordealCount,
+                ordealMultiplier = ordealMultiplier,
                 total = total
             };
         }
@@ -1336,7 +1473,7 @@ namespace Memori.SaveData
             // bookNumber is the act currently in progress. On a win it was actually finished, but on a
             // loss it wasn't - don't award renown for the act the player died in.
             int actsCompleted = _playerWon ? campaignSaveData.bookNumber : Mathf.Max(campaignSaveData.bookNumber - 1, 0);
-            RenownAward renownAward = ComputeRenownReward(campaignSaveData.RunStats, actsCompleted, campaignSaveData.difficultyLevel);
+            RenownAward renownAward = ComputeRenownReward(campaignSaveData.RunStats, actsCompleted, campaignSaveData.difficultyLevel, campaignSaveData.ordeals?.Count ?? 0);
             saveData.renown += renownAward.total;
 
             if (saveData.renown >= 100)
@@ -1434,6 +1571,7 @@ namespace Memori.SaveData
                 if (saveData.HeroDifficultiesCompleted[i].DifficultiesCompleted.Count > 0) heroesBeaten++;
             }
             if (heroesBeaten >= totalHeroes) SteamAchievements.Unlock(AchievementId.RosterComplete);
+            if (AchievementRules.TryGetHeroVictory(currentHeroID, out AchievementId heroVictory)) SteamAchievements.Unlock(heroVictory);
         }
         public static bool IsUnlockConditionUnlocked(UnlockCondition _unlockCondition, int heroID)
         {

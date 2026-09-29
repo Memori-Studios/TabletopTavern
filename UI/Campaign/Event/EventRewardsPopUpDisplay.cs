@@ -63,6 +63,18 @@ namespace TJ.Event
                             eventRewards.Add(eventRewardDisplay);
                             break;
                         }
+                    case EventOutcomeModifierEnum.LoseGear:
+                    case EventOutcomeModifierEnum.LoseSquad:
+                    case EventOutcomeModifierEnum.LosePrestige:
+                        {
+                            string lost = CampaignManager.Instance.CampaignSaveManager.ApplyEventLoss(eventOutcomeModifier);
+                            if (lost == null) break;
+                            EventRewardDisplay eventRewardDisplay = Instantiate(eventRewardPrefab, rewardParent);
+                            eventRewardDisplay.LoadEventReward(eventOutcomeModifier, lost);
+                            eventRewards.Add(eventRewardDisplay);
+                            CampaignManager.Instance.CampaignSaveManager.SaveCampaign();
+                            break;
+                        }
                     case EventOutcomeModifierEnum.GearDrop:
                         {
                             EventAquireRewardButton acquireGearButton = Instantiate(aquireRewardButtonPrefab, rewardParent);

@@ -25,10 +25,10 @@ namespace TJ.MainMenu
     /// <summary>
     /// Run setup, split across two screens.
     ///
-    /// <b>Commander</b> - hero roster, 3D stage, dossier (hero effects, faction effects, signature
-    /// unit, treasury) and the difficulty ladder. Nothing here spends gold.
-    /// <b>Warband</b> - army, gear and spells under one persistent purse, driven by
-    /// <see cref="WarbandPanel"/>.
+    /// <b>Commander</b> - hero roster, 3D stage and the hero panel (effects, signature unit and spell,
+    /// record, treasury), shown through <see cref="CommanderScreenView"/>. Nothing here spends gold.
+    /// <b>Warband</b> - army, gear, spells and the difficulty ladder under one persistent purse,
+    /// driven by <see cref="WarbandPanel"/>.
     ///
     /// This class owns the run's state (hero, difficulty, gear, army, spells) and is the only thing
     /// that calls CreateCampaign. The two screens are views over that state.
@@ -45,34 +45,14 @@ namespace TJ.MainMenu
         [SerializeField] private Button toWarbandButton;
         [SerializeField] private Button startButton;
 
-        [Header("Hero Roster")]
-        [SerializeField] private HeroDifficultyButton[] heroSelectionButtons;
+        [Header("Hero Screen")]
+        [SerializeField] private CommanderScreenView commanderView;
         [SerializeField] private MMF_Player heroPopInFeedback;
         [SerializeField] private DiscordUnlock discordUnlock;
         [SerializeField] private NewsletterUnlock newsletterUnlock;
 
         [Header("Hero Stage")]
         [SerializeField] private Transform heroParent;
-        [SerializeField] private TMP_Text stageHeroNameText;
-        [SerializeField] private TMP_Text stageFactionText;
-        [SerializeField] private TMP_Text stageLoreText;
-
-        [Header("Dossier - Hero")]
-        [SerializeField] private TMP_Text heroBonusText1, heroBonusText2;
-        [SerializeField] private MemoriTooltipTrigger heroTooltipTrigger;
-
-        [Header("Dossier - Faction")]
-        [SerializeField] private TMP_Text raceTitleText;
-        [SerializeField] private TMP_Text raceCampaignBonusText, raceBattleBonusText;
-
-        [Header("Dossier - Signature Unit")]
-        [SerializeField] private TMP_Text signatureUnitNameText;
-        [SerializeField] private SquadDisplayCardMenu uniqueUnitDisplayCardMenu;
-
-        [Header("Dossier - Treasury")]
-        [SerializeField] private TMP_Text treasuryTitleText;
-        [SerializeField] private TMP_Text heroGoldText;
-        [SerializeField] private TMP_Text treasuryNoteText;
         [SerializeField] private MemoriTooltipTrigger startingGoldTooltipTrigger;
 
         [Header("Difficulty")]
@@ -87,7 +67,6 @@ namespace TJ.MainMenu
         // header button, which the redesign removes, so leave it unassigned if there is no longer
         // a summary label for it.
         [SerializeField] private TMP_Text difficultyButtonText;
-        [SerializeField] private LockedButton lockedDifficultyStartButton;
 
         [Header("Army & Gear")]
         [SerializeField] private StartingArmyManager startingArmySection;
@@ -126,13 +105,9 @@ namespace TJ.MainMenu
         bool warbandScreenShown;
         string startingArmyGateReason = string.Empty;
         int _heroPrefabLoadVersion;
-        int _maxDifficultyCompletedOverall = 0;
         UnlockCondition _unlockCondition;
         // Found at runtime: the light lives in the persistent Tavern scene, which a serialized field cannot reach.
         VolumetricLight fireplaceLight;
-        // Added once to the signature-unit card, not once per hero hover.
-        
-        TroopHoverPlayPanel signatureUnitHover;
 
         public override void SetUp(MainMenu _mainMenu)
         {
@@ -165,19 +140,15 @@ namespace TJ.MainMenu
             this.gameObject.SetActive(true);
             base.OpenPanel();
             totalPanel.SetActive(true);
-            _maxDifficultyCompletedOverall = SaveDataHandler.LoadPlayerSaveData().MaxDifficultyOverall;
 
-            // Guard the pairing: a mod can add or remove a hero, and the roster buttons are a fixed
-            // authored array. Extra heroes are reported rather than silently dropped.
+            // Guard the pairing: a mod can add or remove a hero, and the roster tiles are a fixed
+            // generated set. Extra heroes are reported rather than silently dropped.
             Hero[] allHeroes = HeroData.Heroes;
-            int rosterCount = Mathf.Min(heroSelectionButtons.Length, allHeroes.Length);
-            if (allHeroes.Length != heroSelectionButtons.Length)
+            HeroRosterTile[] tiles = commanderView.Tiles;
+            int rosterCount = commanderView.LoadRoster(allHeroes, this);
+            if (allHeroes.Length != tiles.Length)
             {
-                Debug.LogError($"[PlayPanel] {allHeroes.Length} heroes but {heroSelectionButtons.Length} roster buttons - showing {rosterCount}.");
-            }
-            for (int i = 0; i < rosterCount; i++)
-            {
-                heroSelectionButtons[i].LoadHeroSelectionPage(allHeroes[i], this);
+                Debug.LogError($"[PlayPanel] {allHeroes.Length} heroes but {tiles.Length} roster tiles - showing {rosterCount}.");
             }
 
             Hero openingHero = GetHeroToOpenWith();
@@ -188,7 +159,7 @@ namespace TJ.MainMenu
                 openingIndex = i;
                 break;
             }
-            if (rosterCount > 0) EventSystem.current.SetSelectedGameObject(heroSelectionButtons[openingIndex].gameObject);
+            if (rosterCount > 0) EventSystem.current.SetSelectedGameObject(tiles[openingIndex].gameObject);
 
             startingGearLocked = !SaveDataHandler.IsMetaprogressionNodeUnlocked(_startingArmyUnlockMetaprogressionModel);
             LoadHeroes(openingHero);
@@ -417,99 +388,25 @@ namespace TJ.MainMenu
         }
 
         /// <summary>
-        /// Fills the stage and dossier. Called on hero change and on roster hover, so it must stay
-        /// free of side effects that accumulate - see the signature-unit hover component below.
+        /// Fills the hero panel. Called on hero change and on roster hover, so it must stay free of
+        /// side effects that accumulate.
         /// </summary>
         public void ShowHeroDetailsBox(Hero _hero)
         {
-            string heroNameLocalized = LocalizationManager.Instance.GetText(_hero.HeroName);
-            stageHeroNameText.text = heroNameLocalized;
-            stageFactionText.text = LocalizationManager.Instance.GetText(_hero.Race.ToString());
-            stageLoreText.text = LocalizationManager.Instance.GetLoreString(_hero.HeroPrefabName);
-
-            string heroBonusText1string = HeroBonusText.Get(_hero, 0);
-            string heroBonusText2string = HeroBonusText.Get(_hero, 1);
-            KeywordText.Show(heroBonusText1, ApplyPrimaryColorToLabel(KeywordText.Render(heroBonusText1string)));
-            KeywordText.Show(heroBonusText2, ApplyPrimaryColorToLabel(KeywordText.Render(heroBonusText2string)));
-
-            //faction
-            string factionLocalized = LocalizationManager.Instance.GetText("Faction");
-            string factionNameLocalized = LocalizationManager.Instance.GetText(_hero.Race.ToString());
-            // TMP's <uppercase> is a render-time transform, so it cannot mangle a locale the way
-            // string.ToUpper() can, and it leaves CJK untouched.
-            raceTitleText.text = $"<color={ColorData.Gold}><uppercase>{factionLocalized} · {factionNameLocalized}</uppercase></color>";
-
-            // Labelled by phase so it is unambiguous which effect fires on the map and which fires
-            // in a battle - they read identically otherwise.
-            string campaignBonusLocalized = KeywordText.Render(LocalizationManager.Instance.GetText(_hero.Race + "BonusDescription"));
-            KeywordText.Show(raceCampaignBonusText, BuildFactionEffectLine(
-                LocalizationManager.Instance.GetText("CampaignEffectLabel"), campaignBonusLocalized));
-
-            string battleBonusLocalized = KeywordText.Render($"{LocalizationManager.Instance.GetText(_hero.Race + "PassiveName")}: {RacePassiveInfo.GetDescription(_hero.Race)}");
-            KeywordText.Show(raceBattleBonusText, BuildFactionEffectLine(
-                LocalizationManager.Instance.GetText("BattleEffectLabel"), battleBonusLocalized));
-
+            // The signature unit's hover panel reads this squad.
+            uniqueSquad = new SquadToLoad(_hero.SignatureUnit, _prestige: 0, _unitIndex: 0);
+            commanderView.ShowHero(_hero, this);
             ShowTreasury(_hero);
-
-            ShowSignatureUnit(_hero);
-
-            string heroDescription = LocalizationManager.Instance.GetText(_hero.HeroDescription);
-            heroTooltipTrigger.SetUpToolTip($"{heroNameLocalized}", $"{heroDescription}");
         }
 
         /// <summary>
-        /// Title / total / note. The total is base + renown: the old readout printed the hero's raw
-        /// StartingGold with the bonus in brackets after it, so the number the player read was never
-        /// the number they had to spend.
+        /// The total is base + renown: an old readout printed the raw StartingGold with the bonus in
+        /// brackets after it, so the number the player read was never the number they had to spend.
         /// </summary>
         private void ShowTreasury(Hero _hero)
         {
             int renownBonus = startingArmySection.StartingGoldBonusFromMetaprogression;
-            int total = _hero.StartingGold + renownBonus;
-
-            treasuryTitleText.text = LocalizationManager.Instance.GetText("StartingTreasuryTitle");
-
-            // The breakdown only earns its line when there is something to break down.
-            if (renownBonus > 0)
-            {
-                string renownPart = $"<color={ColorData.Green}>+{renownBonus}</color>";
-                heroGoldText.text = string.Format(
-                    LocalizationManager.Instance.GetText("StartingTreasuryBreakdown"),
-                    total, _hero.StartingGold, renownPart);
-            }
-            else
-            {
-                heroGoldText.text = $"{total} <sprite name=GoldSprite>";
-            }
-
-            treasuryNoteText.text = LocalizationManager.Instance.GetText("StartingTreasuryNote");
-        }
-
-        private void ShowSignatureUnit(Hero _hero)
-        {
-            uniqueSquad = new SquadToLoad(
-                _hero.SignatureUnit,
-                _prestige: 0,
-                _unitIndex: 0
-            );
-            uniqueUnitDisplayCardMenu.SetUp(uniqueSquad, false, _isEnemy: true);
-            uniqueUnitDisplayCardMenu.LockCard(true);
-            uniqueUnitDisplayCardMenu.InheritCanvasSorting();
-
-            // AddComponent used to run on every call, stacking one hover handler per roster hover.
-            // GetComponent first so a handler already present on the card prefab is reused rather
-            // than duplicated.
-            if (signatureUnitHover == null)
-            {
-                signatureUnitHover = uniqueUnitDisplayCardMenu.GetComponent<TroopHoverPlayPanel>();
-            }
-            if (signatureUnitHover == null)
-            {
-                signatureUnitHover = uniqueUnitDisplayCardMenu.gameObject.AddComponent<TroopHoverPlayPanel>();
-            }
-            signatureUnitHover.SetUp(SIGNATURE_UNIT_HOVER_INDEX, this);
-
-            signatureUnitNameText.text = LocalizationManager.Instance.GetText(uniqueSquad.UnitName.ToString());
+            commanderView.ShowTreasury(_hero.StartingGold + renownBonus, _hero.StartingGold, renownBonus);
         }
 
         /// <summary>Sentinel index meaning "the signature unit", not a slot in the starting army.</summary>
@@ -530,21 +427,20 @@ namespace TJ.MainMenu
                 AddressablesManager.Instance.Release(_loadedHeroPrefabKey);
                 _loadedHeroPrefabKey = null;
             }
-            SquadDisplayCardMenu[] squadDisplayCards = startingUnitsParent.GetComponentsInChildren<SquadDisplayCardMenu>();
-            foreach (var squad in squadDisplayCards) {
-                Destroy(squad.gameObject);
+            foreach (WarbandArmyTile tile in startingUnitsParent.GetComponentsInChildren<WarbandArmyTile>()) {
+                Destroy(tile.gameObject);
             }
         }
 
         public void ReloadHeroOnDiscordUnlock()
         {
-            heroSelectionButtons[4].LoadHeroSelectionPage(HeroData.BjornIronskull, this);
+            commanderView.Tiles[4].Load(HeroData.BjornIronskull, this);
             LoadHeroes(HeroData.BjornIronskull);
         }
 
         public void ReloadHeroOnNewsletterUnlock()
         {
-            heroSelectionButtons[5].LoadHeroSelectionPage(HeroData.FreyjaStormweaver, this);
+            commanderView.Tiles[5].Load(HeroData.FreyjaStormweaver, this);
             LoadHeroes(HeroData.FreyjaStormweaver);
         }
         #endregion
@@ -602,11 +498,6 @@ namespace TJ.MainMenu
             increaseDifficultyButton.gameObject.SetActive(!DifficultyRules.IsHardest(_difficultySelected));
             decreaseDifficultyButton.gameObject.SetActive(DifficultyRules.Rank(_difficultySelected) > 0);
 
-            //set locked state
-            bool isLocked = DifficultyRules.IsLocked(_difficultySelected, _maxDifficultyCompletedOverall);
-
-            lockedDifficultyStartButton.SetLockedState(isLocked, LocalizationManager.Instance.GetText("Difficulty Locked"));
-
             //display difficulty crests
             for (int i = 0; i < difficultyCrests.Length; i++)
             {
@@ -625,8 +516,7 @@ namespace TJ.MainMenu
             additionalDifficultyInfoTooltipTrigger.SetUpToolTip(
                 additionalModifiersTitleLocalized, additionalModifiersDesc);
 
-            // The spinner can still land on a locked difficulty, so the validation strip has to
-            // re-check it - it is the thing that gates the start button.
+            // A locked level blocks Start, so the validation strip has to re-check on every change.
             warbandPanel.RefreshValidation();
         }
         #endregion
@@ -712,32 +602,6 @@ namespace TJ.MainMenu
                 startingArmySection.OnStartingArmyLengthChanged -= StartingArmyLengthChanged;
             }
             SetFireplaceShadowsLive(false);
-        }
-
-        private string ApplyPrimaryColorToLabel(string text)
-        {
-            int colonIndex = text.IndexOf(':');
-            if (colonIndex < 0) return text;
-            return $"<color={ColorData.Primary}>{text[..(colonIndex + 1)]}</color>{text[(colonIndex + 1)..]}";
-        }
-
-        /// <summary>
-        /// "Imperial Edict: First recruitment pack is free" becomes
-        /// "Imperial Edict: campaign - First recruitment pack is free", effect name in gold and
-        /// phase in the muted colour. The phase used to lead the line, which buried the name.
-        /// Both source strings carry the effect's name ahead of the first colon, so that colon is
-        /// the split rather than a second localization key.
-        /// </summary>
-        private string BuildFactionEffectLine(string phaseLabel, string nameAndBody)
-        {
-            int colonIndex = nameAndBody.IndexOf(':');
-            string name = colonIndex < 0
-                ? ""
-                : $"<color={ColorData.Gold}>{nameAndBody[..(colonIndex + 1)]}</color> ";
-            string body = colonIndex < 0 ? nameAndBody : nameAndBody[(colonIndex + 1)..].TrimStart();
-
-            // Trimmed because several of the phase-label table entries carry a trailing space.
-            return $"{name}<color={ColorData.Secondary}>{phaseLabel.Trim()}</color> - {body}";
         }
 
         private void UpdateStartingGoldTooltip(int startingGoldTreasury)

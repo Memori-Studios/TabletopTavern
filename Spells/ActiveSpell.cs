@@ -1,5 +1,6 @@
 using System;
 using System.Collections;
+using System.Collections.Generic;
 using UnityEngine;
 using Memori.Audio;
 using Unity.Mathematics;
@@ -27,6 +28,8 @@ public class ActiveSpell : MonoBehaviour
     [SerializeField] private float flashWarningDuration = 1f;
     [SerializeField, FormerlySerializedAs("flashMinThicknessScale")] private float flashMinScale = 0.4f;
     [SerializeField] private float flashSpeed = 10f;
+    // Base Unit.prefab's physics collider radius, the body SpellSystem's overlap sphere tests against.
+    private const float UnitBodyRadius = 0.75f;
 
     private Color areaColor;
     // The spell's own art from SpellData.SpellVisualPrefab, spawned under this root in Load.
@@ -95,6 +98,7 @@ public class ActiveSpell : MonoBehaviour
                 if (visualAddon.warmupEffect != null) visualAddon.warmupEffect.SetActive(false);
                 if (visualAddon.castEffect != null) visualAddon.castEffect.SetActive(false);
                 if (visualAddon.authoredRadius > 0f) visual.transform.localScale = Vector3.one * (spellData.SpellRadius / visualAddon.authoredRadius);
+                if (visualAddon.hideAreaBand && areaDisc != null) areaDisc.enabled = false;
             }
         }
         SetAreaDisplay(spellData.SpellRadius);
@@ -389,8 +393,6 @@ public class ActiveSpell : MonoBehaviour
         }
         else
         {
-            Entity spellEntity = entityManager.CreateEntity();
-
             // TeamOfSource and DamageSourceSquadId come from whoever cast this - the hotbar passes
             // the player and squad 0, a mage unit passes its own team and squad id. They used to be
             // hardcoded to Player/0, which meant an enemy mage would have damaged its own army and
@@ -408,23 +410,108 @@ public class ActiveSpell : MonoBehaviour
                 DamageSourceSquadId = sourceSquadId
             };
 
-            ecb.AddComponent(spellEntity, new SpellEntity {
-                Entity = spellEntity,
-                DamageBufferElement = damageBufferElement,
-                SpellPosition = transform.position,
-                SpellRadius = spellData.SpellRadius,
-                IsOneOff = spellData.IsOneOff,
-                SpellForce = spellData.SpellForce,
-                RemainingDuration = spellData.SpellDuration,
-                TargetSquadEntity = targetSquadEntity, // Entity.Null unless this is a Squad-targeted cast
-                TickInterval = spellData.TickInterval,
-                TickTimer = 0f, // first tick fires immediately, then every TickInterval seconds
-                HitsSingleUnit = spellData.HitsSingleUnit,
-                StatusSpellId = statusSpellId
-            });
+            bool pulsed = spellData.DamageLandsWithHits && spellData.IsOneOff
+                && spellData.HitSoundRepeatInterval > 0f && spellData.HitSoundRepeatCount > 0;
+            if (pulsed)
+            {
+                damageBufferElement.AttackStrength = Mathf.CeilToInt((float)spellData.SpellModifierValue / (spellData.HitSoundRepeatCount + 1));
+                StartCoroutine(DamagePulses(damageBufferElement));
+            }
+            List<(float delay, Vector3 position)> shells = pulsed && spellData.ShellKnockbackRadius > 0f ? CastEffectShells() : null;
+            bool throwsPerShell = shells != null && shells.Count > 0;
+            if (throwsPerShell) StartCoroutine(ShellThrows(shells, damageBufferElement));
+            CreateSpellEntity(entityManager, ecb, damageBufferElement, statusSpellId, throwsPerShell ? 0f : spellData.SpellForce);
         }
 
         cleanUpCoroutine = StartCoroutine(CleanUpSpell(spellData.SpellDuration));
+    }
+    private void CreateSpellEntity(EntityManager entityManager, EntityCommandBuffer ecb, DamageBufferElement damageBufferElement, int statusSpellId, float force)
+    {
+        Entity spellEntity = entityManager.CreateEntity();
+        ecb.AddComponent(spellEntity, new SpellEntity {
+            Entity = spellEntity,
+            DamageBufferElement = damageBufferElement,
+            SpellPosition = transform.position,
+            SpellRadius = spellData.SpellRadius,
+            IsOneOff = spellData.IsOneOff,
+            SpellForce = force,
+            RemainingDuration = spellData.SpellDuration,
+            TargetSquadEntity = targetSquadEntity, // Entity.Null unless this is a Squad-targeted cast
+            TickInterval = spellData.TickInterval,
+            TickTimer = 0f, // first tick fires immediately, then every TickInterval seconds
+            HitsSingleUnit = spellData.HitsSingleUnit,
+            StatusSpellId = statusSpellId
+        });
+    }
+    // Paced like RepeatHitSound. Later shells hit the units the first one struck, even after its knockback threw them clear.
+    private IEnumerator DamagePulses(DamageBufferElement pulse)
+    {
+        List<Entity> struck = UnitsInSpellRadius();
+        for (int i = 0; i < spellData.HitSoundRepeatCount; i++)
+        {
+            yield return new WaitForSeconds(spellData.HitSoundRepeatInterval);
+            World world = World.DefaultGameObjectInjectionWorld;
+            if (world == null || !world.IsCreated) yield break;
+            EntityManager entityManager = world.EntityManager;
+            var ecb = world.GetOrCreateSystemManaged<EndSimulationEntityCommandBufferSystem>().CreateCommandBuffer();
+            foreach (Entity unit in struck)
+            {
+                if (!entityManager.Exists(unit) || !entityManager.HasBuffer<DamageBufferElement>(unit)) continue;
+                if (entityManager.HasComponent<Health>(unit) && entityManager.GetComponentData<Health>(unit).Value <= 0) continue;
+                ecb.AppendToBuffer(unit, pulse);
+            }
+        }
+    }
+    // Each explosion in the cast art, with its world position and the particle start delay that times it.
+    private List<(float delay, Vector3 position)> CastEffectShells()
+    {
+        var shells = new List<(float delay, Vector3 position)>();
+        if (visualAddon == null || visualAddon.castEffect == null) return shells;
+        foreach (Transform shell in visualAddon.castEffect.transform)
+        {
+            ParticleSystem system = shell.GetComponentInChildren<ParticleSystem>(true);
+            if (system != null) shells.Add((system.main.startDelay.constant, shell.position));
+        }
+        shells.Sort((a, b) => a.delay.CompareTo(b.delay));
+        return shells;
+    }
+    // A throw-only blast at each shell as it goes off; the damage stays on DamagePulses.
+    private IEnumerator ShellThrows(List<(float delay, Vector3 position)> shells, DamageBufferElement source)
+    {
+        float start = Time.time;
+        foreach ((float delay, Vector3 position) in shells)
+        {
+            while (Time.time - start < delay) yield return null;
+            World world = World.DefaultGameObjectInjectionWorld;
+            if (world == null || !world.IsCreated) yield break;
+            var ecb = world.GetOrCreateSystemManaged<EndSimulationEntityCommandBufferSystem>().CreateCommandBuffer();
+            Entity blast = world.EntityManager.CreateEntity();
+            ecb.AddComponent(blast, new SpellEntity {
+                Entity = blast,
+                DamageBufferElement = source,
+                SpellPosition = position,
+                SpellRadius = spellData.ShellKnockbackRadius,
+                IsOneOff = true,
+                SpellForce = spellData.SpellForce,
+                SkipsDamage = true
+            });
+        }
+    }
+    // Matches SpellSystem's overlap sphere, which catches a unit whose body edge is inside the radius.
+    private List<Entity> UnitsInSpellRadius()
+    {
+        var struck = new List<Entity>();
+        EntityManager entityManager = World.DefaultGameObjectInjectionWorld.EntityManager;
+        using EntityQuery query = entityManager.CreateEntityQuery(ComponentType.ReadOnly<Unit>(), ComponentType.ReadOnly<Unity.Transforms.LocalTransform>());
+        using var units = query.ToEntityArray(Unity.Collections.Allocator.Temp);
+        float reach = spellData.SpellRadius + UnitBodyRadius;
+        float3 centre = transform.position;
+        foreach (Entity unit in units)
+        {
+            float3 position = entityManager.GetComponentData<Unity.Transforms.LocalTransform>(unit).Position;
+            if (math.distancesq(position.xz, centre.xz) <= reach * reach) struck.Add(unit);
+        }
+        return struck;
     }
     // The addon's cast art and the hit sound; every spell but the trap plays them the moment it lands.
     private void ShowCastVisuals()
@@ -432,7 +519,12 @@ public class ActiveSpell : MonoBehaviour
         if (visualAddon != null && visualAddon.castEffect != null) visualAddon.castEffect.SetActive(true);
         if (visualAddon != null && visualAddon.hideWarmupOnCast && visualAddon.warmupEffect != null) visualAddon.warmupEffect.SetActive(false);
         IAudioRequester.Instance.Play(spellData.hitSound, transform.position, ignoreDucking: true);
+        ShakeOnImpact();
         if (spellData.HitSoundRepeatInterval > 0f && spellData.hitSound != null) StartCoroutine(RepeatHitSound());
+    }
+    private void ShakeOnImpact()
+    {
+        if (spellData.ImpactShake > 0f) BattleManager.Instance.CameraShaker.SpellImpactShake(transform.position, spellData.ImpactShake);
     }
     // A long effect (Bombardment's staggered shells, Sunder's sparks) must not be one sound at cast. Dies with the object.
     private IEnumerator RepeatHitSound()
@@ -444,6 +536,7 @@ public class ActiveSpell : MonoBehaviour
             yield return new WaitForSeconds(spellData.HitSoundRepeatInterval);
             if (spellData.HitSoundRepeatCount <= 0 && Time.time >= stopAt) yield break;
             IAudioRequester.Instance.Play(spellData.hitSound, transform.position, ignoreDucking: true);
+            ShakeOnImpact();
         }
     }
     // Tag spells (Mark, Shieldwall) expire on their own tag timer; the status entry mirrors that length.
@@ -462,13 +555,20 @@ public class ActiveSpell : MonoBehaviour
         Coroutine flashCoroutine = StartCoroutine(FlashArea(spellData.SpellRadius));
         // Looping addon art drains over the warning second instead of cutting at Destroy; one-shots run out on their own.
         if (visualAddon != null)
+        {
             foreach (ParticleSystem addonSystem in visualAddon.GetComponentsInChildren<ParticleSystem>())
                 if (addonSystem.main.loop) addonSystem.Stop(false, ParticleSystemStopBehavior.StopEmitting);
+            foreach (SpellAddonRise risen in visualAddon.GetComponentsInChildren<SpellAddonRise>())
+                if (!risen.SinksWithArea) risen.Sink(flashWarningDuration);
+        }
 
         yield return new WaitForSeconds(duration - leadTime);
 
         releaseFlash = true;
         yield return flashCoroutine;
+        if (visualAddon != null)
+            foreach (SpellAddonRise risen in visualAddon.GetComponentsInChildren<SpellAddonRise>())
+                if (risen.SinksWithArea) risen.Sink(radiusAnimationDuration);
         yield return AnimateAreaSize(spellData.SpellRadius, shrinkCurve);
 
         Destroy(gameObject);

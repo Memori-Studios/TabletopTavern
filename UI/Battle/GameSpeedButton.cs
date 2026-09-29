@@ -1,3 +1,5 @@
+using Memori.Localization;
+using Memori.Tooltip;
 using TMPro;
 using UnityEngine;
 using UnityEngine.EventSystems;
@@ -22,6 +24,9 @@ public class GameSpeedButton : MonoBehaviour, IPointerEnterHandler, IPointerExit
         button.onClick.AddListener(GameSpeedButtonButtonClicked);
         highlight.SetActive(false);
         selected.SetActive(false);
+        MemoriTooltipTrigger trigger = GetComponent<MemoriTooltipTrigger>();
+        if (trigger == null) trigger = gameObject.AddComponent<MemoriTooltipTrigger>();
+        trigger.SetContentProvider(BuildHotkeyTooltip);
         // disabled.SetActive(true);
         // button.interactable = false;
         // animator.SetTrigger("Disabled");
@@ -70,6 +75,20 @@ public class GameSpeedButton : MonoBehaviour, IPointerEnterHandler, IPointerExit
             selected.SetActive(false);
             animator.SetTrigger("Disabled");
             button.onClick.RemoveListener(GameSpeedButtonButtonClicked);
+        }
+
+        // Built on each open so a rebind or language change shows without a battle reload.
+        private static TooltipContent BuildHotkeyTooltip()
+        {
+            LocalizationManager loc = LocalizationManager.Instance;
+            string Key(string action) => $"' {BattleGuideKeys.ToSearchText("@" + action).Trim()} '";
+            return new TooltipContent
+            {
+                Title = loc.GetText("GameSpeedHotkeysTitle"),
+                Body = $"{Key("PauseGame")}  {loc.GetText("GameSpeedPauseResume")}\n"
+                     + $"{Key("SpeedDown")}  {loc.GetText("GameSpeedSlowDown")}\n"
+                     + $"{Key("SpeedUp")}  {loc.GetText("GameSpeedSpeedUp")}",
+            };
         }
 }
 }

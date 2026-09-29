@@ -144,8 +144,17 @@ namespace TJ
         // Same protection gear already gets through CampaignSaveManager.DrawRandomGear.
         public static ConsumableEnum GetRandomConsumable(System.Random random)
         {
-            ConsumableEnum[] allConsumables = GetAllConsumableEnums();
+            ConsumableEnum[] allConsumables = OfferableConsumables();
             return allConsumables[random.Next(0, allConsumables.Length)];
+        }
+        // Every consumable an offer may draw. Blood Price takes the prestige ones out; the Collection still reads the full list.
+        private static ConsumableEnum[] OfferableConsumables()
+        {
+            ConsumableEnum[] allConsumables = GetAllConsumableEnums();
+            CampaignManager campaign = CampaignManager.InstanceIfExists;
+            Memori.SaveData.CampaignSaveData run = campaign == null ? null : campaign.CampaignSaveManager.SaveData;
+            if (run == null || !run.HasOrdeal(OrdealId.BloodPrice)) return allConsumables;
+            return System.Array.FindAll(allConsumables, c => c != ConsumableEnum.Prestige && c != ConsumableEnum.TrialofGrasses);
         }
         // Takes a raw campaign seed (CampaignSaveManager.GetSeededRandom, usually plus a per-item offset)
         // and mixes it, without which adjacent seeds hand back the same consumable.
@@ -175,7 +184,7 @@ namespace TJ
                 return items[items.Length - 1];
             }
 
-            ConsumableEnum[] allConsumables = GetAllConsumableEnums();
+            ConsumableEnum[] allConsumables = OfferableConsumables();
             if (hasLuckyHorseshoe)
                 allConsumables = System.Array.FindAll(allConsumables, c => GetConsumable(c).ConsumableRarity != ConsumableRarity.Common);
             float[] weights = new float[allConsumables.Length];

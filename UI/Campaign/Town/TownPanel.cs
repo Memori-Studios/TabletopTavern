@@ -23,6 +23,8 @@ namespace TJ.Town
     {
         [Header("Town Config")]
         [SerializeField] private TownPanelView view;
+        // Lives in the map's shared bottom-right Continue slot, outside the view, where players expect it on every panel.
+        [SerializeField] private Button continueButton;
         [SerializeField] private SquadDisplayCardMenu squadDisplayCardMenuPrefab;
         public Transform GarrisonTroopTransform => view.GarrisonGrid;
 
@@ -51,8 +53,7 @@ namespace TJ.Town
             view.RecruitButton.onClick.AddListener(OnRecruitUnitsButtonClicked);
             view.ConscriptRow.Button.onClick.AddListener(OnConscriptUnitsButtonClicked);
 
-            view.FightContinueButton.onClick.AddListener(CompleteTown);
-            view.EnterContinueButton.onClick.AddListener(CompleteTown);
+            continueButton.onClick.AddListener(CompleteTown);
         }
         public void SetUp(CampaignSaveManager _campaignSaveManager, MapSceneUIManager _mapSceneUIManager)
         {
@@ -143,7 +144,8 @@ namespace TJ.Town
                 selectedNodeIndex,
                 campaignSaveManager.SaveData.seed,
                 campaignSaveManager.SaveData.bookNumber,
-                mapRegion);
+                mapRegion,
+                campaignSaveManager.SaveData.ordealWeather);
 
             string weatherNameLocalized = LocalizationManager.Instance.GetText(weather.ToString());
             string weatherDescriptionLocalized = LocalizationManager.Instance.GetText(weather.ToString() + "Desc");
@@ -192,8 +194,13 @@ namespace TJ.Town
         }
         private void DisplayTownOptions()
         {
-            view.ShowRoad(TownPanelView.Road.Undecided, false);
+            ShowRoad(TownPanelView.Road.Undecided, false);
             LoadEnemyCompany();
+        }
+        private void ShowRoad(TownPanelView.Road road, bool animate)
+        {
+            view.ShowRoad(road, animate);
+            continueButton.gameObject.SetActive(road != TownPanelView.Road.Undecided);
         }
         public async void LoadEnemyCompany()
         {
@@ -240,7 +247,7 @@ namespace TJ.Town
         {
             campaignSaveManager.SetTownData(townSaveData);
             SetUpTownInfo();
-            view.ShowRoad(TownPanelView.Road.Sacked, false);
+            ShowRoad(TownPanelView.Road.Sacked, false);
             view.SetFightSubtitle($"{LocalizationManager.Instance.GetText("townGarrisonDefeated")} <color={ColorData.Negative}>{LocalizationManager.Instance.GetText("townReservesDidNotHeal")}</color>");
             townPanelCanvasGroup.FadeInAsync(0.25f);
             LootTown();
@@ -319,12 +326,13 @@ namespace TJ.Town
             campaignSaveManager.HealTroopsOnTownEntry();
             campaignSaveManager.SetTownData(townSaveData);
 
-            view.ShowRoad(TownPanelView.Road.Entered, true);
+            ShowRoad(TownPanelView.Road.Entered, true);
             view.SetEnterStrip(LocalizationManager.Instance.GetText("townHealed"), HealPercentText(), RecruitRarityText());
             view.SetEnterLines($"<color={ColorData.Positive}>{string.Format(LocalizationManager.Instance.GetText("townHealedLine"), HealPercentText())}</color>",
                 LocalizationManager.Instance.GetText("townRecruitLine"), RecruitLimitNote());
 
-            imperialEdictActive = HeroBonusManager.Instance.ActiveHeroID == 1 || HeroBonusManager.Instance.ActiveHeroID == 2;
+            imperialEdictActive = (HeroBonusManager.Instance.ActiveHeroID == 1 || HeroBonusManager.Instance.ActiveHeroID == 2)
+                && !campaignSaveManager.SaveData.IsFactionPassiveBlocked(Race.IronLegion);
             UpdateAffordability(campaignSaveManager.SaveData.goldAmount);
 
             TutorialManager.Instance.CompleteStepCheck(TutorialStepEnum.TownExplanation);
@@ -368,6 +376,7 @@ namespace TJ.Town
             }
             int modifiedRecruitmentCost = recruitmentCost;
             if (DifficultyRules.RecruitCostIncreased(CampaignManager.Instance.CampaignSaveManager.SaveData.difficultyLevel)) modifiedRecruitmentCost += 2;
+            if (CampaignManager.Instance.CampaignSaveManager.SaveData.HasOrdeal(OrdealId.PressGanged)) modifiedRecruitmentCost += OrdealRegistry.PRESS_GANGED_RECRUIT_RISE;
             if (CampaignManager.Instance.GearManager.CheckForGear(GearID.JailersKey))
             {
                 modifiedRecruitmentCost -= townSaveData.townSize switch
@@ -452,6 +461,8 @@ namespace TJ.Town
             if(DifficultyRules.RecruitCostIncreased(CampaignManager.Instance.CampaignSaveManager.SaveData.difficultyLevel)) {
                 modifiedRecruitmentCost += 2;
             }
+            if (CampaignManager.Instance.CampaignSaveManager.SaveData.HasOrdeal(OrdealId.PressGanged))
+                modifiedRecruitmentCost += OrdealRegistry.PRESS_GANGED_RECRUIT_RISE;
 
 
             string colorString = _goldAmount >= modifiedRecruitmentCost ? ColorData.Primary : ColorData.Negative;
@@ -511,6 +522,8 @@ namespace TJ.Town
             int count = 0;
             foreach (TierCount entry in ArmyGenerationRuleData.ResolveTownGarrisonTierCounts(townSize, saveData.bookNumber, strongerGarrisons))
                 count += entry.Count;
+            // Must match ArmyCreator.AddEliteSquad, which stops at the deployment cap.
+            if (saveData.HasOrdeal(OrdealId.EliteGuard) && count < TabletopTavernConstants.ENDLESS_ENEMY_SQUAD_CAP) count++;
             // Must match the squad CampaignSaveManager.GenerateTown drops for Aura Farming.
             if (CampaignManager.Instance.GearManager.CheckForGear(GearID.AuraFarming)) count--;
             return Mathf.Max(count, 0);

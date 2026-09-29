@@ -124,6 +124,13 @@ partial struct SquadEngageInCombatSystem : ISystem
             //remove charge charge
             if (isCharging)
             {
+                // An empowered charge that still holds its bonus lands now; the squad flag plays the cue.
+                if (entityManager.HasComponent<EmpoweredChargeTag>(squad.ValueRO.SelfEntity))
+                {
+                    entityCommandBuffer.RemoveComponent<EmpoweredChargeTag>(squad.ValueRO.SelfEntity);
+                    if (entityManager.HasComponent<ChargeBonus>(squad.ValueRO.SelfEntity))
+                        entityCommandBuffer.AddComponent<EmpoweredChargeLandedTag>(squad.ValueRO.SelfEntity);
+                }
                 // Debug.Log($"SquadEngageInCombatSystem: squad {squad.ValueRO.SquadId}  Charging: {isCharging}");
                 if (entityManager.HasComponent<SquadStateComponent>(squad.ValueRO.SelfEntity))
                 {

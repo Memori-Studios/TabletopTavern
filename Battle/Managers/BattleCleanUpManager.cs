@@ -109,6 +109,7 @@ namespace TJ
             }
 
             int activeHeroID = customBattle ? -1 : SaveDataHandler.GetActiveHeroID();
+            EventBattleEffects eventEffects = customBattle ? null : SaveDataHandler.Load().eventBattleEffects;
             int warlordHeroID = -1;
             bool enemyOnlySakuraUnits = false;
             if (!customBattle && !battleSaveManager.IsGarrisonBattle)
@@ -136,7 +137,11 @@ namespace TJ
                 OnlySakuraUnits = onlySakuraUnits,
                 EnemyWarlordHeroID = warlordHeroID,
                 EnemyWarlordRace = warlordHeroID == -1 ? Race.Special : HeroData.GetRaceFromHero(warlordHeroID),
-                EnemyOnlySakuraUnits = enemyOnlySakuraUnits
+                EnemyOnlySakuraUnits = enemyOnlySakuraUnits,
+                // Read for garrisons too; a custom battle carries no run, so it gets none.
+                OrdealMask = customBattle ? 0UL : SaveDataHandler.Load().OrdealBits,
+                EventLeadershipPlayer = eventEffects == null ? 0 : eventEffects.playerLeadership,
+                EventLeadershipEnemy = eventEffects == null ? 0 : eventEffects.enemyLeadership,
             });
 
 
@@ -152,7 +157,7 @@ namespace TJ
             if (!customBattle)
             {
                 if (!BattleManager.Instance.BattleSaveManager.IsGarrisonBattle)
-                    await battlefieldBonusManager.SetUp(seed, positionDrawer.BattleZone);
+                    await battlefieldBonusManager.SetUp(seed, positionDrawer.BattleZone, forcedFixtures: eventEffects == null ? null : eventEffects.fixtures);
 
                 greyCompanyBattlefield.GenerateBattlefieldFromCampaign();
             }

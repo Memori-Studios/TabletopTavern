@@ -256,6 +256,9 @@ public class BattleManager : Singleton<BattleManager>
         Entity squadDamageBufferSingletonEntity = entityManager.CreateEntity();
         entityManager.AddBuffer<SquadDamageBufferElement>(squadDamageBufferSingletonEntity);
 
+        Entity squadDamageTotalSingletonEntity = entityManager.CreateEntity();
+        entityManager.AddBuffer<SquadDamageTotalElement>(squadDamageTotalSingletonEntity);
+
         Entity battlefieldBonusAppliedBufferSingletonEntity = entityManager.CreateEntity();
         entityManager.AddBuffer<BattlefieldBonusAppliedBufferElement>(battlefieldBonusAppliedBufferSingletonEntity);
 

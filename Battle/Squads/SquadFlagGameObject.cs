@@ -30,6 +30,9 @@ namespace TJ
         [SerializeField] private ParticleSystem weaponStrengthEffect;
         // Loops in the newest spell's race colour while any lasting spell is on this squad (see HandleSpellStatus).
         [SerializeField] private ParticleSystem spellBuffEffect;
+        // Played where a Rally the Banners charge lands (EmpoweredChargeLandedTag).
+        [SerializeField] private GameObject empoweredChargeBurst;
+        [SerializeField] private SFXCue empoweredChargeSound;
         public int SquadId => squadId;
         public bool IsInCombat { get; private set; }
         public SquadSFXManager SFXManager => squadSFXManager;
@@ -59,6 +62,9 @@ namespace TJ
         private int[] _shownSpellIds = new int[0];
         private int _shownSpellCount = 0;
         private readonly int[] _spellIdScratch = new int[8];
+        // One running StatusLoopEffect per shown spell that has one, keyed by spell id.
+        private readonly Dictionary<int, GameObject> _statusLoops = new();
+        private readonly List<int> _endedStatusLoops = new();
 
         private MaterialPropertyBlock _block;
         bool isRanged, isArtillery, isGate;
@@ -462,6 +468,34 @@ namespace TJ
                 _shownSpellCount = count;
                 healthBarGO.SetSpellStatus(_shownSpellIds, count);
                 UpdateSpellBuffEffect(count > 0 ? _shownSpellIds[count - 1] : 0);
+                SyncStatusLoops(count);
+            }
+            void SyncStatusLoops(int count)
+            {
+                for (int i = 0; i < count; i++)
+                {
+                    int spellId = _shownSpellIds[i];
+                    if (_statusLoops.ContainsKey(spellId)) continue;
+                    if (!TJ.Spells.SpellStatusIcons.TryGetData(spellId, out TJ.Spells.SpellData spellData) || spellData.StatusLoopEffect == null) continue;
+                    GameObject loop = Instantiate(spellData.StatusLoopEffect, transform);
+                    // The flag root sits offset above the squad centre; the loop belongs 1.5 m above the troops.
+                    loop.transform.localPosition = new Vector3(-offset.x, 1.5f - offset.y, -offset.z);
+                    _statusLoops[spellId] = loop;
+                }
+
+                _endedStatusLoops.Clear();
+                foreach (KeyValuePair<int, GameObject> pair in _statusLoops)
+                    if (System.Array.IndexOf(_shownSpellIds, pair.Key, 0, count) < 0) _endedStatusLoops.Add(pair.Key);
+                foreach (int spellId in _endedStatusLoops)
+                {
+                    GameObject loop = _statusLoops[spellId];
+                    _statusLoops.Remove(spellId);
+                    if (loop == null) continue;
+                    // Stop emitting and let the live particles fade rather than cut them.
+                    foreach (ParticleSystem system in loop.GetComponentsInChildren<ParticleSystem>())
+                        system.Stop(true, ParticleSystemStopBehavior.StopEmitting);
+                    Destroy(loop, 2f);
+                }
             }
             void UpdateSpellBuffEffect(int newestSpellId)
             {
@@ -607,12 +641,26 @@ namespace TJ
                 if (inside && !_cameraInside) { _cameraInside = true; Hide(); }
                 else if (!inside && _cameraInside) { _cameraInside = false; Reveal(); }
             }
+            void HandleEmpoweredChargeLanded()
+            {
+                if (!EntityManager.HasComponent<EmpoweredChargeLandedTag>(squadEntity)) return;
+                EntityManager.RemoveComponent<EmpoweredChargeLandedTag>(squadEntity);
+                Vector3 impact = EntityManager.GetComponentData<SquadMovementComponent>(squadEntity).SquadCenter;
+                if (empoweredChargeSound != null) IAudioRequester.Instance.Play(empoweredChargeSound, impact, ignoreDucking: true);
+                if (empoweredChargeBurst == null) return;
+                GameObject burst = Instantiate(empoweredChargeBurst, impact, Quaternion.identity);
+                squadManager.stuffToDestroy.Add(burst);
+                Destroy(burst, 3f);
+            }
 
             HandleFlagPosition();
             HandleCameraHide();
 
             if (battleEnded) return;
             if (broken) return;
+
+            // Before the bar throttle, so the cue lands on the frame the charge hits.
+            HandleEmpoweredChargeLanded();
 
             updateTimer += Time.fixedDeltaTime;
             if(updateTimer < BAR_UPDATE_SPEED) return;

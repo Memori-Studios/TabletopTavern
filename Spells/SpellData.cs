@@ -74,6 +74,12 @@ namespace TJ.Spells
         public float HitSoundRepeatInterval;
         // Extra plays after the first; 0 with an interval set means until SpellDuration runs out.
         public int HitSoundRepeatCount;
+        // One-off damage is split evenly across the first hit and each counted repeat, so it lands with each shell.
+        public bool DamageLandsWithHits;
+        // With DamageLandsWithHits, each explosion in the cast art throws the units within this radius of it as it goes off; 0 throws once from the centre.
+        public float ShellKnockbackRadius;
+        // Camera shake on each hit, faded by distance from the camera; 0 means none.
+        public float ImpactShake;
         public Team TargetTeam;
         // Optional art spawned under the shared AOE Spell instance (SpellManager.aoeSpellPrefab) at cast.
         // A SpellVisualAddon on its root gets its warm-up and cast objects switched on at the right moments.
@@ -84,6 +90,8 @@ namespace TJ.Spells
         // as it lasts. Only lasting effects have anything to show: tags (Mark, Shieldwall), timed bonuses
         // and zone ticks write the squad's SpellStatusBufferElement; one-off bursts never do.
         public bool ShowsStatusIcon;
+        // Loops on every squad carrying this spell's status, for an effect that is otherwise invisible (see SquadFlagGameObject).
+        public GameObject StatusLoopEffect;
 
         [Header("Battlefield Bonus")]
         public bool GrantsBattlefieldBonus;

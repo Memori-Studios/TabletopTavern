@@ -71,7 +71,7 @@ namespace TJ
         // The harder of two saved values (as ints, because that is how completions are stored).
         public static int Harder(int savedA, int savedB) => Rank(savedB) > Rank(savedA) ? savedB : savedA;
 
-        // A level opens once the level below it has been completed; the easiest is always open.
+        // A level opens once the level below it has been won by any hero; the easiest is always open.
         // maxCompleted is PlayerSaveData.MaxDifficultyOverall, 0 when nothing is completed.
         public static bool IsLocked(TT_Difficulty difficulty, int maxCompleted) =>
             Rank(difficulty) > Rank(maxCompleted) + 1;
@@ -99,13 +99,14 @@ namespace TJ
         public static bool AutoResolvePreviewHidden(TT_Difficulty difficulty) => Applies(3, difficulty);
 
         // DifficultyMod 7 "Stronger enemy armies" and DifficultyMod 19 "Enemy armies scale in
-        // strength faster". Each adds one battlesFought step, which moves the army into the next
-        // tier band earlier.
-        public static int BattlesFoughtBonus(TT_Difficulty difficulty)
+        // strength faster". Each adds battlesFought steps, which move the army into a later tier
+        // band: one step in act 1, two from act 2 on, where a typical act never reaches the top bands.
+        public static int BattlesFoughtBonus(TT_Difficulty difficulty, int act)
         {
+            int step = act >= 2 ? 2 : 1;
             int bonus = 0;
-            if (Applies(7, difficulty)) bonus += 1;
-            if (Applies(19, difficulty)) bonus += 1;
+            if (Applies(7, difficulty)) bonus += step;
+            if (Applies(19, difficulty)) bonus += step;
             return bonus;
         }
 

@@ -186,14 +186,18 @@ namespace TJ
         }
         private void LoadGearFromSaveFile()
         {
-            List<GearID> gearNameList = SaveDataHandler.Load().Gear;
-            foreach (GearID gearName in gearNameList) {
+            // Rebuilt from the save each time, so a reload never doubles the list.
+            activeGearItems.Clear();
+            CampaignSaveData run = SaveDataHandler.Load();
+            foreach (GearID gearName in run.Gear) {
+                if (run.IsGearInactive(gearName)) continue;
                 activeGearItems.Add(gearName);
             }
         }
         public void AquireGear(GearID _gearName)
         {
-            activeGearItems.Add(_gearName);
+            if (!CampaignManager.Instance.CampaignSaveManager.SaveData.IsGearInactive(_gearName))
+                activeGearItems.Add(_gearName);
             CampaignManager.Instance.ArmyJuiceManager.MarkGearAsNew(_gearName);
         }
         public void UnAquireGear(GearID _gearName)

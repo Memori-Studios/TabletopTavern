@@ -33,6 +33,7 @@ public class ShopConsumable : MonoBehaviour
     ShopPanel shopPanel;
     // The price the shop passed in: the base cost minus any Renown discount, before difficulty and gear.
     int basePrice;
+    bool soldOut;
 
     public void SetUp(ConsumableEnum _consumableType, int _consumablePrice, ShopPanel _shopPanel)
     {
@@ -46,8 +47,8 @@ public class ShopConsumable : MonoBehaviour
         }
         consumableType = _consumableType;
         basePrice = _consumablePrice;
-        consumablePrice = CurrentPrice();
         shopPanel = _shopPanel;
+        consumablePrice = CurrentPrice();
         spawnInFeedback.PlayFeedbacks();
         CreateConsumableGameObject();
         outline = GetComponentInChildren<Outline>();
@@ -96,8 +97,19 @@ public class ShopConsumable : MonoBehaviour
             hoverOutFeedback.PlayFeedbacks();
         }
     }
+    public void MarkSoldOut()
+    {
+        soldOut = true;
+        if (shopPriceCanvas != null) shopPriceCanvas.SetSoldOut(true);
+        shopItemInfoCanvas.AppendLine($"<color={ColorData.Error}>{LocalizationManager.Instance.GetText("OrdealSoldOut")}</color>");
+    }
     public void AttemptPurchase()
     {
+        if (soldOut) {
+            NotificationManager.Instance.ErrorNotification(LocalizationManager.Instance.GetText("OrdealSoldOutNotice"));
+            shopPanel.RenableShopPanel();
+            return;
+        }
         if(!CampaignManager.Instance.GoldManager.CheckIfCanAfford(consumablePrice)) {
             NotificationManager.Instance.ErrorNotification(LocalizationManager.Instance.GetText("notEnoughGold"));
             shopPanel.RenableShopPanel();
@@ -134,7 +146,9 @@ public class ShopConsumable : MonoBehaviour
     // The first price and every refresh use one rule, so a purchase can never change the other item's price.
     private int CurrentPrice()
     {
-        if (CampaignManager.Instance.GearManager.CheckForGear(GearID.CookieAndFowlCard)) return 0;
+        // Cookie and Fowl Card makes only the first consumable of each shop visit free.
+        if (shopPanel.ConsumablesPurchased == 0 && CampaignManager.Instance.GearManager.CheckForGear(GearID.CookieAndFowlCard)) return 0;
+        if (CampaignManager.Instance.CampaignSaveManager.SaveData.HasOrdeal(OrdealId.IronCoffers)) return basePrice + OrdealRegistry.IRON_COFFERS_PRICE_RISE;
         return basePrice;
     }
     public void RefreshPrices()

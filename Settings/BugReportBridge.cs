@@ -18,6 +18,7 @@ namespace TJ
             reportABugScreen.LoadedModsProvider = DescribeLoadedMods;
             reportABugScreen.GameStateProvider = DescribeGameState;
             reportABugScreen.AnalyticsIdProvider = DescribeAnalyticsId;
+            reportABugScreen.TicketTextProvider = DescribeTicket;
             reportABugScreen.ReportSent += OnReportSent;
         }
 
@@ -27,6 +28,7 @@ namespace TJ
             reportABugScreen.LoadedModsProvider = null;
             reportABugScreen.GameStateProvider = null;
             reportABugScreen.AnalyticsIdProvider = null;
+            reportABugScreen.TicketTextProvider = null;
             reportABugScreen.ReportSent -= OnReportSent;
         }
 
@@ -38,6 +40,16 @@ namespace TJ
         private static string DescribeGameState()
         {
             return SceneHandler.Instance.CurrentGameState.ToString();
+        }
+
+        // "Report BUG-51 sent", from the bugReportTicket string (with {0} where the number goes). Falls back to
+        // English if that string has not been added to the localization tables yet.
+        private static string DescribeTicket(string ticket)
+        {
+            string format = LocalizationManager.Instance.GetText("bugReportTicket");
+            return !string.IsNullOrEmpty(format) && format.Contains("{0}")
+                ? string.Format(format, ticket)
+                : ticket;
         }
 
         private static string DescribeAnalyticsId()

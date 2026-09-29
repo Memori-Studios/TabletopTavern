@@ -32,5 +32,20 @@ namespace TJ
 
             return LocalizationManager.Instance.GetText(titleKey) + ": " + description;
         }
+
+        // Same lookup as Get, with the title and description kept apart. A description without a title sibling leaves the title empty.
+        public static void GetParts(Hero hero, int index, out string title, out string description)
+        {
+            title = string.Empty;
+            description = string.Empty;
+            if (hero.HeroBonusDescription == null || index < 0 || index >= hero.HeroBonusDescription.Length) return;
+
+            string descriptionKey = hero.HeroBonusDescription[index];
+            if (string.IsNullOrEmpty(descriptionKey)) return;
+
+            description = LocalizationManager.Instance.GetText(descriptionKey);
+            string titleKey = descriptionKey.Replace(DescriptionKeyMarker, TitleKeyMarker);
+            if (titleKey != descriptionKey) title = LocalizationManager.Instance.GetText(titleKey);
+        }
     }
 }

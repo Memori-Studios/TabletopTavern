@@ -213,6 +213,20 @@ namespace TJ
                         }
                     }
                 }
+
+                // Ordeals that weaken the player's own squads, cut the same way EntityWatcher and the charge system do.
+                if (unitStat == UnitStat.Ammunition && TabletopTavernConstants.Shoots(unitType) && PlayerHoldsOrdeal(OrdealId.ShortQuivers))
+                {
+                    int cut = (int)(amount + totalBonus) - (int)((amount + totalBonus) * OrdealRegistry.SHORT_QUIVERS_AMMUNITION);
+                    totalBonus -= cut;
+                    description += $"\n<color {ColorData.Error}>{LocalizationManager.Instance.GetText(OrdealRegistry.Get(OrdealId.ShortQuivers).NameKey)}: -{cut}</color>";
+                }
+                if (unitStat == UnitStat.ChargeBonus && PlayerHoldsOrdeal(OrdealId.BluntedCharge))
+                {
+                    int cut = (int)(amount + totalBonus) - (int)(amount + totalBonus) / 2;
+                    totalBonus -= cut;
+                    description += $"\n<color {ColorData.Error}>{LocalizationManager.Instance.GetText(OrdealRegistry.Get(OrdealId.BluntedCharge).NameKey)}: -{cut}</color>";
+                }
             }
 
             //if battle, check squad for battlefield bonuses and defensive stance
@@ -378,6 +392,14 @@ namespace TJ
             );
 
             SetUpBars();
+        }
+        // The map reads the live save; the battle reads the holder, which is empty in a custom battle.
+        private static bool PlayerHoldsOrdeal(OrdealId ordeal)
+        {
+            CampaignManager campaign = CampaignManager.InstanceIfExists;
+            if (campaign != null && campaign.CampaignSaveManager.SaveData != null) return campaign.CampaignSaveManager.SaveData.HasOrdeal(ordeal);
+            BattleManager battle = BattleManager.InstanceIfExists;
+            return battle != null && battle.SquadManager.OrdealActive(ordeal);
         }
         private void SetUpBars()
         {

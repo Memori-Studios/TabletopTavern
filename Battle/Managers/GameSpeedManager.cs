@@ -1,3 +1,4 @@
+using System.Collections;
 using Memori.Input;
 using UnityEngine;
 using Memori.Utilities;
@@ -14,12 +15,15 @@ namespace TJ
     {
         public const string PauseAtBattleStartPref = "PauseAtBattleStart";
         public const string PauseOnSquadBreakPref = "PauseOnSquadBreak";
+        // Game time for the physics step and the flags' FixedUpdate to catch up with units placed as the battle starts.
+        private const float BattleStartSettleSeconds = 0.05f;
         [SerializeField] private GameSpeedButton pauseButton, slowButton, normalButton, fastButton;
         GameSpeedButton[] gameSpeedButtons;
         private bool _isPaused;
         private bool _isSettingsOpen;
         private int _currentSpeedIndex;
         private GameSpeedButton _prePauseButton;
+        private Coroutine _battleStartPause;
         private ReportABugScreen _reportABugScreen;
         private void Start()
         {
@@ -75,6 +79,7 @@ namespace TJ
         // Only a speed change the player made completes the tip; Start's reset to normal must not.
         public void PlayerSetTimeScale(GameSpeedButton _gameSpeedButton)
         {
+            StopBattleStartPause();
             SetTimeScale(_gameSpeedButton);
             TutorialManager.Instance.CompleteStepCheck(TutorialStepEnum.ChangeBattleSpeed);
         }
@@ -122,7 +127,28 @@ namespace TJ
         private void OnGamePhaseChanged(GamePhase gamePhase)
         {
             if (gamePhase != GamePhase.Battle || PlayerPrefs.GetInt(PauseAtBattleStartPref, 0) != 1) return;
-            AutoPause(LocalizationManager.Instance.GetText("autoPauseBattleStart"));
+            _battleStartPause = StartCoroutine(PauseAtBattleStart());
+        }
+        // A deferred enemy army and outriders are placed inside StartBattle and are drawn, clickable and flagged only after a few ticks.
+        private IEnumerator PauseAtBattleStart()
+        {
+            yield return new WaitForSeconds(BattleStartSettleSeconds);
+            if (AutoPause())
+            {
+                // The outrider warning goes up as the battle starts; this message follows it instead of replacing it.
+                float wait = NotificationManager.Instance.SecondsUntilFree;
+                if (wait > 0f) yield return new WaitForSecondsRealtime(wait);
+                if (BattleManager.Instance.GamePhase == GamePhase.Battle)
+                    NotificationManager.Instance.DisplayNotification(LocalizationManager.Instance.GetText("autoPauseBattleStart"));
+            }
+            _battleStartPause = null;
+        }
+        // A speed the player picks replaces a battle-start pause that is still waiting to happen or to show its message.
+        private void StopBattleStartPause()
+        {
+            if (_battleStartPause == null) return;
+            StopCoroutine(_battleStartPause);
+            _battleStartPause = null;
         }
         private void OnSquadBroken(int squadId)
         {
@@ -130,14 +156,15 @@ namespace TJ
             // Losing the last squad ends the battle, so a pause there would only delay the result.
             if (!PlayerHasOtherUnbrokenSquad(squadId)) return;
             string squadName = LocalizationManager.Instance.GetText(BattleManager.Instance.SquadManager.GetSquad(squadId).UnitName.ToString());
-            AutoPause(string.Format(LocalizationManager.Instance.GetText("autoPauseSquadBroke"), squadName));
+            if (AutoPause())
+                NotificationManager.Instance.DisplayNotification(string.Format(LocalizationManager.Instance.GetText("autoPauseSquadBroke"), squadName));
         }
         // Not PlayerSetTimeScale: an automatic pause is not the player's, so it skips PauseUsedThisBattle and the speed tip.
-        private void AutoPause(string reason)
+        private bool AutoPause()
         {
-            if (_isPaused || BattleManager.Instance.GamePhase != GamePhase.Battle) return;
+            if (_isPaused || BattleManager.Instance.GamePhase != GamePhase.Battle) return false;
             SetTimeScale(pauseButton);
-            NotificationManager.Instance.DisplayNotification(reason);
+            return true;
         }
         private static bool PlayerHasOtherUnbrokenSquad(int brokenSquadId)
         {

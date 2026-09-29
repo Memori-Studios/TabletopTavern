@@ -138,6 +138,12 @@ namespace TJ.Map
         public bool AttemptToUseConsumable(ConsumableEnum _consumable, int _targetUnitIndex)
         {
             // Debug.Log($"ConsumableManager.AttemptToUseConsumable({_consumable}, {_targetUnitIndex})");
+            OrdealId countering = OrdealRegistry.CounteringOrdeal(CampaignManager.Instance.CampaignSaveManager.SaveData.ordeals, _consumable);
+            if (countering != OrdealId.None) {
+                string ordealName = LocalizationManager.Instance.GetText(OrdealRegistry.Get(countering).NameKey);
+                NotificationManager.Instance.ErrorNotification(string.Format(LocalizationManager.Instance.GetText("OrdealItemInactive"), ordealName));
+                return false;
+            }
             if(!ConsumableData.ConsumableRequiresTarget(_consumable)) {
 
                 if(_consumable == ConsumableEnum.Rewind) {
@@ -203,6 +209,7 @@ namespace TJ.Map
     }
     public bool CanUseConsumable(ConsumableEnum _consumable)
     {
+        if (CampaignManager.Instance.CampaignSaveManager.SaveData.IsConsumableBlocked(_consumable)) return false;
         if(_consumable == ConsumableEnum.Rewind) {
             return CampaignManager.Instance.MapSceneUIManager.EventPanel.CanReroll
                 || CampaignManager.Instance.MapSceneUIManager.GamesPanel.CanRewind;

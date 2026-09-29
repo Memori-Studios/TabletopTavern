@@ -29,6 +29,8 @@ namespace TabletopTavern.Analytics
         public int UnitsStart;
         public int UnitsEnd;
         public int Kills;
+        // Health removed from enemy models, overkill excluded.
+        public int Damage;
         // Stand, Withdrew, Broke or Dead.
         public string Status;
     }
@@ -48,6 +50,8 @@ namespace TabletopTavern.Analytics
         public int ManaMax = -1;
         public int ManaLeft = -1;
         public int SpellKills;
+        // Hotbar spell and snare trap damage, which belongs to no squad. Fought battles only.
+        public int SpellDamage;
         public bool ArmyLossTriggered;
         public bool PauseUsed;
         public Dictionary<string, int> SpellCasts = new Dictionary<string, int>();
@@ -72,5 +76,11 @@ namespace TabletopTavern.Analytics
         public int UnitsMax;
         public int HealthNow;
         public int HealthMax;
+        // Campfire only, null elsewhere: the option taken, and for Train the unit and its new prestige level.
+        public string CampfireChoice;
+        public string TrainedUnit;
+        public int TrainedPrestige;
+        // The trait picked when Train reached max prestige, null otherwise.
+        public string TrainedTrait;
     }
 }

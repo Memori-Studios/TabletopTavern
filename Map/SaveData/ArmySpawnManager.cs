@@ -37,6 +37,8 @@ namespace Memori.SaveData
         // under this id rather than any army slot. Folded into the run total at battle end.
         public const int SPELL_KILL_SQUAD_ID = 0;
         public int SpellKillCount => squadIdKillCounter.TryGetValue(SPELL_KILL_SQUAD_ID, out int kills) ? kills : 0;
+        // Filled from the ECS damage totals at battle end, because the totals die with the battle's world.
+        Dictionary<int, int> squadIdDamageDealt = new();
         int squadIndex = 0;
 
         List<SquadToLoad> withdrawnSquads = new();
@@ -55,6 +57,7 @@ namespace Memori.SaveData
         readonly float GAP_BETWEEN_SQUADS_Z = 20f;  // Distance between front and back rows
         const float PLAYER_STAGING_Z = -165f;
         const float ENEMY_STAGING_Z  =  165f;
+        const float OUTRIDER_ROW_GAP = 10f; // Must exceed half the deepest Outrider squad, or its rear ranks start inside the zone
         bool enemyArmyContainsOutriders;
 
         public BattleLayoutType LayoutType { get; private set; }
@@ -163,11 +166,11 @@ namespace Memori.SaveData
                             newSquads.Add(squad);
                     }
                     if (newSquads.Count > 0)
-                        TeleportToNormalFormation(newSquads.ToArray(), playerArmyCenter);
+                        TeleportFreshPlayerSquads(newSquads.ToArray());
                 }
                 else
                 {
-                    TeleportToNormalFormation(playerArmy, playerArmyCenter);
+                    TeleportFreshPlayerSquads(playerArmy);
                 }
                 PlayerArmyDeployed = true;
 
@@ -299,14 +302,14 @@ namespace Memori.SaveData
             if (BattleManager.Instance.BattleSaveManager.IsCustomBattle)
             {
                 if (playerArmy != null && playerArmy.Length != 0)
-                    AssignSpawnPositionsNormalBattle(playerArmy, playerArmyCenter);
+                    SpawnPlayerArmyWithOutriderRow(playerArmy);
             }
             else
 #endif
             if(playerSquadBattlePositions.Count == 0 || isGarrisonBattle)
             {
                 if (playerArmy != null && playerArmy.Length != 0) {
-                    AssignSpawnPositionsNormalBattle(playerArmy, playerArmyCenter);
+                    SpawnPlayerArmyWithOutriderRow(playerArmy);
                 }
             }
             else
@@ -456,6 +459,16 @@ namespace Memori.SaveData
             SquadToLoad[] playerArmyLoaded = BattleManager.Instance.BattleSaveManager.GetArmyFromSaveData(true).Item1;
             SquadToLoad[] enemyArmyLoaded = BattleManager.Instance.BattleSaveManager.GetArmyFromSaveData(false).Item1;
 
+            CaptureDamageTotals();
+            List<SquadDamageStored> squadGUIDDamage = new();
+            void AddDamageEntry(SquadToLoad squad)
+            {
+                if (!uniqueIDToSquadId.TryGetValue(squad.UniqueID, out int squadId)) return;
+                squadGUIDDamage.Add(new SquadDamageStored { SquadGUID = squad.UniqueID, Damage = GetSquadDamageDealt(squadId) });
+            }
+            foreach (SquadToLoad squad in playerArmyLoaded) AddDamageEntry(squad);
+            foreach (SquadToLoad squad in enemyArmyLoaded) AddDamageEntry(squad);
+
             List<SquadKillsStored> squadGUIDKillCounter = new();
             for (int i = 0; i < playerArmyLoaded.Length; i++)
             {
@@ -552,7 +565,7 @@ namespace Memori.SaveData
 
             SteamAchievements.AddStat(SteamStatId.UnitKills, SpellKillCount);
             AnalyticsBattleReport report = GameEventTracker.TryBuild("battleEnded", () => BuildBattleReport(playerArmyLoaded, enemyArmyLoaded, _playerWonBattle));
-            SaveDataHandler.SaveSquadsPostBattle(playerArmyLoaded, enemyArmyLoaded, _playerWonBattle, squadGUIDKillCounter, squadGUIDLossCounter, SpellKillCount, report);
+            SaveDataHandler.SaveSquadsPostBattle(playerArmyLoaded, enemyArmyLoaded, _playerWonBattle, squadGUIDKillCounter, squadGUIDLossCounter, squadGUIDDamage, SpellKillCount, report);
             Debug.Log($"Saved post-battle squad data for {( _playerWonBattle ? "player" : "enemy")} with {squadGUIDKillCounter.Count} entries");
         }
 
@@ -561,6 +574,7 @@ namespace Memori.SaveData
         {
             SquadToLoad[] playerArmyLoaded = BattleManager.Instance.BattleSaveManager.GetArmyFromSaveData(true).Item1;
             SquadToLoad[] enemyArmyLoaded = BattleManager.Instance.BattleSaveManager.GetArmyFromSaveData(false).Item1;
+            CaptureDamageTotals();
             ApplyLiveUnitCounts(playerArmyLoaded);
             ApplyLiveUnitCounts(enemyArmyLoaded);
             AnalyticsBattleReport report = BuildBattleReport(playerArmyLoaded, enemyArmyLoaded, false);
@@ -588,6 +602,7 @@ namespace Memori.SaveData
                 Garrison = BattleManager.Instance.BattleSaveManager.IsGarrisonBattle,
                 EnemyRace = enemyArmy.Length > 0 ? TabletopTavernData.Instance.GetRaceFromUnitName(enemyArmy[0].UnitName).ToString() : null,
                 Layout = LayoutType.ToString(),
+                SpellDamage = GetSquadDamageDealt(SPELL_KILL_SQUAD_ID),
             };
 #if SPELLS
             var spellManager = BattleManager.Instance.SpellManager;
@@ -617,6 +632,7 @@ namespace Memori.SaveData
                 UnitsStart = squadIdToInitialUnitCount.TryGetValue(squadId, out int unitsStart) ? unitsStart : unitsEnd,
                 UnitsEnd = unitsEnd,
                 Kills = squadIdKillCounter.TryGetValue(squadId, out int kills) ? kills : 0,
+                Damage = GetSquadDamageDealt(squadId),
                 Status = withdrew ? "Withdrew" : unitsEnd <= 0 ? "Dead" : "Stand",
             });
         }
@@ -752,6 +768,44 @@ namespace Memori.SaveData
                 TeleportSquadUnits(row[i], pos, facing);
             }
         }
+
+        #region Player Outrider Row
+        // Base stats only: a hero grant such as Morvayne's still deploys anywhere but starts in the normal formation.
+        private static bool StartsInOutriderRow(UnitName unitName) =>
+            TabletopTavernData.Instance.GetSquadStats(unitName).SquadAttributes.Outrider;
+
+        private Vector3 PlayerOutriderRowCenter()
+        {
+            Vector3 center = playerArmyCenter.position;
+            center.z = BattleManager.Instance.PositionDrawer.PlayerDeploymentZone.max.z + OUTRIDER_ROW_GAP;
+            return center;
+        }
+
+        // Only squads with no recorded position come here; a recorded Outrider keeps its saved spot.
+        private void TeleportFreshPlayerSquads(SquadToLoad[] squads)
+        {
+            SquadToLoad[] outriders = squads.Where(s =>  StartsInOutriderRow(s.UnitName)).ToArray();
+            SquadToLoad[] others    = squads.Where(s => !StartsInOutriderRow(s.UnitName)).ToArray();
+            if (others.Length > 0)    TeleportToNormalFormation(others, playerArmyCenter);
+            if (outriders.Length > 0) TeleportPlayerOutriderRow(outriders);
+        }
+
+        private void TeleportPlayerOutriderRow(SquadToLoad[] outriders)
+        {
+            Vector3 right = playerArmyCenter.right;
+            Vector3 start = PlayerOutriderRowCenter() - right * ((outriders.Length - 1) * GAP_BETWEEN_SQUADS_X / 2f);
+            for (int i = 0; i < outriders.Length; i++)
+                TeleportSquadUnits(outriders[i], start + right * (i * GAP_BETWEEN_SQUADS_X), playerArmyCenter.rotation);
+        }
+
+        // Custom battle squad ids come from squadIndex, which AssignSpawnPositionsNormalBattle resets, so the row must spawn after it.
+        private void SpawnPlayerArmyWithOutriderRow(SquadToLoad[] playerArmy)
+        {
+            SquadToLoad[] outriders = playerArmy.Where(s => StartsInOutriderRow(s.UnitName)).ToArray();
+            AssignSpawnPositionsNormalBattle(playerArmy.Where(s => !StartsInOutriderRow(s.UnitName)).ToArray(), playerArmyCenter);
+            if (outriders.Length > 0) AssignSpawnPositionsStagingRow(outriders, PlayerOutriderRowCenter(), playerArmyCenter.rotation);
+        }
+        #endregion
 
         private void TeleportSquadUnits(SquadToLoad squad, Vector3 spawnCenter, Quaternion rotation, int2 widthAndDepth = default)
         {
@@ -1617,6 +1671,26 @@ namespace Memori.SaveData
         public int GetSquadKillCount(int _squadId)
         {
             return squadIdKillCounter.ContainsKey(_squadId) ? squadIdKillCounter[_squadId] : 0;
+        }
+        public int GetSquadDamageDealt(int _squadId)
+        {
+            return squadIdDamageDealt.TryGetValue(_squadId, out int damage) ? damage : 0;
+        }
+        private void CaptureDamageTotals()
+        {
+            squadIdDamageDealt.Clear();
+            World world = World.DefaultGameObjectInjectionWorld;
+            if (world == null || !world.IsCreated) return;
+
+            EntityQuery query = world.EntityManager.CreateEntityQuery(ComponentType.ReadOnly<SquadDamageTotalElement>());
+            query.CompleteDependency();
+            // Absent when the battle ended before it started (a concede during deployment): nothing to record.
+            if (query.TryGetSingletonBuffer(out DynamicBuffer<SquadDamageTotalElement> totals, true))
+            {
+                foreach (SquadDamageTotalElement total in totals)
+                    squadIdDamageDealt[total.SquadId] = total.Total;
+            }
+            query.Dispose();
         }
         public void WithdrawSquad(int squadIndex, int _squadUnitCount)
         {

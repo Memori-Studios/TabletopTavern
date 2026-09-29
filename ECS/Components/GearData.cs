@@ -162,7 +162,7 @@ namespace TJ
             GearModifierValue = GEAR_ARMINGSWORDS_MODIFIER,
         };
 
-        //Desc: "[Shielded] units are now Invulnerable to ranged attacks"
+        //Desc: "[StandardShields] and [HeavyShields] Units gain +{0} [MeleeDefense]"
         //Flavor: "The best defense is a good defense"
         public static Gear BucklerShields = new ()
         {
@@ -216,7 +216,7 @@ namespace TJ
             GearModifierValue = GEAR_GNOMISHARMORERS_MODIFIER,
         };
 
-        //Desc: "[Ranged] units gain [Armor Piercing]"
+        //Desc: "[Ranged] Units gain [ArmorPiercing] (not [Artillery])"
         //Flavor: "Cut armor into pieces, this is my last resort"
         public static Gear DiamondTippedArrows = new ()
         {
@@ -224,7 +224,7 @@ namespace TJ
             GearRarity = GearRarity.Common,
         };
 
-        //Desc: "[Ranged] units gain +{0} Bonus [Range]"
+        //Desc: "[Ranged] Units gain +{0} bonus [Range] (not [Artillery])"
         //Flavor: "A bow that is perfect for shooting arrows"
         public static Gear Longbows = new ()
         {
@@ -242,7 +242,7 @@ namespace TJ
             GearModifierValue = GEAR_WELLHONEDAXES_MODIFIER,
         };
 
-        //Desc: "[Ranged] units gain +{0} [Missile Strength]"
+        //Desc: "[Ranged] Units gain +{0} [MissileStrength] (not [Artillery])"
         //Flavor: "Why make toys when you can make war"
         public static Gear RingoftheElvenKing = new ()
         {
@@ -251,7 +251,7 @@ namespace TJ
             GearModifierValue = GEAR_RINGOFTHEELVENKING_MODIFIER,
         };
 
-        //Desc: "[Uncommon] & [Rare] [Ranged] units gain +{0} [Accuracy]"
+        //Desc: "[Uncommon], [Rare] and [Legendary] [Ranged] Units gain +{0} [Accuracy] (not [Artillery])"
         //Flavor: "Oh my god it's an actual eye"
         public static Gear RavensEye = new ()
         {
@@ -260,7 +260,7 @@ namespace TJ
             GearModifierValue = GEAR_RAVENSEY_MODIFIER,
         };
 
-        //Desc: "[Ranged] units gain +{0} [Accuracy]"
+        //Desc: "[Ranged] Units gain +{0} [Accuracy] (not [Artillery])"
         //Flavor: "It's not rocket science you heretic"
         public static Gear BallisticCharts = new ()
         {
@@ -269,7 +269,7 @@ namespace TJ
             GearModifierValue = GEAR_BALLISTICCHARTS_MODIFIER,
         };
 
-        //Desc: "[Ranged] units gain [Anti Large]"
+        //Desc: "[Ranged] Units gain [AntiLarge] (not [Artillery])"
         //Flavor: "It's hard to miss a target that big"
         public static Gear Turkey = new ()
         {
@@ -419,7 +419,7 @@ namespace TJ
         //Old Enron Accounting: 
 
 
-        //Desc: "[Shielded] units are now Invulnerable to ranged attacks"
+        //Desc: "[StandardShields] and [HeavyShields] Units block every projectile from the front"
         //Flavor: "The best defense is a good defense"
         public static Gear TowerShields = new ()
         {

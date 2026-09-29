@@ -18,8 +18,20 @@ namespace TJ
         [SerializeField] private Button _giveGearButton;
         [SerializeField] private TMP_Dropdown _giveGearDropdown;
         [SerializeField] private Button _forceLODButton;
+        [SerializeField] private Button _grantOrdealButton;
+        [SerializeField] private TMP_Dropdown _grantOrdealDropdown;
         private void Start()
         {
+            if (_grantOrdealDropdown != null && _grantOrdealButton != null)
+            {
+                _grantOrdealDropdown.ClearOptions();
+                foreach (OrdealDefinition ordeal in OrdealRegistry.All)
+                    _grantOrdealDropdown.options.Add(new TMP_Dropdown.OptionData(ordeal.Id.ToString()));
+                _grantOrdealDropdown.value = 0;
+                _grantOrdealDropdown.RefreshShownValue();
+                _grantOrdealButton.onClick.AddListener(GrantOrdeal);
+            }
+
             _giveUnitDropdown.ClearOptions();
             foreach (var unit in System.Enum.GetValues(typeof(UnitName)))
             {
@@ -94,6 +106,13 @@ namespace TJ
             if(CampaignManager.Instance.CampaignSaveManager.CanAquireGear())
                 CampaignManager.Instance.CampaignSaveManager.AquireGear(gearID);
             SaveAndSnapshot();
+        }
+        public void GrantOrdeal()
+        {
+            if (!CampaignManager.HasInstance) return;
+            string ordealName = _grantOrdealDropdown.options[_grantOrdealDropdown.value].text;
+            Debug.Log($"[DevPanel] GrantOrdeal: {ordealName}");
+            CampaignManager.Instance.CampaignSaveManager.TakeOrdeal((OrdealId)System.Enum.Parse(typeof(OrdealId), ordealName));
         }
         public void GiveGold()
         {

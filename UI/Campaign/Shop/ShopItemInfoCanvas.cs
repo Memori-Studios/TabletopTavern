@@ -20,6 +20,10 @@ public class ShopItemInfoCanvas : MonoBehaviour
         // A world-space sign over the shop stall: nothing on it is hovered.
         descriptionText.text = KeywordText.Render(_description, false);
     }
+    public void AppendLine(string _line)
+    {
+        descriptionText.text += "\n" + _line;
+    }
     void Update()
     {
         //face the camera

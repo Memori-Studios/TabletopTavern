@@ -17,5 +17,7 @@ namespace TJ.Spells
         public Transform[] keepOwnColorRoots;
         // Warm-up art that should not outlive the wind-up (a looping "incoming" marker) is switched off on cast.
         public bool hideWarmupOnCast = false;
+        // Art that marks its own edge (Shieldwall's shields) hides the area band, which draws over everything at that radius.
+        public bool hideAreaBand = false;
     }
 }

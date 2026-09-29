@@ -57,6 +57,8 @@ namespace TJ.Shop
         private int gearPacksPurchased = 0;
         public int GearPacksPurchased => gearPacksPurchased;
 
+        private const int EMBARGO_SEED_OFFSET = 4099;
+
         private void Awake()
         {
             shopCanvasGroup = GetComponent<MemoriCanvasGroup>();
@@ -174,6 +176,14 @@ namespace TJ.Shop
                     consumableUI.SetUp(consumable, ConsumableData.ConsumableCost(consumableData.ConsumableRarity) - consumableDiscount, this);
                     shopConsumables.Add(consumableUI);
                     await Task.Delay(100);
+                }
+
+                // Embargo: one of the seven items is sold out, drawn apart from the stock so the stock is unchanged.
+                if (campaignSaveManager.SaveData.HasOrdeal(OrdealId.Embargo))
+                {
+                    int slot = new System.Random(MathUtilities.MixSeed(shopSaveData.shopSeed + EMBARGO_SEED_OFFSET)).Next(7);
+                    if (slot < 5) new[] { gearPack, cardPack1, cardPack2, cardPack3, cardPack4 }[slot].MarkSoldOut();
+                    else shopConsumables[slot - 5].MarkSoldOut();
                 }
                 outlines = GetComponentsInChildren<Outline>();
             }

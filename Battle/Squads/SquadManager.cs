@@ -312,8 +312,9 @@ public class SquadManager : MonoBehaviour
         int squadId = 0;
         bool guardMode = false;
         bool ceaseFire = false;
+        bool autoTarget = true;
         RangedFireMode fireMode = RangedFireMode.Volley;
-        if(_enemyData.Team == Team.Player) 
+        if(_enemyData.Team == Team.Player)
         {
             if(BattleManager.Instance.BattleSaveManager.IsCustomBattle)
             {
@@ -334,6 +335,9 @@ public class SquadManager : MonoBehaviour
             // buttons and the battle card read the real stance on the very first selection.
             if (TabletopTavernConstants.FightsAtRange(squadStats.unitType))
                 fireMode = TabletopTavernConstants.GetPlayerDefaultFireMode();
+            // A mage's AutoTarget is its Free Cast switch; other squads keep auto-retarget on.
+            if (TabletopTavernConstants.Casts(squadStats.unitType))
+                autoTarget = TabletopTavernConstants.GetPlayerDefaultMageFreeCast();
         } else {
             squadId = (enemySquadsRegistered + 1) * -1;
             enemySquadsRegistered++;
@@ -422,7 +426,7 @@ public class SquadManager : MonoBehaviour
             GuardMode = guardMode,
             UnitType = squadStats.unitType,
             ShieldedStance = isShielded ? ShieldedStance.Balanced : ShieldedStance.None,
-            AutoTarget = true,
+            AutoTarget = autoTarget,
             MeleeMode = false,
             CeaseFire = ceaseFire,
             FireMode = fireMode,
@@ -582,7 +586,16 @@ public class SquadManager : MonoBehaviour
             {
                 leadership += 10;
             }
-        } 
+        }
+        // Unbroken Ranks: every enemy squad holds longer, garrison gates and summons included.
+        if (_enemyData.Team == Team.Enemy && OrdealMask.Has(campaignSaveDataHolder.OrdealMask, OrdealId.UnbrokenRanks))
+        {
+            leadership += OrdealRegistry.UNBROKEN_RANKS_LEADERSHIP;
+        }
+        // A map-event morale penalty must never make a squad arrive already broken.
+        int eventLeadership = _enemyData.Team == Team.Enemy ? campaignSaveDataHolder.EventLeadershipEnemy : campaignSaveDataHolder.EventLeadershipPlayer;
+        if (eventLeadership != 0)
+            leadership = Mathf.Max(leadership + eventLeadership, TabletopTavernConstants.MORALE_BREAK_THRESHOLD * 2);
 
         #region Morale
         ecb.AddComponent(squadEntity, new MoraleComponent
@@ -1195,6 +1208,13 @@ public class SquadManager : MonoBehaviour
         using EntityQuery query = entityManager.CreateEntityQuery(ComponentType.ReadOnly<CampaignSaveDataHolder>());
         return query.TryGetSingleton(out CampaignSaveDataHolder holder) ? BattleHeroContext.For(holder, team) : default;
     }
+    /// <summary>Whether the run holds this Ordeal; always false in a custom battle.</summary>
+    public bool OrdealActive(OrdealId ordeal)
+    {
+        EntityManager entityManager = World.DefaultGameObjectInjectionWorld.EntityManager;
+        using EntityQuery query = entityManager.CreateEntityQuery(ComponentType.ReadOnly<CampaignSaveDataHolder>());
+        return query.TryGetSingleton(out CampaignSaveDataHolder holder) && !holder.IsCustomBattle && OrdealMask.Has(holder.OrdealMask, ordeal);
+    }
     public SquadSFXManager SetUpSquadFlag(SquadEntity _squadEntity, Team _team, int _squadId, MoraleComponent _moraleComponent)
     {
         Material GetFlagMaterial(Team team, SquadStats _squadStats, int ActiveHeroID, bool isCustomBattle, Material raceFlagBaseMaterial)
@@ -1250,6 +1270,9 @@ public class SquadManager : MonoBehaviour
                 foreach (var bonus in HeroBonusManager.GetFactionBonusForHero(UnitStat.Ammunition, hero.HeroID))
                     ammunition += (int)bonus.Value;
         }
+        // Same cut as EntityWatcher, so the bar starts full.
+        if (_team == Team.Player && TabletopTavernConstants.Shoots(squadStats.unitType) && OrdealActive(OrdealId.ShortQuivers))
+            ammunition = (int)(ammunition * OrdealRegistry.SHORT_QUIVERS_AMMUNITION);
         SquadFlagGameObject flag = flagInstance.GetComponent<SquadFlagGameObject>();
         flag.SetUp(flagMaterial, _squadId, unitSize, _moraleComponent, _squadEntity.SelfEntity, ammunition, _squadEntity.UnitName);
         stuffToDestroy.Add(flagInstance);

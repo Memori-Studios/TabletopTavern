@@ -39,9 +39,14 @@ namespace TJ.Map
         int sellValue;
         [SerializeField] private int indexHovered;
         [SerializeField] private MMF_Player consumeableSpawnFeedback;
+        // The Collection's dim tint for an owned item that cannot be used right now.
+        static readonly Color InactiveIconColor = new(0.6f, 0.6f, 0.6f, 0.7f);
+        Color iconColor;
+
         private void Awake()
         {
             memoriTooltipTrigger = GetComponent<MemoriTooltipTrigger>();
+            iconColor = consumableIcon.color;
         }
         public void LoadConsumableUI(ConsumableEnum _consumableEnum)
         {
@@ -50,7 +55,14 @@ namespace TJ.Map
             hudPanel = CampaignManager.Instance.MapSceneUIManager.HUDPanel;
             string localizedConsumableName = LocalizationManager.Instance.GetText(consumable.ConsumableEnum.ToString() + "Name");
             string localizedConsumableDescription = CampaignManager.Instance.ConsumableManager.GetConsumableDescription(consumable.ConsumableEnum);
-            memoriTooltipTrigger.SetUpToolTip(localizedConsumableName, localizedConsumableDescription, _delay: 0f);
+            OrdealId countering = OrdealRegistry.CounteringOrdeal(CampaignManager.Instance.CampaignSaveManager.SaveData.ordeals, _consumableEnum);
+            consumableIcon.color = countering != OrdealId.None ? iconColor * InactiveIconColor : iconColor;
+            memoriTooltipTrigger.SetUpToolTip(new TooltipContent
+            {
+                Title = localizedConsumableName,
+                Body = localizedConsumableDescription,
+                Footer = countering != OrdealId.None ? OrdealRegistry.InactiveNote(countering) : "",
+            });
             memoriTooltipTrigger.enabled = true;
             consumableIcon.enabled = true;
             consumableLoaded = true;
@@ -78,6 +90,7 @@ namespace TJ.Map
         {
             consumableIcon.sprite = null;
             consumableIcon.enabled = false;
+            consumableIcon.color = iconColor;
             consumableLoaded = false;
             consumableOptions.SetActive(false);
             Button.onClick.RemoveAllListeners();
@@ -140,6 +153,9 @@ namespace TJ.Map
                     DrinkConsumable();
                     break;
                 case ConsumableEnum.LambSauce:
+                    DrinkConsumable();
+                    break;
+                case ConsumableEnum.ManaDraught:
                     DrinkConsumable();
                     break;
                 default:

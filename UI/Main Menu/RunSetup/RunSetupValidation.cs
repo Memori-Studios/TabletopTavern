@@ -49,9 +49,8 @@ namespace TJ.MainMenu
                 blockers.Add(LocalizationManager.Instance.GetText("InsufficientGoldError"));
             }
 
-            // Load-bearing, not defensive: the difficulty spinner can be stepped onto a locked
-            // level, so this is what actually stops the run starting.
-            if (IsDifficultyLocked(playPanel.SelectedDifficulty))
+            // The difficulty arrows can step onto a locked level, so this is what stops the run starting.
+            if (DifficultyRules.IsLocked(playPanel.SelectedDifficulty, SaveDataHandler.LoadPlayerSaveData().MaxDifficultyOverall))
             {
                 blockers.Add(LocalizationManager.Instance.GetText("Difficulty Locked"));
             }
@@ -66,11 +65,6 @@ namespace TJ.MainMenu
 #endif
 
             Render();
-        }
-
-        private static bool IsDifficultyLocked(TT_Difficulty difficulty)
-        {
-            return DifficultyRules.IsLocked(difficulty, SaveDataHandler.LoadPlayerSaveData().MaxDifficultyOverall);
         }
 
         private void Render()

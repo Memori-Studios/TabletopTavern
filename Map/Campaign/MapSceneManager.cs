@@ -14,6 +14,8 @@ namespace TJ.Map
     {
         [SerializeField] private bool allowMapInput = false;
         public bool AllowMapInput => allowMapInput;
+        // Holds map input off from the act's first load until its Ordeal is taken.
+        private bool ordealPickPending;
         [SerializeField] MapSceneUIManager mapSceneUIManager;
         [SerializeField] private MapGenerator mapGenerator;
         
@@ -68,6 +70,8 @@ namespace TJ.Map
         {
             activeChapterIndex = CampaignManager.Instance.CampaignSaveManager.SaveData.activeMapLayer;
             Debug.Log($"Loading map scene with active chapter index: {activeChapterIndex}");
+            CampaignSaveData save = CampaignManager.Instance.CampaignSaveManager.SaveData;
+            ordealPickPending = activeChapterIndex == -1 && !save.battleCompleted && save.OrdealPickDue;
             ResetAllNodes();
             if (CampaignManager.Instance.CampaignSaveManager.SaveData.nodesRevealed)
                 RevealNodesVisually(-1, mapLayers.Count);
@@ -137,12 +141,35 @@ namespace TJ.Map
                 mapSceneUIManager.HUDPanel.HudAnimator.Play("HUD Open");
             }
 
-            if (CampaignManager.Instance.CampaignSaveManager.SaveData.battleCompleted) LoadPostBattle();
+            // A node with a locked roll reopens on it, so the player cannot walk away from a result they have seen.
+            void LoadNodeResume()
+            {
+                SnapshotLoad();
+                int resumeIndex = save.nodeResume.nodeIndex;
+                MapNode resumeNode = mapLayers[activeChapterIndex + 1].LayerNodes.Find(x => x.index == resumeIndex).mapNodeGameObject;
+                if (resumeNode == null)
+                {
+                    Debug.LogError($"[Map] Locked node {resumeIndex} not found on layer {activeChapterIndex + 1}; dropping the lock");
+                    save.nodeResume = default;
+                    return;
+                }
+                selectedNode = resumeNode;
+                hoppingArrived = true;
+                playerToken.transform.position = resumeNode.transform.position;
+                resumeNode.NodeClicked();
+                DeselectOtherNodesOnLayer();
+                UpdateNodePath();
+                FocusSelectedNode();
+                mapSceneUIManager.LoadPanelFromNode(resumeNode);
+            }
+
+            if (save.battleCompleted) LoadPostBattle();
+            else if (save.nodeResume.active && activeChapterIndex >= 0) LoadNodeResume();
             else if (activeChapterIndex == -1) InitialLoad();
             else SnapshotLoad();
 
             //check if map scene is the override
-            if(SceneHandler.Instance.EditorOverride == SceneHandler.EditorOverrides.Map && activeChapterIndex >= 0 && !CampaignManager.Instance.CampaignSaveManager.SaveData.battleCompleted)
+            if(SceneHandler.Instance.EditorOverride == SceneHandler.EditorOverrides.Map && activeChapterIndex >= 0 && !CampaignManager.Instance.CampaignSaveManager.SaveData.battleCompleted && !save.nodeResume.active)
             {
                 // Debug.Log($"Map scene loaded from editor override");
                 SnapshotLoad();
@@ -397,6 +424,8 @@ namespace TJ.Map
                 TutorialManager.Instance.LoadStepsFromRandomSpot(new TutorialStep[1]{ TutorialData.GoldInterest });
             }
 
+            PayOrdealGoldLoss();
+
             // Debug.Log($"Layer completed. Moving to layer {activeChapterIndex}");
             // if (activeChapterIndex == 0) // for quick completion check
             if (activeChapterIndex == mapLayers.Count - 1)
@@ -500,6 +529,17 @@ namespace TJ.Map
                 report.UnitsMax += squad.maxUnitCount;
                 report.HealthNow += squad.SquadCurrentHealth;
                 report.HealthMax += squad.SquadMaxHealth;
+            }
+            if (selectedNode.Value.type == NodeType.Campfire)
+            {
+                var campfire = mapSceneUIManager.CampfirePanel;
+                report.CampfireChoice = campfire.Chosen.ToString();
+                report.TrainedUnit = campfire.TrainedUnit;
+                report.TrainedPrestige = campfire.TrainedPrestige;
+                // The trait picker runs before the layer completes, so a max-prestige squad already holds its trait here.
+                foreach (SquadToLoad squad in save.playerArmy)
+                    if (campfire.TrainedSquadId != null && squad.UniqueID == campfire.TrainedSquadId && squad.PrestigeTrait != UnitAttribute.None)
+                        report.TrainedTrait = squad.PrestigeTrait.ToString();
             }
             return report;
         }
@@ -692,12 +732,55 @@ namespace TJ.Map
             }
             
             mapSceneUIManager.HUDPanel.HudAnimator.Play("HUD Open");
-            SetMapInput(true);
+            if (ordealPickPending) StartCoroutine(OfferOrdeals());
+            else SetMapInput(true);
         }
         public void SetMapInput(bool _allowMapInput)
         {
             // Debug.Log($"Setting map input to {_allowMapInput}");
-            allowMapInput = _allowMapInput;
+            allowMapInput = _allowMapInput && !ordealPickPending;
         }
+        #region Ordeals
+        // The Tithe and Mercenary Contract, on every completed layer; gold floors at 0, so a broke run loses nothing.
+        private void PayOrdealGoldLoss()
+        {
+            CampaignSaveData save = CampaignManager.Instance.CampaignSaveManager.SaveData;
+            int loss = Mathf.Min(OrdealRegistry.GoldLostPerTurn(save), save.goldAmount);
+            if (loss <= 0) return;
+            string label = LocalizationManager.Instance.GetText(OrdealRegistry.Get(save.HasOrdeal(OrdealId.TheTithe) ? OrdealId.TheTithe : OrdealId.MercenaryContract).NameKey);
+            CampaignManager.Instance.GoldManager.ModifyGold(-loss, label);
+        }
+        private IEnumerator OfferOrdeals()
+        {
+            while (mapSceneUIManager.IsDrainingPrestigeChoices) yield return null;
+
+            CampaignSaveData save = CampaignManager.Instance.CampaignSaveManager.SaveData;
+            List<OrdealId> offer = OrdealRegistry.DrawOffer(save);
+            if (offer.Count == 0)
+            {
+                FinishOrdealPick(OrdealId.None, offer);
+                yield break;
+            }
+            mapSceneUIManager.OrdealPanel.Open(offer, save.bookNumber, taken => FinishOrdealPick(taken, offer));
+        }
+        private void FinishOrdealPick(OrdealId taken, List<OrdealId> offer)
+        {
+            List<string> notices = CampaignManager.Instance.CampaignSaveManager.BeginOrdealAct(taken, offer);
+            if (notices.Count > 0) Memori.Notifications.NotificationManager.Instance.DisplayNotification(string.Join("\n", notices));
+
+            bool redrawMap = taken != OrdealId.None && OrdealRegistry.Get(taken).RedrawsMap;
+            ordealPickPending = false;
+            if (redrawMap)
+            {
+                mapGenerator.RedrawNodes();
+                hoveredNode = null;
+                selectedNode = null;
+                if (CampaignManager.Instance.CampaignSaveManager.SaveData.nodesRevealed)
+                    RevealNodesVisually(-1, mapLayers.Count);
+                SelectNextLayer();
+            }
+            SetMapInput(true);
+        }
+        #endregion
     }
 }

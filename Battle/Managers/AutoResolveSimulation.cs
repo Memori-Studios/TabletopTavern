@@ -216,7 +216,7 @@ namespace TJ.Engagement
         /// second (no damage and no squad able to move), so a caller can end a stalemate by health
         /// rather than spin to the round cap.
         /// </summary>
-        internal static bool Tick(AutoResolveSquad[] player, AutoResolveSquad[] enemy, float enemyDamageBonus, List<int3> damageLog)
+        internal static bool Tick(AutoResolveSquad[] player, AutoResolveSquad[] enemy, float enemyDamageBonus, List<int3> damageLog, float playerDamageBonus = 1f)
         {
             Initialize(player, enemy);
             ApplyPooledDamage(player, enemy, damageLog);
@@ -234,9 +234,9 @@ namespace TJ.Engagement
             bool playerFirst = UnityEngine.Random.value < 0.5f;
             if (playerFirst)
             {
-                Fire(player, enemy, 1f);
+                Fire(player, enemy, playerDamageBonus);
                 Fire(enemy, player, enemyDamageBonus);
-                Melee(player, enemy, 1f);
+                Melee(player, enemy, playerDamageBonus);
                 Melee(enemy, player, enemyDamageBonus);
                 UpdateMorale(player, enemy, false);
                 UpdateMorale(enemy, player, true);
@@ -244,9 +244,9 @@ namespace TJ.Engagement
             else
             {
                 Fire(enemy, player, enemyDamageBonus);
-                Fire(player, enemy, 1f);
+                Fire(player, enemy, playerDamageBonus);
                 Melee(enemy, player, enemyDamageBonus);
-                Melee(player, enemy, 1f);
+                Melee(player, enemy, playerDamageBonus);
                 UpdateMorale(enemy, player, true);
                 UpdateMorale(player, enemy, false);
             }
@@ -732,6 +732,7 @@ namespace TJ.Engagement
             target.finalHealth -= dealt;
             target.TickLoss += dealt;
             striker.TickDealt += dealt;
+            striker.DamageDealt += dealt;
             if (target.UnitHealth[victim] <= 0)
             {
                 int last = target.UnitsAlive - 1;

@@ -74,6 +74,8 @@ namespace TJ.Map
         MapRegion mapRegion;
         int _bookNumber = 0;
         Race _race;
+        // Ordeals that change the map, copied from the save before each build; tests build without them.
+        bool scorchedEarth, fogOnTheRoad;
         public Race MapRace => _race;
         public async void LoadMap(int bookNumber)
         {
@@ -84,6 +86,7 @@ namespace TJ.Map
             lastNodeType = NodeType.Horde;
 #endif
             seed = CampaignManager.Instance.CampaignSaveManager.SaveData.seed;
+            ReadMapOrdeals();
             await GenerateMap(bookNumber);
 
             int heroId = CampaignManager.Instance.CampaignSaveManager.SaveData.heroID;
@@ -206,6 +209,30 @@ namespace TJ.Map
             BuildLayers();
         }
         internal IReadOnlyList<MapLayer> Layers => mapLayers;
+        private void ReadMapOrdeals()
+        {
+            var run = CampaignManager.Instance.CampaignSaveManager.SaveData;
+            scorchedEarth = run.HasOrdeal(OrdealId.ScorchedEarth);
+            fogOnTheRoad = run.HasOrdeal(OrdealId.FogOnTheRoad);
+        }
+        /// <summary>Test hook: builds with these map Ordeals on, as a run holding them would.</summary>
+        internal void SetMapOrdeals(bool _scorchedEarth, bool _fogOnTheRoad)
+        {
+            scorchedEarth = _scorchedEarth;
+            fogOnTheRoad = _fogOnTheRoad;
+        }
+        /// <summary>
+        /// Rebuilds the act's nodes and paths after an Ordeal changes what they show. Positions and paths come out
+        /// the same because Ordeals only remap values after their draw, so terrain and trees are left alone.
+        /// </summary>
+        public void RedrawNodes()
+        {
+            ReadMapOrdeals();
+            SeededRandom.Init(seed + (_bookNumber * 13));
+            BuildLayers();
+            DrawMap();
+            GetComponent<MapSceneManager>().SetMapLayers(mapLayers);
+        }
         private void FixIndexing()
         {
             //look at connected node index, get the actual index of the node from that layer
@@ -450,7 +477,10 @@ namespace TJ.Map
 
             for(int i = 0; i < possibleNodeTypes.nodeTypeWeights.Length; i++) {
                 if (weight <= possibleNodeTypes.nodeTypeWeights[i].weight) {
-                    return possibleNodeTypes.nodeTypeWeights[i].type;
+                    NodeType type = possibleNodeTypes.nodeTypeWeights[i].type;
+                    // Remapped after the draw, never instead of it, so every later draw lands the same.
+                    if (scorchedEarth && (type == NodeType.Campfire || type == NodeType.Games)) return NodeType.Skirmish;
+                    return type;
                 }
             }
             Debug.LogError($"Failed to get node type, returning default: {NodeType.Horde}");
@@ -492,7 +522,7 @@ namespace TJ.Map
                         nodeObject = Instantiate(mapNodePrefab, mapParent);
                     #endif
 
-                    bool hidden = SeededRandom.Range(0, 1f) < hiddenNodeChance;
+                    bool hidden = SeededRandom.Range(0, 1f) < (fogOnTheRoad ? OrdealRegistry.FOG_HIDDEN_NODE_CHANCE : hiddenNodeChance);
                     if (x < layerNodeTypeWeights.Length && layerNodeTypeWeights[x].preventHidden) {
                         hidden = false;
                     }

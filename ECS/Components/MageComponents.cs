@@ -53,6 +53,9 @@ public enum MageTargetPriority
     /// <summary>Enemy squad currently charging, falling back to nearest. For interrupts
     /// (Drakosaur's Primal Quake).</summary>
     ChargingEnemy,
+
+    /// <summary>Nearest enemy squad that can shoot, any enemy only when none can. For accuracy debuffs (Taelindor's Veil Mist).</summary>
+    RangedEnemyFirst,
 }
 
 /// <summary>

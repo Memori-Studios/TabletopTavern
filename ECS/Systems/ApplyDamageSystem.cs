@@ -35,6 +35,8 @@ namespace TJ
                 var healingHitPoints = 0;
                 int maxDamageSquadId = 100;
                 int maxDamageAmount = 0;
+                // Health left to credit this frame, so overkill never counts as damage dealt.
+                int creditableHealth = math.max(0, health.ValueRO.Value);
 
                 Unit unitTakingDamage = SystemAPI.GetComponent<Unit>(damageReceivingEntity);
                 bool infantry = SystemAPI.HasComponent<InfantryTag>(damageReceivingEntity);
@@ -195,8 +197,10 @@ namespace TJ
                             maxDamageAmount = attackHitPoints;
                             maxDamageSquadId = damageElement.DamageSourceSquadId;
                         }
+                        int credited = math.min(attackHitPoints, creditableHealth);
+                        creditableHealth -= credited;
                         if (hasDamageBuffer)
-                            globalDamageBuffer.Add(new SquadDamageBufferElement { SquadId = damageElement.DamageSourceSquadId, DamageAmount = attackHitPoints });
+                            globalDamageBuffer.Add(new SquadDamageBufferElement { SquadId = damageElement.DamageSourceSquadId, DamageAmount = attackHitPoints, Credited = credited });
                     }
                 }
 

@@ -102,6 +102,19 @@ namespace TJ.Recruit
             campaignSaveManager.IncrementRerollCount(3);
             skipButton.gameObject.SetActive(true);
         }
+        // Reopens the battle reward picker on the units it first offered, so closing it without a pick is not a free reroll.
+        public void ReopenRecruitPanelFromBattle(UnitName[] offeredUnits)
+        {
+            recruitmentType = RecruitmentType.Battle;
+            hasSelectedRecruitCard = false;
+            recruitCards = new();
+            gearCards = new();
+
+            campaignSaveManager.SaveRecruitableUnits(offeredUnits);
+            LoadRecruitCards();
+            recruitmentScene.SetUp(campaignSaveManager.SaveData.recruitableUnits);
+            skipButton.gameObject.SetActive(true);
+        }
         public void LoadRecruitPanelForConscript(UnitName[] unitsToConscript)
         {
             recruitmentType = RecruitmentType.Conscription;
@@ -292,20 +305,10 @@ namespace TJ.Recruit
             }
             else
             {
-                float conscriptedHealth = 1;
-                if(recruitmentType == RecruitmentType.Conscription) 
-                {
-                    conscriptedHealth = TabletopTavernConstants.CONSCRIPT_SURVIVORS_HEALTH_PERCENTAGE;
-                    if(SaveDataHandler.IsMetaprogressionNodeUnlocked(_postBattleRecruitMetaprogressionModel)) {
-                        conscriptedHealth = 0.75f;
-                    }
-                    if(CampaignManager.Instance.CampaignSaveManager.CheckForGear(GearID.RiverTrout)) {
-                        conscriptedHealth = 1;
-                    }
-                }
+                float conscriptedHealth = recruitmentType == RecruitmentType.Conscription ? ConscriptHealth() : 1;
 
                 hasSelectedRecruitCard = true;
-                campaignSaveManager.RecruitSquad(_squadStats, conscriptedHealth);
+                campaignSaveManager.RecruitSquad(_squadStats, conscriptedHealth, _conscripted: recruitmentType == RecruitmentType.Conscription);
             }
 
             IAudioRequester.Instance.PlaySFX(SFXData.RecruitUnit);
@@ -357,6 +360,13 @@ namespace TJ.Recruit
             CloseRecruitPanel();
         }
         
+        // The health a conscripted unit joins at; the Engagement panel's Conscript text reads the same rule.
+        public float ConscriptHealth()
+        {
+            if (CampaignManager.Instance.CampaignSaveManager.CheckForGear(GearID.RiverTrout)) return 1f;
+            if (SaveDataHandler.IsMetaprogressionNodeUnlocked(_postBattleRecruitMetaprogressionModel)) return 0.75f;
+            return TabletopTavernConstants.CONSCRIPT_SURVIVORS_HEALTH_PERCENTAGE;
+        }
         public void CloseRecruitPanel()
         {
             _cardLoadCts?.Cancel();
@@ -372,8 +382,8 @@ namespace TJ.Recruit
             } else if(recruitmentType == RecruitmentType.Town) {
                 mapSceneUIManager.TownPanel.CloseRecruitPanel();
             } else if(recruitmentType == RecruitmentType.Battle || recruitmentType == RecruitmentType.Conscription) {
-                mapSceneUIManager.EngagementPanel.ReturnFromRecruitPanel();
-            } 
+                mapSceneUIManager.EngagementPanel.ReturnFromRecruitPanel(hasSelectedRecruitCard);
+            }
             recruitCards.Clear();
             gearCards.Clear();
             hoveredCard = null;

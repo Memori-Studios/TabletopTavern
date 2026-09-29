@@ -9,6 +9,7 @@ using TJ.Treasure;
 using TJ.Games;
 using TJ.Campfire;
 using TJ.Prestige;
+using TJ.Ordeals;
 using Memori.Audio;
 using System;
 using System.Collections.Generic;
@@ -27,6 +28,7 @@ namespace TJ.Map
         [SerializeField] private GamesPanel tavernPanel;
         [SerializeField] private CampfirePanel campfirePanel;
         [SerializeField] private PrestigeTraitPanel prestigeTraitPanel;
+        [SerializeField] private OrdealPanel ordealPanel;
 
         [Header("Other Panels")]
         [SerializeField] private HUDPanel hudPanel;
@@ -42,8 +44,11 @@ namespace TJ.Map
         public HUDPanel HUDPanel => hudPanel;
         public GameOverPanel GameOverPanel => gameOverPanel;
         public TreasurePanel TreasurePanel => treasurePanel;
+        public OrdealPanel OrdealPanel => ordealPanel;
+        public CampfirePanel CampfirePanel => campfirePanel;
 
         [Header("Other")]
+        [SerializeField] private OrdealStrip ordealStrip;
         [SerializeField] private ArmyJuiceManager armyJuiceManager;
         [SerializeField] private AutoSavingIndicator autoSavingIndicator;
         [SerializeField] private MemoriCanvasGroup legendCanvasGroup;
@@ -62,6 +67,7 @@ namespace TJ.Map
         public int LayerNodeSelected => layerNodeSelected;
         private int activeLayer = 0;
         private bool isDrainingPrestigeChoices = false;
+        public bool IsDrainingPrestigeChoices => isDrainingPrestigeChoices;
 
         public void SetUp(MapSceneManager _mapSceneManager)
         {
@@ -81,6 +87,7 @@ namespace TJ.Map
             campfirePanel.SetUp(campaignSaveManager, this);
             prestigeTraitPanel.SetUp(campaignSaveManager, this);
             armyJuiceManager.SetUp(campaignSaveManager, this);
+            ordealStrip.SetUp(campaignSaveManager);
 
             legendCanvasGroup.FadeInAsync();
 

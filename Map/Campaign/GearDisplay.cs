@@ -36,12 +36,19 @@ namespace TJ
         int bonusValue;
         Gear gear;
         GearID gearID;
+        bool broken;
         public GearID GearID => gearID;
         // bool dynamicSellValue = false;
+
+        // The Collection's dim tint for an owned item that cannot be used right now.
+        static readonly Color InactiveIconColor = new(0.6f, 0.6f, 0.6f, 0.7f);
+
+        Color iconColor;
 
         private void Awake()
         {
             memoriTooltipTrigger = GetComponent<MemoriTooltipTrigger>();
+            iconColor = gearIcon.color;
         }
         public void LoadGearDisplay(GearID _gearID)
         {
@@ -54,7 +61,19 @@ namespace TJ
             gearDescLocalized = string.Format(gearDescLocalized, gear.GearModifierValue);
             string gearFlavorLocalized = LocalizationManager.Instance.GetText(gearID + "Flavor");
 
-            memoriTooltipTrigger.SetUpToolTip(gearNameLocalized, KeywordText.ForTooltip(gearDescLocalized), gearFlavorLocalized, _delay: 0f);
+            CampaignSaveData run = CampaignManager.Instance.CampaignSaveManager.SaveData;
+            broken = run.IsGearBroken(gearID);
+            OrdealId countering = OrdealRegistry.CounteringOrdeal(run.ordeals, gearID);
+            string inactiveNote = broken ? OrdealRegistry.BrokenNote() : countering != OrdealId.None ? OrdealRegistry.InactiveNote(countering) : "";
+            gearIcon.color = inactiveNote.Length > 0 ? iconColor * InactiveIconColor : iconColor;
+
+            memoriTooltipTrigger.SetUpToolTip(new TooltipContent
+            {
+                Title = gearNameLocalized,
+                Body = KeywordText.ForTooltip(gearDescLocalized),
+                Detail = gearFlavorLocalized,
+                Footer = inactiveNote,
+            });
             memoriTooltipTrigger.enabled = true;
             gearIcon.enabled = true;
             gearSellTag.SetActive(false);
@@ -67,7 +86,13 @@ namespace TJ
             }
             #endregion
 
-            if (gear.GearName == GearData.OrnateRing.GearName)//doubles gold
+            // Broken gear sells for nothing and fires no sell effect; selling it only frees the slot.
+            if (broken)
+            {
+                sellValue = 0;
+                bonusValue = 0;
+            }
+            else if (gear.GearName == GearData.OrnateRing.GearName)//doubles gold
             {
                 // dynamicSellValue = true;
                 sellValue = CampaignManager.Instance.CampaignSaveManager.SaveData.goldAmount;
@@ -85,6 +110,7 @@ namespace TJ
                 foreach (GearID gearName in gearNames)
                 {
                     if (gearName == GearID.Cauldron) continue;
+                    if (CampaignManager.Instance.CampaignSaveManager.SaveData.IsGearBroken(gearName)) continue;
 
                     if (gearName == GearID.ThePotato)
                     {
@@ -120,6 +146,8 @@ namespace TJ
         {
             gearIcon.sprite = null;
             gearIcon.enabled = false;
+            gearIcon.color = iconColor;
+            broken = false;
             gearSellTag.SetActive(false);
             Button.onClick.RemoveAllListeners();
             string titleLocalized = LocalizationManager.Instance.GetText("emptyGearSlotTitle");
@@ -170,7 +198,7 @@ namespace TJ
             sellButton.onClick.RemoveAllListeners();
 
             //prestige a random unit
-            if(gear.GearName == GearData.Mitre.GearName)
+            if(gear.GearName == GearData.Mitre.GearName && !broken)
             {
                 CampaignManager.Instance.CampaignSaveManager.PrestigeRandomUnit();
                 CampaignManager.Instance.MapSceneUIManager.TryDrainPendingPrestigeChoices();

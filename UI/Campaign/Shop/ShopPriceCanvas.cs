@@ -11,6 +11,8 @@ namespace TJ.Shop
         private Outline outline;
         private Canvas canvas;
         GoldManager goldManager;
+        // Embargo: the price is struck through, so nothing may parse the label as a number.
+        bool soldOut;
         private void Start()
         {
             canvas = GetComponent<Canvas>();
@@ -18,8 +20,20 @@ namespace TJ.Shop
             goldManager = CampaignManager.Instance.GoldManager;
             goldManager.OnGoldAmountChanged += UpdateAffordability;
         }
+        public void SetSoldOut(bool _soldOut)
+        {
+            soldOut = _soldOut;
+            if (!soldOut) return;
+            outline = GetComponentInChildren<Outline>();
+            // The label ships with rich text off; the strike-through needs it.
+            priceText.richText = true;
+            priceText.text = $"<s>{priceText.text}</s>";
+            priceText.color = Color.gray;
+            outline.OutlineColor = Color.gray;
+        }
         public void SetUp(string price)
         {
+            if (soldOut) return;
             outline = GetComponentInChildren<Outline>();
             priceText.text = price;
             bool canAfford = CampaignManager.Instance.GoldManager.CheckIfCanAfford(int.Parse(priceText.text));
@@ -39,6 +53,7 @@ namespace TJ.Shop
         }
         public void UpdateAffordability(int _goldAmount)
         {
+            if (soldOut) return;
             bool canAfford = CampaignManager.Instance.GoldManager.CheckIfCanAfford(int.Parse(priceText.text));
             Color color = ColorData.GetColorBasedOnAffordability(canAfford);
             priceText.color = color;

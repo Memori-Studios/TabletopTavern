@@ -25,10 +25,13 @@ namespace TJ.Shop
 
         ShopPanel shopPanel;
         int cost, _discount;
+        bool soldOut;
         public void SetUp(CardPackData _cardPackData, ShopPanel _shopPanel, int discount)
         {
             IAudioRequester.Instance.PlaySFX(SFXData.ShopItem);
             shopPanel = _shopPanel;
+            soldOut = false;
+            shopPriceCanvas.SetSoldOut(false);
             spawnInFeedback.PlayFeedbacks();
             cardPackData = _cardPackData;
             _discount = discount;
@@ -95,8 +98,20 @@ namespace TJ.Shop
                 }
             }
         }
+        public void MarkSoldOut()
+        {
+            soldOut = true;
+            shopPriceCanvas.SetSoldOut(true);
+            cardImage.color *= new Color(0.5f, 0.5f, 0.5f, 1f);
+            shopItemInfoCanvas.AppendLine($"<color={ColorData.Error}>{LocalizationManager.Instance.GetText("OrdealSoldOut")}</color>");
+        }
         public void AttemptPurchase()
         {
+            if (soldOut) {
+                NotificationManager.Instance.ErrorNotification(LocalizationManager.Instance.GetText("OrdealSoldOutNotice"));
+                shopPanel.RenableShopPanel();
+                return;
+            }
             if(!CampaignManager.Instance.GoldManager.CheckIfCanAfford(cost)) {
                 NotificationManager.Instance.ErrorNotification(LocalizationManager.Instance.GetText("notEnoughGold"));
                 shopPanel.RenableShopPanel();
@@ -146,6 +161,9 @@ namespace TJ.Shop
             {
                 cost = 5;
             }
+
+            // After every set price above, so Drums in the Deep keeps its pack cheap but not free of the rise.
+            if (CampaignManager.Instance.CampaignSaveManager.SaveData.HasOrdeal(OrdealId.IronCoffers)) cost += OrdealRegistry.IRON_COFFERS_PRICE_RISE;
 
             cost -= _discount;
             shopPriceCanvas.SetUp(cost.ToString());

@@ -28,8 +28,10 @@ namespace TJ.MainMenu
     public class WarbandPanel : MonoBehaviour
     {
         [Header("Commander Summary")]
+        // Optional: the split bars show the step marker instead of a hero line.
         [SerializeField] private TMP_Text commanderSummaryText;
         [SerializeField] private Button backToCommanderButton;
+        [SerializeField] private WarbandBuildView buildView;
 
         // Label, amount and breakdown are one TMP object; the size and colour steps between them
         // are inline tags rather than separate objects.
@@ -141,6 +143,7 @@ namespace TJ.MainMenu
             BuildGrimoire();
             RefreshSpellSlots();
             RefreshCommanderSummary(hero);
+            buildView.ShowRecord(hero.HeroID);
             RefreshPurse(startingArmySection.remainingTreasury.Value);
             // Re-applied even if Army was already focused, so every visit opens on the recruit list.
             focusApplied = false;
@@ -167,13 +170,13 @@ namespace TJ.MainMenu
         {
             loadout = SpellLoadout.GetDefaultLoadout(hero.HeroID);
             targetSpellSlot = SpellLoadout.SignatureSlotIndex + 1;
-            // LoadHeroes evaluates validation before it gets here (via LoadDifficulty), so without
-            // this the strip would be judging the previous hero's loadout.
+            // This is the refresh that judges the new hero once LoadHeroes has swapped it in.
             RefreshValidation();
         }
 
         private void RefreshCommanderSummary(Hero hero)
         {
+            if (commanderSummaryText == null) return;
             string heroName = LocalizationManager.Instance.GetText(hero.HeroName);
             string factionName = LocalizationManager.Instance.GetText(hero.Race.ToString());
             DifficultyLevel difficultyData = DifficultyData.GetDifficultyLevelData(playPanel.SelectedDifficulty);
@@ -226,17 +229,17 @@ namespace TJ.MainMenu
             // Colour lives inline rather than on TMP_Text.color, because the label and breakdown
             // either side of the amount stay muted while the amount alone turns red on an overspend.
             string amountColor = remaining < 0 ? ColorData.Error : ColorData.Gold;
-            string treasuryLabel = LocalizationManager.Instance.GetText("Treasury");
+            string goldLeftLabel = LocalizationManager.Instance.GetText("WarbandRecruitBudget");
 
             int startingGold = startingArmySection.StartingGold;
             int armySpend = startingArmySection.ArmyGoldSpend;
             int gearSpend = startingArmySection.GearGoldSpend;
 
             remainingTreasuryText.text =
-                $"<color={ColorData.Secondary}><size=75%><uppercase>{treasuryLabel}</uppercase></size></color>  " +
-                $"<b><color={amountColor}><size=135%>{remaining}</size></color></b>  " +
-                $"<color={ColorData.Secondary}><size=85%>" +
-                string.Format(LocalizationManager.Instance.GetText("TreasuryBreakdown"), startingGold, armySpend, gearSpend) +
+                $"<color={ColorData.Secondary}><size=75%><uppercase>{goldLeftLabel}</uppercase></size></color>  " +
+                $"<b><color={amountColor}><size=125%>{remaining}</size></color></b> <sprite name=GoldSprite>\n" +
+                $"<color={ColorData.Secondary}><size=80%>" +
+                string.Format(LocalizationManager.Instance.GetText("warbandPurseBreakdown"), startingGold, armySpend, gearSpend) +
                 "</size></color>";
 
             string bonus = startingArmySection.StartingGoldBonusFromMetaprogression > 0

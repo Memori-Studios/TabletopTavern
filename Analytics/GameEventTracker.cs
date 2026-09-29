@@ -153,6 +153,10 @@ namespace TabletopTavern.Analytics
                 p["unitsAlive"] = node.UnitsAlive;
                 p["unitsMax"] = node.UnitsMax;
                 p["healthPct"] = node.HealthMax > 0 ? Math.Round(100.0 * node.HealthNow / node.HealthMax, 1) : 0.0;
+                p["campfireChoice"] = node.CampfireChoice;
+                p["trainedUnit"] = node.TrainedUnit;
+                p["trainedPrestige"] = node.TrainedUnit != null ? (object)node.TrainedPrestige : null;
+                p["trainedTrait"] = node.TrainedTrait;
                 AnalyticsService.Record("nodeCompleted", p);
             });
         }
@@ -176,11 +180,25 @@ namespace TabletopTavern.Analytics
                 p["manaLeft"] = report.ManaLeft >= 0 ? (object)report.ManaLeft : null;
                 p["spellCasts"] = report.SpellCasts;
                 p["spellKills"] = report.SpellKills;
+                p["spellDamage"] = report.SpellDamage;
                 p["armyLossTriggered"] = report.ArmyLossTriggered;
                 p["pauseUsed"] = report.PauseUsed;
                 p["p"] = Squads(report.Player, true);
                 p["e"] = Squads(report.Enemy, false);
                 AnalyticsService.Record("battleEnded", p);
+            });
+        }
+
+        // The cards offered at an endless act's start and the one taken, so avoided cards show up in the data.
+        public static void OrdealPicked(CampaignSaveData run, List<OrdealId> offered, OrdealId taken)
+        {
+            TryRun("ordealPicked", () =>
+            {
+                Dictionary<string, object> p = RunProps(run, 0);
+                p["offered"] = Names(offered);
+                p["taken"] = taken.ToString();
+                p["held"] = run.ordeals != null ? run.ordeals.Count : 0;
+                AnalyticsService.Record("ordealPicked", p);
             });
         }
         #endregion
@@ -359,6 +377,7 @@ namespace TabletopTavern.Analytics
                     { "n0", r.UnitsStart },
                     { "n1", r.UnitsEnd },
                     { "k", r.Kills },
+                    { "d", r.Damage },
                     { "st", r.Status },
                 };
                 if (withSlot) squad["s"] = r.Slot;

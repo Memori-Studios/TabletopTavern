@@ -9,6 +9,7 @@ using Memori.Audio;
 using Memori.Utilities;
 using MoreMountains.Feedbacks;
 using Memori.Localization;
+using Memori.SaveData;
 
 namespace TJ.Recruit
 {
@@ -59,6 +60,9 @@ namespace TJ.Recruit
         public bool CanCombine => canCombine;
         bool isPurchased = false;
         bool isPointerOver = false;
+        bool displayOnly = false;
+        // A display-only card sits above its panel's canvas, which can sort far above the Map Canvas.
+        int restingSortingOrder = 1;
 
         #region Hover motion fields
         public enum HoverMotion { Idle, Hovered, Neighbour, Pressed }
@@ -153,6 +157,72 @@ namespace TJ.Recruit
 
             OnPointerExit(null); // Ensure the card is not highlighted on setup
         }
+
+        #region Display only
+        /// <summary>
+        /// Shows an owned squad beside a panel, such as the Prestige III picker: no click, no hover motion and no
+        /// combine check. The unit picture comes from the caller's own camera.
+        /// </summary>
+        public void SetUpDisplay(SquadToLoad squad, RenderTexture unitTexture, int prestige, UnitAttribute prestigeTrait)
+        {
+            displayOnly = true;
+            squadStats = TabletopTavernData.Instance.GetSquadStats(squad.UnitName);
+            if (cardContentRect == null) Debug.LogError("RecruitCard: cardContentRect is not assigned", this);
+            iconHighlight.enabled = false;
+            canvas = GetComponent<Canvas>();
+            Canvas parentCanvas = transform.parent != null ? transform.parent.GetComponentInParent<Canvas>() : null;
+            restingSortingOrder = parentCanvas != null ? parentCanvas.sortingOrder + 1 : 1;
+            canvas.overrideSorting = true;
+            canvas.sortingOrder = restingSortingOrder;
+            graphicRaycaster = GetComponent<GraphicRaycaster>();
+            graphicRaycaster.enabled = true;
+
+            SetUpTierVisuals();
+            purceasedGO.SetActive(false);
+            canCombineGO.SetActive(false);
+
+            recruitNameText.text = LocalizationManager.Instance.GetText(squadStats.unitName.ToString());
+            unitCountText.text = squad.maxUnitCount.ToString();
+            unitCountTooltip.SetUpToolTip(_description: LocalizationManager.Instance.GetText("Unit Count"));
+            maxHealthText.text = squad.SquadMaxHealth.ToString();
+            maxHealthTooltip.SetUpToolTip(_description: LocalizationManager.Instance.GetText("HitPoints"));
+            recruitImageRaw.texture = unitTexture;
+
+            unitAttributesUIContainer = GetComponent<UnitAttributesUIContainer>();
+            unitStatsUIContainer = GetComponent<UnitStatsUIContainer>();
+            unitAttributesUIContainer.Load(squadStats.unitName, true, prestigeTrait);
+            if (spellInfoBlock != null && spellInfoBlock.Load(squadStats.unitName, squadStats.unitType))
+                CollapseEmptyAttributesRow();
+            ShowPrestige(prestige, prestigeTrait);
+
+            Sprite sprite = TabletopTavernData.Instance.GetSquadTypeIcon(squadStats.unitName);
+            recruitUnitTypeImage1.sprite = sprite;
+            recruitUnitTypeImage2.sprite = sprite;
+
+            // Nothing to click, so only the graphics that carry a tooltip keep their raycast.
+            GetComponent<Button>().enabled = false;
+            Image rootImage = GetComponent<Image>();
+            rootImage.raycastTarget = false;
+            foreach (Graphic graphic in GetComponentsInChildren<Graphic>(true))
+            {
+                if (graphic.gameObject == gameObject || graphic.GetComponent<MemoriTooltipTrigger>() != null) continue;
+                graphic.raycastTarget = false;
+            }
+
+            loadInMMF.PlayFeedbacks();
+            cardParentTransform.rotation = Quaternion.Euler(0, -90, 0);
+        }
+
+        /// <summary>Redraws the stats and traits at a prestige level, so the Prestige III picker can show the step up.</summary>
+        public void ShowPrestige(int prestige, UnitAttribute prestigeTrait)
+        {
+            unitAttributesUIContainer.Load(squadStats.unitName, true, prestigeTrait);
+            unitStatsUIContainer.Load(squadStats.unitName, true, prestige, prestigeTrait);
+            unitStatsUIContainer.DisableTooltips();
+            unitStatsUIContainer.Refresh();
+            unitAttributesUIContainer.Refresh();
+        }
+        #endregion
 
         /// <summary>
         /// The attribute row reserves a flat 65px via its LayoutElement's minHeight, whether or not
@@ -274,7 +344,7 @@ namespace TJ.Recruit
         {
             isPointerOver = false;
             iconHighlight.enabled = false;
-            canvas.sortingOrder = 1;
+            canvas.sortingOrder = restingSortingOrder;
             if (recruitPanel != null) recruitPanel.SetHoveredCard(null);
         }
         public void OnPointerDown(PointerEventData eventData)
@@ -309,6 +379,7 @@ namespace TJ.Recruit
                 _tierParticleSystem3.gameObject.SetActive(true);
                 _tierParticleSystem4.gameObject.SetActive(true);
             }
+            if (displayOnly) return;
             canInteract = true;
             StartHoverMotion();
             if (isPointerOver) BeginHover();

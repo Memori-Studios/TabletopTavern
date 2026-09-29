@@ -264,6 +264,8 @@ namespace TJ
                             foreach (var bonus in HeroBonusManager.GetFactionBonusForHero(UnitStat.Ammunition, hero.HeroID))
                                 ammunition += (int)bonus.Value;
                     }
+                    if (squadTeam == Team.Player && BattleManager.Instance.SquadManager.OrdealActive(OrdealId.ShortQuivers))
+                        ammunition = (int)(ammunition * OrdealRegistry.SHORT_QUIVERS_AMMUNITION);
                     ecb.AddComponent(entity, new RangedSquad()
                     {
                         // AttackRange = squadStats.BaseRange,
@@ -301,6 +303,8 @@ namespace TJ
                             foreach (var bonus in HeroBonusManager.GetFactionBonusForHero(UnitStat.Ammunition, hero.HeroID))
                                 ammunition += (int)bonus.Value;
                     }
+                    if (squadTeam == Team.Player && BattleManager.Instance.SquadManager.OrdealActive(OrdealId.ShortQuivers))
+                        ammunition = (int)(ammunition * OrdealRegistry.SHORT_QUIVERS_AMMUNITION);
                     ecb.AddComponent(entity, new RangedSquad() { });
                     ecb.AddComponent(entity, new SquadAmmunition() { Value = ammunition });
                     BattleManager.Instance.SquadManager.CreateArcherRangeDrawer(squadEntity);

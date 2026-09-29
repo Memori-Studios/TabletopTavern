@@ -11,6 +11,7 @@ using Memori.Steamworks;
 using Memori.Metaprogression;
 using Memori.Localization;
 using TabletopTavern.Analytics;
+using TJ.Achievements;
 
 #if UNITY_EDITOR
 using UnityEditor;
@@ -32,7 +33,9 @@ namespace TJ
         public event ConsumablesChanged OnConsumablesChanged;
         public delegate void GameSaved();
         public event GameSaved OnGameSaved;
-        
+        public delegate void OrdealsChanged();
+        public event OrdealsChanged OnOrdealsChanged;
+
         public static float healAmount = 0.25f;
         readonly string[] townNames = new string[] { "townName1", "townName2", "townName3", "townName4", "townName5", "townName6", "townName7", "townName8", "townName9", "townName10" };
 
@@ -252,7 +255,7 @@ namespace TJ
         }
         public bool CheckForGear(GearID _gearID)
         {
-            return saveData.Gear.Contains(_gearID);
+            return saveData.HasWorkingGear(_gearID);
         }
         public List<SquadKillsStored> GetSquadIdKillCounter()
         {
@@ -338,11 +341,23 @@ namespace TJ
         public void RecordSelectedNode(int _selectedNodeIndex, NodeType _nodeType)
         {
             saveData.selectedNodeType = _nodeType;
+            saveData.RunStats.nodeTypesVisited ??= new List<NodeType>();
+            if (!saveData.RunStats.nodeTypesVisited.Contains(_nodeType)) saveData.RunStats.nodeTypesVisited.Add(_nodeType);
+            if (AchievementRules.GrandTourComplete(saveData.RunStats.nodeTypesVisited)) SteamAchievements.Unlock(AchievementId.GrandTour);
             RecordSelectedNode(_selectedNodeIndex);
+        }
+        // Continue loads the snapshot, so a seen roll must land there too or a quit would replay it with the same dice.
+        public void LockNodeResult(NodeResume _resume)
+        {
+            _resume.active = true;
+            saveData.nodeResume = _resume;
+            SaveCampaign();
+            SaveCampaignSnapshot();
         }
         public void CompleteChapter()
         {
             // Debug.Log($"Completing chapter {_selectedNodeIndex}");
+            saveData.nodeResume = default;
             saveData.SetSelectedNodeIndex(-1);
             saveData.activeMapLayer++;
             saveData.RunStats.chaptersCompleted++;
@@ -363,6 +378,8 @@ namespace TJ
         public void CompleteBook()
         {
             saveData.bookNumber++;
+            if (saveData.bookNumber >= AchievementRules.MARCH_ON_ACT) SteamAchievements.Unlock(AchievementId.MarchOn);
+            if (saveData.bookNumber >= AchievementRules.BEYOND_THE_MAPS_EDGE_ACT) SteamAchievements.Unlock(AchievementId.BeyondTheMapsEdge);
             saveData.BattlesFought = 0;
             saveData.activeMapLayer = -1;
             saveData.nodePath.Clear();
@@ -419,7 +436,7 @@ namespace TJ
             // saveData is authoritative; persist it directly instead of reloading and overlaying fields.
             SaveDataHandler.SaveCampaign(saveData);
         }
-        public void RemoveZeroHealthSquads()
+        public void RemoveZeroHealthSquads(bool includeEnemies = true)
         {
             // Debug.Log($"Removing squads with 0 health from player and enemy armies");
             //filter out any squads with 0 unit count
@@ -442,7 +459,7 @@ namespace TJ
                 saveData.playerArmy = ResetIndexes(saveData.playerArmy);
             }
 
-            if (saveData.enemyArmy != null)
+            if (includeEnemies && saveData.enemyArmy != null)
             for (int i = 0; i < saveData.enemyArmy.Length; i++)
             {
                 if (saveData.enemyArmy[i].SquadCurrentHealth == 0)
@@ -622,8 +639,9 @@ namespace TJ
             }
         // Sole path for gaining a unit mid-run. _viaRaiseDead flags the Sanguine Court post-battle
         // reward so everything else can disqualify DeadShallServe.
-        public void RecruitSquad(SquadStats _squadsStats, float healthOfSquad = 1f, bool _viaRaiseDead = false)
+        public void RecruitSquad(SquadStats _squadsStats, float healthOfSquad = 1f, bool _viaRaiseDead = false, bool _conscripted = false)
         {
+            if (saveData.HasOrdeal(OrdealId.GreenRecruits)) healthOfSquad *= OrdealRegistry.GREEN_RECRUITS_HEALTH;
             EnsureArmyCapacity();
             int nextEmptyUnitIndex = GetNextEmptyUnitIndex(saveData.playerArmy);
             SquadToLoad newSquad = new (
@@ -663,6 +681,7 @@ namespace TJ
             Debug.Log($"[Unit] Recruited {_squadsStats.unitName} ({_squadsStats.RarityTier} {_squadsStats.unitType}) at slot {nextEmptyUnitIndex}");
             saveData.RunStats.unitsRecruited++;
             if (!_viaRaiseDead) saveData.RunStats.gainedUnitOutsideRaiseDead = true;
+            if (_conscripted) (saveData.RunStats.conscriptedSquadIds ??= new List<string>()).Add(saveData.playerArmy[nextEmptyUnitIndex].UniqueID);
             OnArmyStructureChanged?.Invoke();
         }
         public void MoveUnitToIndex(string _uniqueID, int _index)
@@ -784,6 +803,7 @@ namespace TJ
             foreach (SquadToLoad s in squads) totalHealth += s.SquadCurrentHealth;
 
             int remainder = totalHealth;
+            List<string> removed = new();
             for (int i = 0; i < squads.Count; i++)
             {
                 int idx = Array.FindIndex(saveData.playerArmy, x => x.UniqueID == squads[i].UniqueID);
@@ -795,9 +815,11 @@ namespace TJ
                 }
                 else
                 {
+                    removed.Add(saveData.playerArmy[idx].UniqueID);
                     saveData.playerArmy[idx].UnitIndex = -1;
                 }
             }
+            if (!removed.Contains(squads[0].UniqueID)) InheritRunMarks(squads[0], removed.ToArray());
 
             Debug.Log($"[Unit] Merging squads. Total health: {totalHealth}, leftover after fill: {remainder}");
 
@@ -866,6 +888,7 @@ namespace TJ
 
                 // Debug.Log($"units prestiged: {squadToPrestige.UnitIndex}, removing {unitsMerged[0]} and {unitsMerged[1]}");
 
+                InheritRunMarks(squadToPrestige, saveData.playerArmy[unitsMerged[0]].UniqueID, saveData.playerArmy[unitsMerged[1]].UniqueID);
                 saveData.playerArmy[squadToPrestige.UnitIndex] = squadToPrestige;
                 saveData.playerArmy[unitsMerged[0]] = new SquadToLoad { UnitIndex = -1, UniqueID = Guid.NewGuid().ToString() };
                 saveData.playerArmy[unitsMerged[1]] = new SquadToLoad { UnitIndex = -1, UniqueID = Guid.NewGuid().ToString() };
@@ -891,6 +914,7 @@ namespace TJ
 
                 squadToPrestige = PrestigeUnit(squadToPrestige);
 
+                InheritRunMarks(squadToPrestige, consume1.UniqueID, consume2.UniqueID);
                 saveData.playerArmy[squadToPrestige.UnitIndex] = squadToPrestige;
                 saveData.playerArmy[consume1.UnitIndex] = new SquadToLoad { UnitIndex = -1, UniqueID = Guid.NewGuid().ToString() };
                 saveData.playerArmy[consume2.UnitIndex] = new SquadToLoad { UnitIndex = -1, UniqueID = Guid.NewGuid().ToString() };
@@ -915,6 +939,7 @@ namespace TJ
 
             target = PrestigeUnit(target);
 
+            InheritRunMarks(target, consume.UniqueID);
             saveData.playerArmy[target.UnitIndex]   = target;
             saveData.playerArmy[consume.UnitIndex]  = new SquadToLoad { UnitIndex = -1, UniqueID = Guid.NewGuid().ToString() };
 
@@ -1002,8 +1027,30 @@ namespace TJ
                 if (saveData.playerArmy[i].UnitPrestige >= 2) maxPrestigeUnits++;
             }
             if (maxPrestigeUnits >= 3) SteamAchievements.Unlock(AchievementId.LivingLegend);
+            if (_squadToPrestige.UnitPrestige >= 2) CheckOneOfUs(_squadToPrestige.UniqueID);
 
             return _squadToPrestige;
+        }
+        // Trial of Grasses sets Gold directly, so it repeats the Gold checks PrestigeUnit makes.
+        private void CheckGoldSquadAchievements(string _uniqueID)
+        {
+            int goldSquads = 0;
+            for (int i = 0; i < saveData.playerArmy.Length; i++)
+                if (saveData.playerArmy[i].UnitIndex != -1 && saveData.playerArmy[i].UnitPrestige >= 2) goldSquads++;
+            if (goldSquads >= 3) SteamAchievements.Unlock(AchievementId.LivingLegend);
+            CheckOneOfUs(_uniqueID);
+        }
+        private void CheckOneOfUs(string _uniqueID)
+        {
+            if (saveData.RunStats.conscriptedSquadIds != null && saveData.RunStats.conscriptedSquadIds.Contains(_uniqueID))
+                SteamAchievements.Unlock(AchievementId.OneOfUs);
+        }
+        // A merge deletes copies; their starting and conscripted marks move to the copy that survives.
+        private void InheritRunMarks(SquadToLoad _survivor, params string[] _removedIDs)
+        {
+            AchievementRules.InheritMark(saveData.RunStats.startingSquadIds, _survivor.UniqueID, _removedIDs);
+            AchievementRules.InheritMark(saveData.RunStats.conscriptedSquadIds, _survivor.UniqueID, _removedIDs);
+            if (_survivor.UnitPrestige >= 2) CheckOneOfUs(_survivor.UniqueID);
         }
         public List<UnitAttribute> GetEligiblePrestigeTraitsForUnit(UnitName _unitName) =>
             TabletopTavernConstants.GetEligiblePrestigeTraits(TabletopTavernData.Instance.GetSquadStats(_unitName));
@@ -1106,6 +1153,7 @@ namespace TJ
             SteamAchievements.Unlock(AchievementId.Prestige3);
 
             saveData.playerArmy = squadToLoads;
+            CheckGoldSquadAchievements(targetSquadID);
             OnArmyStructureChanged?.Invoke();
         }
             public string[] PrestigeRandomUnits2()
@@ -1237,14 +1285,140 @@ namespace TJ
                         CampaignManager.Instance.GoldManager.ModifyGold((int)eventOutcomeModifier.Value, localizedString);
                         break;
                     case EventOutcomeModifierEnum.UnitHealth:
-                        if (saveData.Gear.Contains(GearID.MichaelsSecretStuff) && eventOutcomeModifier.Value < 0)
+                        if (IsEventHealthLossBlocked(eventOutcomeModifier.Value))
                         {
                             continue;
                         }
                         ModifyTroopHealth(eventOutcomeModifier.Value);
                         break;
+                    case EventOutcomeModifierEnum.NextBattleLeadership:
+                        saveData.eventBattleEffects.playerLeadership += (int)eventOutcomeModifier.Value;
+                        break;
+                    case EventOutcomeModifierEnum.NextBattleEnemyLeadership:
+                        saveData.eventBattleEffects.enemyLeadership += (int)eventOutcomeModifier.Value;
+                        break;
+                    case EventOutcomeModifierEnum.NextBattleMana:
+                        saveData.eventBattleEffects.mana += (int)eventOutcomeModifier.Value;
+                        break;
+                    case EventOutcomeModifierEnum.NextBattleFixture:
+                        saveData.eventBattleEffects.fixtures.Add(eventOutcomeModifier.Fixture);
+                        break;
+                    case EventOutcomeModifierEnum.RevealMap:
+                        MapSceneManager map = CampaignManager.Instance.MapSceneUIManager.MapSceneManager;
+                        map.RevealNodesInNextLayers(map.GetActiveChapterIndex(), 100);
+                        break;
                 }
             }
+            SaveCampaign();
+        }
+
+        #region Event choices
+        public bool MeetsEventRequirements(EventChoice _choice)
+        {
+            if (_choice.RequiredRaces != null && _choice.RequiredRaces.Count > 0 && !_choice.RequiredRaces.Contains(HeroData.GetRaceFromHero(saveData.heroID))) return false;
+            if (_choice.RequiredHeroes != null && _choice.RequiredHeroes.Count > 0 && !_choice.RequiredHeroes.Contains(saveData.heroID)) return false;
+            if (_choice.RequiredGear != null && _choice.RequiredGear.Count > 0 && !_choice.RequiredGear.Exists(CheckForGear)) return false;
+            if (_choice.RequiredUnitTypes != null && _choice.RequiredUnitTypes.Count > 0)
+            {
+                foreach (SquadToLoad squad in saveData.playerArmy)
+                    if (squad.UnitIndex != -1 && !squad.isEmptySquad && _choice.RequiredUnitTypes.Contains(TabletopTavernData.Instance.GetSquadStats(squad.UnitName).unitType))
+                        return true;
+                return false;
+            }
+            return true;
+        }
+        public bool CanPayEventCost(List<EventOutcomeModifier> _cost)
+        {
+            if (_cost == null) return true;
+            foreach (EventOutcomeModifier part in _cost)
+            {
+                switch (part.EventOutcomeModifierEnum)
+                {
+                    case EventOutcomeModifierEnum.LoseGear:
+                        if (!saveData.Gear.Exists(g => !saveData.IsGearBroken(g))) return false;
+                        break;
+                    case EventOutcomeModifierEnum.LoseSquad:
+                        if (GetArmySize() < 2) return false;
+                        break;
+                    case EventOutcomeModifierEnum.LosePrestige:
+                        if (!Array.Exists(saveData.playerArmy, s => s.UnitIndex != -1 && s.UnitPrestige > 0)) return false;
+                        break;
+                }
+            }
+            return true;
+        }
+        // Returns what was lost, localized, one line per part.
+        public List<string> PayEventCost(List<EventOutcomeModifier> _cost)
+        {
+            List<string> lost = new();
+            if (_cost == null) return lost;
+            foreach (EventOutcomeModifier part in _cost)
+            {
+                string what = ApplyEventLoss(part);
+                if (what != null) lost.Add(what);
+            }
+            SaveCampaign();
+            return lost;
+        }
+        // Applies UnitHealth, LoseGear, LoseSquad or LosePrestige; returns the localized name of what went, or null.
+        public string ApplyEventLoss(EventOutcomeModifier _loss)
+        {
+            switch (_loss.EventOutcomeModifierEnum)
+            {
+                case EventOutcomeModifierEnum.UnitHealth:
+                    if (!IsEventHealthLossBlocked(_loss.Value)) ModifyTroopHealth(_loss.Value);
+                    return null;
+                case EventOutcomeModifierEnum.LoseGear:
+                {
+                    List<GearID> working = saveData.Gear.FindAll(g => !saveData.IsGearBroken(g));
+                    if (working.Count == 0) return null;
+                    GearID gear = working[GetCampaignRandom().Next(working.Count)];
+                    saveData.Gear.Remove(gear);
+                    saveData.brokenGear?.Remove(gear);
+                    CampaignManager.Instance.GearManager.UnAquireGear(gear);
+                    OnGearChanged?.Invoke();
+                    return LocalizationManager.Instance.GetText($"{gear}Name");
+                }
+                case EventOutcomeModifierEnum.LoseSquad:
+                {
+                    if (GetArmySize() < 2) return null;
+                    List<SquadToLoad> squads = new(Array.FindAll(saveData.playerArmy, s => s.UnitIndex != -1 && !s.isEmptySquad));
+                    if (squads.Count == 0) return null;
+                    SquadToLoad squad = squads[GetCampaignRandom().Next(squads.Count)];
+                    DisbandSquad(squad.UniqueID);
+                    OnArmyStructureChanged?.Invoke();
+                    return LocalizationManager.Instance.GetText(squad.UnitName.ToString());
+                }
+                case EventOutcomeModifierEnum.LosePrestige:
+                {
+                    List<int> prestiged = new();
+                    for (int i = 0; i < saveData.playerArmy.Length; i++)
+                        if (saveData.playerArmy[i].UnitIndex != -1 && saveData.playerArmy[i].UnitPrestige > 0) prestiged.Add(i);
+                    if (prestiged.Count == 0) return null;
+                    int slot = prestiged[GetCampaignRandom().Next(prestiged.Count)];
+                    // The trait belongs to prestige 2, so it goes with it.
+                    if (saveData.playerArmy[slot].UnitPrestige == 2) saveData.playerArmy[slot].PrestigeTrait = UnitAttribute.None;
+                    saveData.playerArmy[slot].UnitPrestige--;
+                    OnArmyStructureChanged?.Invoke();
+                    return LocalizationManager.Instance.GetText(saveData.playerArmy[slot].UnitName.ToString());
+                }
+            }
+            return null;
+        }
+        public EventDrawContext GetEventDrawContext() => new()
+        {
+            Act = saveData.bookNumber,
+            Endless = TabletopTavernConstants.EndlessActs(saveData.bookNumber) > 0,
+            HeroId = saveData.heroID,
+            HeroRace = HeroData.GetRaceFromHero(saveData.heroID),
+            History = saveData.eventHistory,
+        };
+        public void RecordEventOutcome(string _entry) => saveData.eventHistory.Add(_entry);
+        #endregion
+        // The event reward line reads this too, so it never shows a loss that was not applied.
+        public bool IsEventHealthLossBlocked(float _healthChange)
+        {
+            return _healthChange < 0 && saveData.HasWorkingGear(GearID.MichaelsSecretStuff);
         }
         /// <summary>
         /// Modifies the gold amount by _goldAmount. Can be positive or negative.
@@ -1262,6 +1436,8 @@ namespace TJ
 
             if (saveData.goldAmount > 20)
                 SteamAchievements.Unlock(AchievementId.TwentyGold);
+            if (saveData.goldAmount >= AchievementRules.OVERFLOWING_COFFERS_GOLD)
+                SteamAchievements.Unlock(AchievementId.OverflowingCoffers);
         }
 
         #region Gear
@@ -1292,6 +1468,7 @@ namespace TJ
         {
             Debug.Log($"Sold gear {_gearName}");
             saveData.Gear.Remove(_gearName);
+            saveData.brokenGear?.Remove(_gearName);
             if (!saveData.SoldGear.Contains(_gearName)) {
                 saveData.SoldGear.Add(_gearName);
             }
@@ -1301,6 +1478,7 @@ namespace TJ
             CampaignSaveData tempSaveData = SaveDataHandler.Load();
             tempSaveData.Gear = saveData.Gear;
             tempSaveData.SoldGear = saveData.SoldGear;
+            tempSaveData.brokenGear = saveData.brokenGear;
             // tempSaveData.goldAmount = saveData.goldAmount;
             SaveDataHandler.SaveCampaign(tempSaveData);
             OnGearChanged?.Invoke();
@@ -1339,7 +1517,113 @@ namespace TJ
             return exclusionList;
         }
         #endregion
-        
+
+        #region Ordeals
+        /// <summary>
+        /// Starts an endless act's Ordeals: adds the card taken (None when nothing was left to offer), applies its
+        /// one-off effect, then the per-act cards, in one save and snapshot write so Continue can never apply them twice.
+        /// Returns the notices to show the player.
+        /// </summary>
+        public List<string> BeginOrdealAct(OrdealId taken, List<OrdealId> offered)
+        {
+            var notices = new List<string>();
+            if (taken != OrdealId.None && !saveData.HasOrdeal(taken))
+            {
+                AddOrdeal(taken);
+                GameEventTracker.OrdealPicked(saveData, offered, taken);
+            }
+            ApplyActStartOrdeals(notices);
+            saveData.ordealActStarted = saveData.bookNumber;
+
+            SaveCampaign();
+            SaveCampaignSnapshot();
+            RefreshAfterOrdealChange();
+            return notices;
+        }
+        /// <summary>Adds an Ordeal outside the act-start pick (the Dev Panel), without the per-act cards or analytics.</summary>
+        public void TakeOrdeal(OrdealId id)
+        {
+            if (id == OrdealId.None || saveData.HasOrdeal(id)) return;
+            AddOrdeal(id);
+            SaveCampaign();
+            SaveCampaignSnapshot();
+            RefreshAfterOrdealChange();
+        }
+        private void AddOrdeal(OrdealId id)
+        {
+            saveData.ordeals ??= new List<OrdealId>();
+            saveData.ordeals.Add(id);
+
+            switch (id)
+            {
+                case OrdealId.MercenaryContract:
+                    CampaignManager.Instance.GoldManager.ModifyGold(OrdealRegistry.MERCENARY_CONTRACT_GOLD, LocalizationManager.Instance.GetText(OrdealRegistry.Get(id).NameKey));
+                    break;
+                case OrdealId.LongNight:
+                    Weather[] harsh = { Weather.Snow, Weather.Fog, Weather.Rain };
+                    saveData.ordealWeather = harsh[GetCampaignRandom().Next(harsh.Length)];
+                    break;
+                case OrdealId.SealedPage:
+                    // The last slot Renown opened; the draw only offers the card with two or more, so never the signature.
+                    saveData.sealedSpellSlot = Mathf.Max(1, TJ.Spells.SpellLoadout.GetUnlockedSlotCount() - 1);
+                    break;
+            }
+        }
+        // Deserters and Rusted Arms fire at the start of every endless act, the act they are taken in included.
+        private void ApplyActStartOrdeals(List<string> notices)
+        {
+            if (saveData.HasOrdeal(OrdealId.Deserters) && GetArmySize() > 2)
+            {
+                string deserter = FindWeakestSquad();
+                if (deserter != null)
+                {
+                    string squadName = GetUnitNameOrUnitNameOverride(deserter);
+                    DisbandSquad(deserter);
+                    notices.Add(string.Format(LocalizationManager.Instance.GetText("OrdealDesertersNotice"), squadName));
+                }
+            }
+            if (saveData.HasOrdeal(OrdealId.RustedArms))
+            {
+                List<GearID> working = saveData.Gear.FindAll(gear => !saveData.IsGearBroken(gear));
+                if (working.Count > 0)
+                {
+                    GearID broken = working[GetCampaignRandom().Next(working.Count)];
+                    saveData.brokenGear ??= new List<GearID>();
+                    saveData.brokenGear.Add(broken);
+                    notices.Add(string.Format(LocalizationManager.Instance.GetText("OrdealRustedArmsNotice"), LocalizationManager.Instance.GetText($"{broken}Name")));
+                }
+            }
+        }
+        // Lowest rarity first, then the lowest share of its health left.
+        private string FindWeakestSquad()
+        {
+            string weakest = null;
+            UnitRarity weakestRarity = UnitRarity.Legendary;
+            float weakestHealth = float.MaxValue;
+            foreach (SquadToLoad squad in saveData.playerArmy)
+            {
+                if (squad.UnitIndex == -1 || squad.isEmptySquad) continue;
+                UnitRarity rarity = TabletopTavernData.Instance.GetSquadStats(squad.UnitName).RarityTier;
+                float health = squad.SquadMaxHealth > 0 ? (float)squad.SquadCurrentHealth / squad.SquadMaxHealth : 0f;
+                if (weakest == null || rarity < weakestRarity || (rarity == weakestRarity && health < weakestHealth))
+                {
+                    weakest = squad.UniqueID;
+                    weakestRarity = rarity;
+                    weakestHealth = health;
+                }
+            }
+            return weakest;
+        }
+        // Gear, consumables, a faction passive or a spell slot may have just switched off.
+        private void RefreshAfterOrdealChange()
+        {
+            CampaignManager.Instance.GearManager.LoadAllGear();
+            OnGearChanged?.Invoke();
+            OnConsumablesChanged?.Invoke();
+            OnOrdealsChanged?.Invoke();
+        }
+        #endregion
+
         #region Consumables
         public bool HasRoomForConsumable()
         {
@@ -1460,12 +1744,15 @@ namespace TJ
             TT_Difficulty difficulty = CampaignManager.Instance.CampaignSaveManager.SaveData.difficultyLevel;
             bool isImperator = DifficultyRules.StrongerGarrisons(difficulty);
             bool enemyPrestigeEligible = DifficultyRules.EnemyPrestigeEligible(difficulty);
-            bool enemyPrestigeEnhanced = DifficultyRules.EnemyPrestigeEnhanced(difficulty);
-            SquadToLoad[] townGarrison = ArmyCreator.GenerateTownGarrison(townSize, seed, unitsPool, isImperator, bookNumber, enemyPrestigeEligible, enemyPrestigeEnhanced);
+            bool enemyPrestigeEnhanced = OrdealRegistry.EnemyPrestigeEnhanced(saveData);
+            bool eliteGuard = saveData.HasOrdeal(OrdealId.EliteGuard);
+            SquadToLoad[] townGarrison = ArmyCreator.GenerateTownGarrison(townSize, seed, unitsPool, isImperator, bookNumber, enemyPrestigeEligible, enemyPrestigeEnhanced,
+                eliteGuard, OrdealRegistry.DoubleEnemyPrestigeChance(saveData));
             if (CampaignManager.Instance.GearManager.CheckForGear(GearID.AuraFarming))
             {
-                //remove the last squad from the array
-                townGarrison = townGarrison.Take(townGarrison.Length - 1).ToArray();
+                // Drops the last squad; under Elite Guard that is the elite, so the one before it goes instead.
+                int drop = eliteGuard && townGarrison.Length > 1 ? townGarrison.Length - 2 : townGarrison.Length - 1;
+                townGarrison = townGarrison.Where((_, i) => i != drop).ToArray();
             }
 
             //bear spray replaces large units with infantry
@@ -1509,8 +1796,10 @@ namespace TJ
                 return Race.DrakosaurBrood;
             }
         }
-        public static Weather GenerateNodeWeather(int nodeIndex, int campaignSeed, int bookNumber, MapRegion mapRegion)
+        // Long Night's weather, when held, is every node's weather; the map flag, town and battle all read it here.
+        public static Weather GenerateNodeWeather(int nodeIndex, int campaignSeed, int bookNumber, MapRegion mapRegion, Weather ordealWeather = Weather.ClearSkies)
         {
+            if (ordealWeather != Weather.ClearSkies) return ordealWeather;
             System.Random random = new(campaignSeed + nodeIndex + (bookNumber * 13));
             return mapRegion.GetRandomWeather(random);
         }
@@ -1526,7 +1815,7 @@ namespace TJ
             SaveCampaign();
         }
         public void SaveSquadsPostAutoresolve(
-            SquadToLoad[] _playerSquads, SquadToLoad[] _enemySquads, bool _playerWon, List<SquadKillsStored> _squadIdKillCounter, List<SquadLossesStored> _squadIdLossCounter, AnalyticsBattleReport _report = null)
+            SquadToLoad[] _playerSquads, SquadToLoad[] _enemySquads, bool _playerWon, List<SquadKillsStored> _squadIdKillCounter, List<SquadLossesStored> _squadIdLossCounter, List<SquadDamageStored> _squadDamage, AnalyticsBattleReport _report = null)
         {
             // Debug.Log($"playersquads length post battle: {_playerSquads.Length}");
             for (int i = 0; i < saveData.playerArmy.Length; i++)
@@ -1544,9 +1833,15 @@ namespace TJ
             saveData.enemyArmy = _enemySquads;
             saveData.battleCompleted = true;
             saveData.playerWonBattle = _playerWon;
+            saveData.spoilsTaken = null;
+            // Auto-resolve has no mana pool, so event mana waits for a fought battle, like a Mana Draught.
+            saveData.eventBattleEffects = new EventBattleEffects { mana = saveData.eventBattleEffects.mana };
             saveData.SquadKillsStore = _squadIdKillCounter;
             saveData.HistoricalKillStore = SaveDataHandler.AddToHistoricalKills(saveData.HistoricalKillStore, _squadIdKillCounter);
             SaveDataHandler.RecordUnitNameKills(_playerSquads, _squadIdKillCounter);
+            HashSet<string> playerSquadGuids = new();
+            foreach (SquadToLoad squad in _playerSquads) playerSquadGuids.Add(squad.UniqueID);
+            SaveDataHandler.CheckSlaughtersChampion(saveData.HistoricalKillStore, playerSquadGuids);
             // Debug.Log($"new historical kill store count: {saveData.HistoricalKillStore.Count}");
 
             int totalKills = 0;
@@ -1554,6 +1849,7 @@ namespace TJ
             saveData.RunStats.enemiesSlain += totalKills;
 
             saveData.SquadLossesStore = _squadIdLossCounter;
+            saveData.SquadDamageStore = _squadDamage;
 
             //achievement check - flawless victory (won losing zero units)
             if (_playerWon)
@@ -1568,8 +1864,8 @@ namespace TJ
 
             foreach (var playerSquad in _playerSquads)
             {
-                // Hybrids shoot, so they disqualify the No Archers run just like a dedicated shooter.
-                if (TabletopTavernConstants.FightsAtRange(TabletopTavernData.Instance.GetSquadStats(playerSquad.UnitName).unitType))
+                // Only the Ranged class breaks the No Archers run; Hybrids count as melee.
+                if (TabletopTavernData.Instance.GetSquadStats(playerSquad.UnitName).unitType == UnitType.Ranged)
                 {
                     saveData.archerUsedInBattle = true;
                     break;
@@ -1623,7 +1919,7 @@ namespace TJ
         {
             if(saveData == null) return 0;
             SquadKillsStored squadKillsStored = saveData.HistoricalKillStore.Find(x => x.SquadGUID == _uniqueID);
-            if (squadKillsStored.Kills > 250)
+            if (squadKillsStored.Kills >= SaveDataHandler.SLAUGHTERS_CHAMPION_KILLS)
             {
                 SteamAchievements.Unlock(AchievementId.HighKill);
             }
@@ -1663,14 +1959,22 @@ namespace TJ
             if (saveData == null) return;
             saveData.RunStats.ransomsChosen++;
         }
-        // Recomputes army-derived run stats: peak total models (QualityOverQuantity) and the
-        // ever-held-a-duplicate flag (OneOfAKind). Subscribed to OnArmyStructureChanged + sampled on load.
+        // A squad was trained at a campfire this run (DrillSergeant).
+        public void RegisterCampfireTraining()
+        {
+            if (saveData == null) return;
+            saveData.RunStats.campfireTrainings++;
+            if (saveData.RunStats.campfireTrainings >= AchievementRules.DRILL_SERGEANT_TRAININGS) SteamAchievements.Unlock(AchievementId.DrillSergeant);
+        }
+        // Recomputes army-derived run stats (peak models, duplicates, a mage held) and the army achievements.
+        // Subscribed to OnArmyStructureChanged + sampled on load.
         public void EvaluateArmyRunStats()
         {
             if (saveData == null || saveData.playerArmy == null) return;
 
             int totalModels = 0;
             HashSet<UnitName> seenNames = new();
+            List<ArmySquad> army = new();
             for (int i = 0; i < saveData.playerArmy.Length; i++)
             {
                 SquadToLoad squad = saveData.playerArmy[i];
@@ -1680,10 +1984,22 @@ namespace TJ
 
                 if (!seenNames.Add(squad.UnitName))
                     saveData.RunStats.heldDuplicateUnit = true;
+
+                SquadStats stats = TabletopTavernData.Instance.GetSquadStats(squad.UnitName);
+                if (stats.unitType == UnitType.Mage) saveData.RunStats.heldMage = true;
+                army.Add(new ArmySquad
+                {
+                    Type = stats.unitType,
+                    Rarity = stats.RarityTier,
+                    Race = TabletopTavernData.Instance.GetRaceFromUnitName(squad.UnitName),
+                    PrestigeTrait = squad.PrestigeTrait,
+                });
             }
 
             if (totalModels > saveData.RunStats.maxArmyModels)
                 saveData.RunStats.maxArmyModels = totalModels;
+
+            foreach (AchievementId id in AchievementRules.ForArmy(army)) SteamAchievements.Unlock(id);
         }
         public void CheckPostRunAchievements()
         {
@@ -1748,6 +2064,21 @@ namespace TJ
                 Debug.Log($"Unlocking No Archers Achievement");
                 SteamAchievements.Unlock(AchievementId.NoArchersRun);
             }
+
+            // Band of Brothers: every starting squad is still in the army.
+            HashSet<string> armySquadIds = new();
+            foreach (SquadToLoad squad in saveData.playerArmy)
+                if (squad.UnitIndex != -1) armySquadIds.Add(squad.UniqueID);
+            if (AchievementRules.StartingArmyIntact(saveData.RunStats.startingSquadIds, armySquadIds))
+                SteamAchievements.Unlock(AchievementId.BandOfBrothers);
+
+            // Steel Over Sorcery: Hard or Godking with no spell cast and no mage ever held.
+            bool castAnySpell = false;
+            if (saveData.RunStats.spellsCast != null)
+                foreach (SpellCastStored cast in saveData.RunStats.spellsCast)
+                    if (cast.Casts > 0) castAnySpell = true;
+            if (!castAnySpell && !saveData.RunStats.heldMage && DifficultyRules.Rank(saveData.difficultyLevel) >= DifficultyRules.Rank(TT_Difficulty.Hard))
+                SteamAchievements.Unlock(AchievementId.SteelOverSorcery);
 
             SavePostRunDifficultyData();
             CheckGodkingCompletionAchievements();

@@ -43,6 +43,12 @@ public class UnitPositioningManager : MonoBehaviour
 
         foreach (KeyValuePair<int, List<Entity>> kvp in unitSelectionManager.GetSelectedSquadIDsAndAllUnits())
         {
+            // A squad the preview laid out no points for would read past them: out of range, and unchecked in a player build.
+            if (unitIndexOffset + kvp.Value.Count > positionDrawer.ActivePointCount)
+            {
+                Debug.LogError($"TeleportUnits: no preview points for squad {kvp.Key} (pool has {positionDrawer.ActivePointCount}, offset {unitIndexOffset}) - skipping");
+                continue;
+            }
             Unit unit = entityManager.GetComponentData<Unit>(kvp.Value[0]);
             // A locked block gives every squad its own facing; a box preview shares one.
             quaternion desiredRotation = positionDrawer.TryGetLockedSquadPose(kvp.Key, out _, out quaternion lockedRotation)

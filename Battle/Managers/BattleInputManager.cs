@@ -552,7 +552,7 @@ public class BattleInputManager : MonoBehaviour
                 if (GetSelectionAreaRect().Contains(unitScreenPosition))
                 {
                     Unit unit = entityManager.GetComponentData<Unit>(entityArray[i]);
-                    if (CanThisTeamBeSelected(unit.Team))
+                    if (CanThisTeamBeBoxSelected(unit.Team))
                     {
                         if (!squadsToSelect.Contains(unit.squadId)) squadsToSelect.Add(unit.squadId);
                     }
@@ -735,7 +735,7 @@ public class BattleInputManager : MonoBehaviour
                     if (GetSelectionAreaRect().Contains(unitScreenPosition))// Unit is inside the selection area
                     {
                         Unit unit = entityManager2.GetComponentData<Unit>(entityArray[i]);
-                        if (CanThisTeamBeSelected(unit.Team))
+                        if (CanThisTeamBeBoxSelected(unit.Team))
                         {
                             if (!squadsInSelectionArea.Contains(unit.squadId)) squadsInSelectionArea.Add(unit.squadId);
                         }
@@ -835,6 +835,9 @@ public class BattleInputManager : MonoBehaviour
         entityQuery.Dispose();
     }
     private bool CanThisTeamBeSelected(Team team) => team == Team.Player;
+    // One team per box: the Enemy side in custom battle deployment, the player everywhere else.
+    private bool CanThisTeamBeBoxSelected(Team team) =>
+        team == (unitSelectionManager.CanRepositionEnemySquads ? Team.Enemy : Team.Player);
     private void OnDestroy() {
         if (BattleManager.HasInstance)
         {

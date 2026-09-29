@@ -8,6 +8,7 @@ using Memori.Localization;
 using Memori.Notifications;
 using Memori.SaveData;
 using Memori.Steamworks;
+using TJ.Achievements;
 using Unity.Entities;
 using Unity.Mathematics;
 using UnityEngine;
@@ -232,7 +233,7 @@ public class SpellManager : MonoBehaviour
             WireSlotButton(slotIndex, slotStates[i].SpellData);
             // Custom battles are a sandbox and bypass the unlock gate entirely - the browse pool
             // already ignores IsUnlocked - so slot locking is a campaign-only concern.
-            spellCastButtons[i].SetLocked(!isCustomBattle && SpellLoadout.IsSlotLocked(slotIndex));
+            spellCastButtons[i].SetLocked(!isCustomBattle && Memori.SaveData.SaveDataHandler.IsCampaignSlotLocked(slotIndex));
             // The picker's info panel describes a slot the moment it is hovered, so the button's own
             // floating tooltip stands down for as long as the picker is available.
             spellCastButtons[i].SetBrowseModeActive(browsingEnabled);
@@ -921,11 +922,11 @@ public class SpellManager : MonoBehaviour
     #endregion
     /// <summary>
     /// "Full Arsenal" - every slot on a fully-equipped hotbar cast at least once this battle.
-    /// A partly-filled bar can never qualify, so the achievement always means all four spells.
+    /// A partly-filled bar can never qualify, so the achievement always means every slot.
     /// </summary>
     private void CheckFullArsenal()
     {
-        if(SpellTestMode.Active) return;
+        if(!BattleAchievements.BattleCounts) return;
         for (int i = 0; i < slotStates.Length; i++)
         {
             if(slotStates[i].SpellData == null) return;

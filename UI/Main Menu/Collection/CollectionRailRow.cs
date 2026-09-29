@@ -50,6 +50,13 @@ namespace TJ.MainMenu
             progressImage.color = found >= total ? progressFull : progressPartial;
         }
 
+        /// <summary>A plain count with no progress bar, for a row that is not a collection.</summary>
+        public void SetCount(string text)
+        {
+            count.text = text;
+            progressFill.parent.gameObject.SetActive(false);
+        }
+
         public void SetNew(bool isNew) => newDot.SetActive(isNew);
 
         public void SetActive(bool active)

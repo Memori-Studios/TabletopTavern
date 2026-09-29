@@ -133,6 +133,19 @@ namespace TJ
             ShakeCamera(force, 0.5f, 6f);
         }
 
+        // A spell the player aimed fades out by 120 m instead of cutting off at the explosion's 45 m.
+        public void SpellImpactShake(float3 position, float force)
+        {
+            if (battleEnded) return;
+            float distance = math.distance(position, cameraTransform.position);
+            float scaled = force * (1f - math.saturate((distance - 30f) / 90f));
+            if (scaled <= 0.05f) return;
+
+            if (shakeDuration > 0f && scaled < shakeForce) return;
+            if (shakeDuration > 0f) objectToShake.localPosition = originalPosition;
+            ShakeCamera(scaled, 0.45f, 7f);
+        }
+
         public void NearCombatShake()
         {
             if (battleEnded) return;

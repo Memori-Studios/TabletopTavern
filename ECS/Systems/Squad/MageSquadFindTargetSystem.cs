@@ -137,6 +137,18 @@ partial struct MageSquadFindTargetSystem : ISystem
                 }
             }
 
+            // An accuracy debuff does nothing to a squad that never fires, so while any shooter stands the rest are not candidates.
+            bool shootersOnly = false;
+            if (priority == MageTargetPriority.RangedEnemyFirst)
+            {
+                foreach (RefRO<SquadEntity> hostile in SystemAPI.Query<RefRO<SquadEntity>>().WithAll<RangedSquad>().WithNone<BrokenSquadTag>())
+                {
+                    if ((hostile.ValueRO.SquadId < 0) != searchForEnemySquads) continue;
+                    shootersOnly = true;
+                    break;
+                }
+            }
+
             // Two candidates tracked at once. The priority rule only applies among squads actually in
             // range; if nothing is in range we still take the nearest, because that is what makes the
             // squad advance with the army rather than standing idle forever (same as artillery).
@@ -162,6 +174,9 @@ partial struct MageSquadFindTargetSystem : ISystem
                 // rather than UnitType: a spent mage has traded it for MeleeSquad and by then is a
                 // legitimate front-line body to buff.
                 if (wantFriendly && entityManager.HasComponent<MageSquad>(enemySquad.ValueRO.SelfEntity)) continue;
+
+                if (shootersOnly && !(entityManager.HasComponent<RangedSquad>(enemySquad.ValueRO.SelfEntity)
+                    && entityManager.IsComponentEnabled<RangedSquad>(enemySquad.ValueRO.SelfEntity))) continue;
 
                 float distance = math.distance(selfCenter, enemyMovement.ValueRO.SquadCenter);
 
@@ -242,6 +257,8 @@ partial struct MageSquadFindTargetSystem : ISystem
             // was written for and deliberately ships on NearestEnemy instead - a charge-hunter
             // idles whenever nothing is charging, which a unit with three casts cannot afford.
             // Kept as a tuning upgrade; no shipped SpellData selects it.
+            // RangedEnemyFirst has already dropped the non-shooters, so nearest is the rest of the rule.
+            case MageTargetPriority.RangedEnemyFirst:
             case MageTargetPriority.NearestEnemy:
             default:
                 return -distance;

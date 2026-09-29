@@ -25,6 +25,8 @@ public static class TabletopTavernConstants
     public const int MELEE_ATTACK_ID = 4;
     public const int RANGED_ATTACK_IDLE_ID = 13;
     public const int RANGED_ATTACK_ID = 14;
+    // Mages share the archer fire slot so one baked 15-slot layout serves every caster.
+    public const int MAGE_CAST_ANIMATION_ID = 14;
     public const int CAVALRY_DEATH_ANIMATION_ID = 2;
 
     // Combat
@@ -361,9 +363,14 @@ public static class TabletopTavernConstants
     // rows on the Settings Game page in Core.unity. Enemy squads never read these.
     public const string PREF_DEFAULT_CEASE_FIRE = "defaultSquadCeaseFire";
     public const string PREF_DEFAULT_FIRE_MODE = "defaultSquadFireMode";
+    public const string PREF_DEFAULT_MAGE_FREE_CAST = "defaultMageFreeCast";
 
     public static bool GetPlayerDefaultCeaseFire() =>
         PlayerPrefs.GetInt(PREF_DEFAULT_CEASE_FIRE, 0) == 1;
+
+    // Off (0) by default: a player mage casts only when ordered until Free Cast is switched on.
+    public static bool GetPlayerDefaultMageFreeCast() =>
+        PlayerPrefs.GetInt(PREF_DEFAULT_MAGE_FREE_CAST, 0) == 1;
 
     // Off (0) is Volley, matching the hardcoded value every spawn path used before this existed.
     public static RangedFireMode GetPlayerDefaultFireMode() =>

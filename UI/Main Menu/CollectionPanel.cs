@@ -22,7 +22,7 @@ namespace TJ.MainMenu
     [RequireComponent(typeof(MemoriCanvasGroup))]
     public class CollectionPanel : MonoBehaviour
     {
-        private enum View { Gear, Potions, Faction }
+        private enum View { Gear, Potions, Faction, Records }
         private enum FactionTab { Units, Heroes, Lore }
 
         [Header("Frame")]
@@ -38,6 +38,9 @@ namespace TJ.MainMenu
         [SerializeField] private CollectionRailRow railRowTemplate;
         [SerializeField] private Sprite gearRailIcon;
         [SerializeField] private Sprite potionRailIcon;
+        [SerializeField] private Sprite questsRailIcon;
+        [SerializeField] private Sprite runsRailIcon;
+        [SerializeField] private Sprite boardsRailIcon;
 
         [Header("Page header")]
         [SerializeField] private Image headerMarker;
@@ -80,6 +83,9 @@ namespace TJ.MainMenu
         [SerializeField] private ScrollRect loreScroll;
         [SerializeField] private TMP_Text loreText;
 
+        [Header("Records")]
+        [SerializeField] private CollectionRecords records;
+
         [Header("Detail")]
         [SerializeField] private CollectionDetailPanel detail;
         [SerializeField] private CanvasGroup contentGroup;
@@ -117,6 +123,9 @@ namespace TJ.MainMenu
         private readonly List<CollectionTile> _gearTiles = new();
         private readonly List<CollectionTile> _potionTiles = new();
         private CollectionRailRow _gearRow, _potionRow;
+        // Run History and Leaderboards are null outside SPELLS builds, where Records holds only Quests.
+        private CollectionRailRow _questsRow, _runsRow, _boardsRow;
+        private CollectionRecords.Page _recordsPage;
         // -1 until the page is first opened, which then picks the first entry the player owns.
         private int _gearPinned = -1, _potionPinned = -1;
 
@@ -154,6 +163,7 @@ namespace TJ.MainMenu
 
             ReadSave();
             BuildData();
+            records.SetUp();
             BuildRail();
             WireTabs();
             Localize();
@@ -176,11 +186,9 @@ namespace TJ.MainMenu
             if (EventSystem.current != null) EventSystem.current.SetSelectedGameObject(null);
             _canvasGroup.CGDisable();
             StopPending();
+            records.Hide();
             if (_rig != null) _rig.Clear();
         }
-
-        /// <summary>Kept for CollectionGearCard, which the Warband gear list shares.</summary>
-        public void UpdateAcknowledged() => RefreshNewDots();
 
         /// <summary>
         /// Collection achievements are unrelated to drawing the panel, and each evaluator re-reads the save
@@ -243,6 +251,13 @@ namespace TJ.MainMenu
                 Faction target = faction;
                 faction.Row = Row(T(faction.Race.ToString()), null, ColorData.GetRaceDisplayColor(faction.Race), true,
                     () => ShowFaction(target, FactionTab.Units));
+            }
+            Section("CollectionRecords");
+            _questsRow = Row(T("questsButton"), questsRailIcon, Color.white, false, () => ShowRecords(CollectionRecords.Page.Quests));
+            if (CollectionRecords.SpellsRelease)
+            {
+                _runsRow = Row(T("runHistoryButton"), runsRailIcon, Color.white, false, () => ShowRecords(CollectionRecords.Page.Runs));
+                _boardsRow = Row(T("leaderboardButton"), boardsRailIcon, Color.white, false, () => ShowRecords(CollectionRecords.Page.Boards));
             }
         }
 
@@ -428,13 +443,19 @@ namespace TJ.MainMenu
             foreach (Faction f in _factions) f.Row.SetActive(f == faction);
 
             bool isFaction = view == View.Faction;
-            gridRoot.SetActive(!isFaction);
+            bool isRecords = view == View.Records;
+            _questsRow.SetActive(isRecords && _recordsPage == CollectionRecords.Page.Quests);
+            if (_runsRow != null) _runsRow.SetActive(isRecords && _recordsPage == CollectionRecords.Page.Runs);
+            if (_boardsRow != null) _boardsRow.SetActive(isRecords && _recordsPage == CollectionRecords.Page.Boards);
+            gridRoot.SetActive(!isFaction && !isRecords);
             gearGroups.gameObject.SetActive(view == View.Gear);
             potionGroups.gameObject.SetActive(view == View.Potions);
             tabsRoot.SetActive(isFaction);
             effectsRoot.SetActive(isFaction);
             // The marker's slot holds its place in the header row, so the slot is what hides.
             headerMarker.transform.parent.gameObject.SetActive(isFaction);
+            detail.gameObject.SetActive(!isRecords);
+            if (!isRecords) records.Hide();
             if (!isFaction)
             {
                 stageRoot.SetActive(false);
@@ -442,6 +463,13 @@ namespace TJ.MainMenu
                 _rig.Clear();
                 gridScroll.verticalNormalizedPosition = 1f;
             }
+        }
+
+        private void ShowRecords(CollectionRecords.Page page)
+        {
+            _recordsPage = page;
+            SetView(View.Records, null);
+            records.Show(page, headerTitle, headerSubtitle);
         }
 
         private void ShowGear()
@@ -695,6 +723,12 @@ namespace TJ.MainMenu
                 return;
             }
 
+            if (_view == View.Records)
+            {
+                RecordsInput(keyboard, pad);
+                return;
+            }
+
             if (_view == View.Faction)
             {
                 int tab = -1;
@@ -729,15 +763,51 @@ namespace TJ.MainMenu
             if (move != Vector2.zero) Move(move);
         }
 
+        // Board tabs on 1 / 2 and the triggers, Everyone / Friends on F and the top face button, runs on up / down.
+        private void RecordsInput(Keyboard keyboard, Gamepad pad)
+        {
+            bool boardKey = keyboard != null && (keyboard.digit1Key.wasPressedThisFrame || keyboard.digit2Key.wasPressedThisFrame);
+            if (pad != null && (pad.leftTrigger.wasPressedThisFrame || pad.rightTrigger.wasPressedThisFrame)) boardKey = true;
+            if (boardKey)
+            {
+                bool wantDeepest = keyboard != null && keyboard.digit2Key.wasPressedThisFrame;
+                bool wantGodking = keyboard != null && keyboard.digit1Key.wasPressedThisFrame;
+                if (!wantDeepest && !wantGodking) records.StepBoard();
+                else records.ShowBoard(wantDeepest);
+                return;
+            }
+            if ((keyboard != null && keyboard.fKey.wasPressedThisFrame) || (pad != null && pad.buttonNorth.wasPressedThisFrame))
+            {
+                records.ToggleFriends();
+                return;
+            }
+
+            int step = 0;
+            if (keyboard != null && keyboard.upArrowKey.wasPressedThisFrame) step = -1;
+            if (keyboard != null && keyboard.downArrowKey.wasPressedThisFrame) step = 1;
+            if (pad != null && pad.dpad.up.wasPressedThisFrame) step = -1;
+            if (pad != null && pad.dpad.down.wasPressedThisFrame) step = 1;
+            if (step != 0) records.MoveRun(step);
+            if (pad != null && pad.buttonEast.wasPressedThisFrame) closeButton.onClick.Invoke();
+        }
+
         private void StepPage(int direction)
         {
             IAudioRequester.Instance.PlaySFX(SFXData.ButtonClick);
-            int count = _factions.Length + 2;
-            int current = _view == View.Gear ? 0 : _view == View.Potions ? 1 : 2 + Array.IndexOf(_factions, _faction);
+            int recordPages = _boardsRow != null ? 3 : 1;
+            int count = _factions.Length + 2 + recordPages;
+            int current = _view switch
+            {
+                View.Gear => 0,
+                View.Potions => 1,
+                View.Records => 2 + _factions.Length + (int)_recordsPage,
+                _ => 2 + Array.IndexOf(_factions, _faction),
+            };
             int next = (current + direction + count) % count;
             if (next == 0) ShowGear();
             else if (next == 1) ShowPotions();
-            else ShowFaction(_factions[next - 2], FactionTab.Units);
+            else if (next < 2 + _factions.Length) ShowFaction(_factions[next - 2], FactionTab.Units);
+            else ShowRecords((CollectionRecords.Page)(next - 2 - _factions.Length));
         }
 
         // Moves the kept entry to the nearest tile in the pressed direction, measured on screen, so it works
@@ -815,6 +885,20 @@ namespace TJ.MainMenu
 
             progressText.text = string.Format(T("CollectionFoundCount"), $"<color=#ECE6D8>{found}</color>", total);
             progressFill.anchorMax = new Vector2(total > 0 ? (float)found / total : 0f, 1f);
+
+            // Records never count toward the found total: they are not collected.
+            _questsRow.SetProgress(CollectionRecords.CountUnlockedQuests(), CollectionRecords.ListedQuests.Count);
+            _questsRow.SetNew(false);
+            if (_runsRow != null)
+            {
+                _runsRow.SetCount(CollectionRecords.CountRuns().ToString());
+                _runsRow.SetNew(false);
+            }
+            if (_boardsRow != null)
+            {
+                _boardsRow.SetCount(string.Empty);
+                _boardsRow.SetNew(false);
+            }
             RefreshNewDots();
         }
 

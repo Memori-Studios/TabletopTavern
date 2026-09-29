@@ -4,7 +4,6 @@ using Memori.Audio;
 using Memori.Localization;
 using Memori.Notifications;
 using Memori.Utilities;
-using TMPro;
 using TJ;
 using TJ.Map;
 using UnityEngine;
@@ -15,38 +14,49 @@ namespace TJ.Campfire
 {
     public class CampfirePanel : MapPanel
     {
-        [Header("Options Panel")]
-        [SerializeField] private MemoriCanvasGroup optionsPanel;
-        [SerializeField] private Button restButton;
-        [SerializeField] private Button trainButton;
-        [SerializeField] private Button scavengeButton;
-        [SerializeField] private Button scoutAheadButton;
-        // [SerializeField] private Button viewMapButton;
+        // Stored as NodeResume.choiceIndex, so values are append-only.
+        public enum CampfireChoice { None, Rest, Train, Scavenge, Scout }
+
+        [Header("View")]
+        [SerializeField] private CampfirePanelView view;
+
+        [Header("Train Cards")]
+        [SerializeField] private SquadDisplayCardMenu squadCardPrefab;
 
         [Header("Map Overview")]
         [SerializeField] private MapOverviewPanel mapOverviewPanel;
 
-        [Header("Result Panel")]
-        [SerializeField] private MemoriCanvasGroup resultPanel;
-        [SerializeField] private TMP_Text resultTitleText;
-        [SerializeField] private TMP_Text resultDescriptionText;
+        [Header("Continue")]
         [SerializeField] private Button continueButton;
 
-        [Header("Extra Text")]
-        [SerializeField] private TMP_Text scoutDescriptionText;
-        [SerializeField] private TMP_Text campfireHealDescriptionText;
-        [SerializeField] private TMP_Text campfireScavengeDescriptionText;
         private const float RestHealAmount = 0.3f;
         private const int GearScavengeCount = 3;
+        private const int MaxPrestige = 2;
+
+        // Indexed by act - 1; endless acts keep the act 3 values.
+        private static readonly int[] TrainCostToFirstLevelByAct = { 10, 20, 30 };
+        private static readonly int[] TrainCostToSecondLevelByAct = { 20, 40, 60 };
+        private static readonly int[] ScoutGoldByAct = { 5, 15, 25 };
+
+        private int ActIndex => Mathf.Clamp(campaignSaveManager.SaveData.bookNumber, 1, ScoutGoldByAct.Length) - 1;
+        private int TrainCostToFirstLevel => TrainCostToFirstLevelByAct[ActIndex];
+        private int TrainCostToSecondLevel => TrainCostToSecondLevelByAct[ActIndex];
+        private int ScoutGold => ScoutGoldByAct[ActIndex];
+        private const int DeployedSlots = 10;
 
         private CampaignSaveManager campaignSaveManager;
         private MapSceneUIManager mapSceneUIManager;
         private MemoriCanvasGroup panelCanvasGroup;
 
+        // Read by the nodeCompleted report when the layer completes.
+        public CampfireChoice Chosen { get; private set; }
+        public string TrainedUnit { get; private set; }
+        public int TrainedPrestige { get; private set; }
+        public string TrainedSquadId { get; private set; }
+
         private void Awake()
         {
             panelCanvasGroup = GetComponent<MemoriCanvasGroup>();
-            resultPanel.CGDisable();
         }
 
         public void SetUp(CampaignSaveManager _csm, MapSceneUIManager _msui)
@@ -54,11 +64,12 @@ namespace TJ.Campfire
             campaignSaveManager = _csm;
             mapSceneUIManager = _msui;
 
-            if (restButton != null) restButton.onClick.AddListener(OnRest);
-            if (trainButton != null) trainButton.onClick.AddListener(OnTrain);
-            if (scavengeButton != null) scavengeButton.onClick.AddListener(OnScavenge);
-            if (scoutAheadButton != null) scoutAheadButton.onClick.AddListener(OnScoutAhead);
-            // if (viewMapButton != null) viewMapButton.onClick.AddListener(OnViewMap);
+            view.SetUp(mapOverviewPanel, mapSceneUIManager);
+            view.RestButton.onClick.AddListener(OnRest);
+            view.TrainButton.onClick.AddListener(OpenTrainPicker);
+            view.ScavengeButton.onClick.AddListener(OnScavenge);
+            view.ScoutButton.onClick.AddListener(OnScoutAhead);
+            view.BackButton.onClick.AddListener(CloseTrainPicker);
             if (continueButton != null) continueButton.onClick.AddListener(() =>
             {
                 continueButton.interactable = false;
@@ -68,138 +79,280 @@ namespace TJ.Campfire
 
         public void LoadCampfirePanel()
         {
-            resultPanel.CGDisable();
+            Chosen = CampfireChoice.None;
+            TrainedUnit = null;
+            TrainedPrestige = 0;
+            TrainedSquadId = null;
             OpenFeedback.PlayFeedbacks();
-            // Disable Train if all units are max prestige
-            bool anyTrainable = false;
-            foreach (var squad in campaignSaveManager.SaveData.playerArmy)
-                if (squad.UnitIndex != -1 && squad.UnitPrestige < 2) { anyTrainable = true; break; }
 
-            if (trainButton != null) trainButton.interactable = anyTrainable;
-            if (restButton != null) restButton.interactable = true;
-            if (scavengeButton != null) scavengeButton.interactable = true;
-            if (scoutAheadButton != null) scoutAheadButton.interactable = true;
+            view.ClearSlots();
+            view.SetChoicesInteractable(true);
+            FillChoices();
+            SetContinueVisible(false);
             if (continueButton != null) continueButton.interactable = true;
 
-            SetOptionsVisible(true);
             panelCanvasGroup.FadeInAsync();
             IAudioRequester.Instance.PlaySFX(SFXData.OpenUI);
 
-            scoutDescriptionText.text = LocalizationManager.Instance.GetText("Reveal all Future ? Paths") + "+\n" +
-                LocalizationManager.Instance.GetText("heroBonusDescription17") + "\n";
-            campfireHealDescriptionText.text = string.Format(LocalizationManager.Instance.GetText("campfireHeal"), (int)(RestHealAmount * 100));
-            campfireScavengeDescriptionText.text = string.Format(LocalizationManager.Instance.GetText("campfireGear"), GearScavengeCount);
+            if (TryResumeLockedChoice()) return;
+            ShowChoosing();
         }
 
-        private void DisableActionButtons()
+        private void FillChoices()
         {
-            if (restButton != null) restButton.interactable = false;
-            if (trainButton != null) trainButton.interactable = false;
-            if (scavengeButton != null) scavengeButton.interactable = false;
-            if (scoutAheadButton != null) scoutAheadButton.interactable = false;
+            int healPercent = RestHealPercent();
+            view.SetRest($"{healPercent}%", string.Format(Text("campfireRestLine"), healPercent));
+
+            int trainable = GetTrainableSquads().Count;
+            view.SetTrain(
+                $"{string.Format(Text("campfireCostRange"), TrainCostToFirstLevel, TrainCostToSecondLevel)} {TabletopTavernConstants.GOLD_SPRITE_STRING}",
+                string.Format(Text("campfireTrainLine"), trainable, CountLiveSquads()),
+                string.Format(Text("campfireTrainPrices"), TrainCostToFirstLevel, TrainCostToSecondLevel),
+                trainable > 0);
+
+            view.SetScavenge(string.Format(Text("campfireGearValue"), GearScavengeCount), string.Format(Text("campfireScavengeLine"), GearScavengeCount));
+
+            bool slotsFull = !campaignSaveManager.HasRoomForConsumable();
+            view.SetScout($"+{ScoutGold} {TabletopTavernConstants.GOLD_SPRITE_STRING}",
+                Text(slotsFull ? "campfireScoutSlotsFull" : "campfireScoutConsumable"), slotsFull);
+        }
+
+        private void ShowChoosing()
+        {
+            view.SetHeader(Text("campfirePickOne"), Text("campfirePickOneSub"));
+            view.ShowState(CampfirePanelView.State.Choosing);
+        }
+
+        // Scout and Scavenge show hidden things, so a quit reopens the locked choice instead of offering the options again.
+        private bool TryResumeLockedChoice()
+        {
+            NodeResume resume = campaignSaveManager.SaveData.nodeResume;
+            if (!resume.active || resume.nodeType != NodeType.Campfire || resume.nodeIndex != mapSceneUIManager.LayerNodeSelected) return false;
+
+            Chosen = (CampfireChoice)resume.choiceIndex;
+            view.SetChoicesInteractable(false);
+            if (Chosen == CampfireChoice.Scavenge)
+            {
+                OpenScavengeTreasure();
+                return true;
+            }
+            ShowResult(CampfireChoice.Scout,
+                Text("CampfireScoutAhead"),
+                string.Format(Text("CampfireScoutGoldDesc"), ScoutGold),
+                new List<(string, string)>
+                {
+                    (Text("Gold"), $"+{ScoutGold} {TabletopTavernConstants.GOLD_SPRITE_STRING}"),
+                    (Text("campfireCaptionReveals"), Text("campfireThisAct")),
+                });
+            return true;
+        }
+
+        private void LockChoice(CampfireChoice _choice)
+        {
+            campaignSaveManager.LockNodeResult(new NodeResume
+            {
+                nodeIndex = mapSceneUIManager.LayerNodeSelected,
+                nodeType = NodeType.Campfire,
+                choiceIndex = (int)_choice,
+            });
         }
 
         private void OnRest()
         {
-            DisableActionButtons();
+            Chosen = CampfireChoice.Rest;
+            view.SetChoicesInteractable(false);
             if (mapOverviewPanel != null) mapOverviewPanel.Close();
             campaignSaveManager.ModifyTroopHealth(RestHealAmount);
             CampaignManager.Instance.MapSceneUIManager.HUDPanel.ArmyStructureChanged();
-            ShowResult(
-                LocalizationManager.Instance.GetText("CampfireRest"),
-                string.Format(LocalizationManager.Instance.GetText("CampfireRestDesc"), (int)(RestHealAmount * 100)));
+            int healPercent = RestHealPercent();
+            ShowResult(CampfireChoice.Rest,
+                Text("CampfireRest"),
+                string.Format(Text("CampfireRestDesc"), healPercent),
+                new List<(string, string)>
+                {
+                    (Text("townHeal"), $"{healPercent}%"),
+                    (Text("campfireCaptionSquads"), CountLiveSquads().ToString()),
+                });
         }
 
-        private void OnTrain()
+        private int RestHealPercent() => Mathf.RoundToInt(CampaignSaveManager.ApplyHealingBonus(RestHealAmount) * 100f);
+
+        private List<SquadToLoad> GetTrainableSquads()
         {
-            DisableActionButtons();
-            if (mapOverviewPanel != null) mapOverviewPanel.Close();
             List<SquadToLoad> eligible = new();
             foreach (var squad in campaignSaveManager.SaveData.playerArmy)
-                if (squad.UnitIndex != -1 && squad.UnitPrestige < 2)
+                if (squad.UnitIndex != -1 && !squad.isEmptySquad && squad.SquadCurrentHealth > 0 && squad.UnitPrestige < MaxPrestige)
                     eligible.Add(squad);
+            return eligible;
+        }
 
-            if (eligible.Count > 0)
+        private int CountLiveSquads()
+        {
+            int count = 0;
+            foreach (var squad in campaignSaveManager.SaveData.playerArmy)
+                if (squad.UnitIndex != -1 && !squad.isEmptySquad && squad.SquadCurrentHealth > 0) count++;
+            return count;
+        }
+
+        private int TrainCost(SquadToLoad _squad) => _squad.UnitPrestige == 0 ? TrainCostToFirstLevel : TrainCostToSecondLevel;
+
+        private string PriceText(SquadToLoad _squad)
+        {
+            int cost = TrainCost(_squad);
+            string price = CampaignManager.Instance.GoldManager.CheckIfCanAfford(cost) ? cost.ToString() : $"<color={ColorData.Negative}>{cost}</color>";
+            return $"{price} {TabletopTavernConstants.GOLD_SPRITE_STRING}";
+        }
+
+        private void OpenTrainPicker()
+        {
+            if (mapOverviewPanel != null) mapOverviewPanel.Close();
+            view.ClearSlots();
+
+            // Slot order matches the army bar: deployed first, then reserves. The array can be shorter than 10 + reserves.
+            SquadToLoad[] army = campaignSaveManager.SaveData.playerArmy;
+            int slotCount = Mathf.Min(army.Length, DeployedSlots + campaignSaveManager.MaxReserveSlots);
+            bool hasReserve = false;
+            for (int i = 0; i < slotCount; i++)
             {
-                System.Random random = campaignSaveManager.GetCampaignRandom();
-                int idx = random.Next(0, eligible.Count);
-                campaignSaveManager.PrestigeSpecificUnit(eligible[idx]);
-                string unitName = LocalizationManager.Instance.GetText(eligible[idx].UnitName.ToString());
-                ShowResult(
-                    LocalizationManager.Instance.GetText("CampfireTrainSuccess"),
-                    string.Format(LocalizationManager.Instance.GetText("CampfireTrainSuccessDesc"), unitName));
+                SquadToLoad squad = army[i];
+                if (squad.UnitIndex == -1 || squad.isEmptySquad || squad.SquadCurrentHealth <= 0) continue;
+                bool inReserve = i >= DeployedSlots;
+                hasReserve |= inReserve;
+                bool trainable = squad.UnitPrestige < MaxPrestige;
+                view.AddSlot(inReserve).SetUp(squad, squadCardPrefab, inReserve,
+                    trainable ? PriceText(squad) : Text("campfireMax"), trainable, OnTrainSquadPicked, OnTrainSquadHovered);
             }
-            else
+
+            view.SetTrainCounts(string.Format(Text("campfireCanTrainCount"), GetTrainableSquads().Count, CountLiveSquads()), Text("campfireTrainHint"), hasReserve);
+            view.ShowState(CampfirePanelView.State.Train);
+            IAudioRequester.Instance.PlaySFX(SFXData.OpenUI);
+        }
+
+        private void OnTrainSquadHovered(SquadToLoad _squad, bool _hovered)
+        {
+            if (!_hovered)
             {
-                ShowResult(
-                    LocalizationManager.Instance.GetText("CampfireTrainFail"),
-                    LocalizationManager.Instance.GetText("CampfireTrainFailDesc"));
+                view.SetTrainDetail(null);
+                return;
             }
+            string unitName = campaignSaveManager.GetUnitNameOrUnitNameOverride(_squad.UniqueID);
+            view.SetTrainDetail(_squad.UnitPrestige >= MaxPrestige
+                ? string.Format(Text("campfireTrainDetailMax"), unitName)
+                : string.Format(Text("campfireTrainDetail"), unitName, _squad.UnitPrestige + 1, PriceText(_squad)));
+        }
+
+        private void CloseTrainPicker()
+        {
+            view.ClearSlots();
+            ShowChoosing();
+        }
+
+        private void OnTrainSquadPicked(SquadToLoad _squad)
+        {
+            int cost = TrainCost(_squad);
+            if (!CampaignManager.Instance.GoldManager.CheckIfCanAfford(cost))
+            {
+                NotificationManager.Instance.ErrorNotification(Text("NotEnoughGold"));
+                return;
+            }
+
+            Chosen = CampfireChoice.Train;
+            TrainedUnit = _squad.UnitName.ToString();
+            TrainedPrestige = _squad.UnitPrestige + 1;
+            TrainedSquadId = _squad.UniqueID;
+            view.SetChoicesInteractable(false);
+            string unitName = campaignSaveManager.GetUnitNameOrUnitNameOverride(_squad.UniqueID);
+
+            // The prestige lands first so the one save ModifyGold writes holds both.
+            campaignSaveManager.PrestigeSpecificUnit(_squad);
+            campaignSaveManager.RegisterCampfireTraining();
+            IAudioRequester.Instance.PlaySFX(SFXData.PrestigeUnit);
+            CampaignManager.Instance.GoldManager.ModifyGold(-cost, Text("Train"));
+
+            view.ClearSlots();
+            ShowResult(CampfireChoice.Train,
+                Text("CampfireTrainSuccess"),
+                string.Format(Text("CampfireTrainSuccessDesc"), unitName),
+                new List<(string, string)>
+                {
+                    (Text("campfireCaptionSquad"), unitName),
+                    (Text("Prestige"), TrainedPrestige.ToString()),
+                    (Text("Gold"), $"-{cost} {TabletopTavernConstants.GOLD_SPRITE_STRING}"),
+                });
         }
 
         private void OnScavenge()
         {
-            DisableActionButtons();
+            Chosen = CampfireChoice.Scavenge;
+            view.SetChoicesInteractable(false);
             if (mapOverviewPanel != null) mapOverviewPanel.Close();
-            SetOptionsVisible(false);
+            LockChoice(CampfireChoice.Scavenge);
+            OpenScavengeTreasure();
+        }
+
+        private void OpenScavengeTreasure()
+        {
             panelCanvasGroup.FadeOutAsync();
             mapSceneUIManager.SetActivePanel(mapSceneUIManager.TreasurePanel);
             mapSceneUIManager.TreasurePanel.LoadTreasurePanelFromMapNode(GearScavengeCount);
         }
 
-        private void OnViewMap()
-        {
-            if (mapOverviewPanel == null) return;
-            mapOverviewPanel.Open(
-                mapSceneUIManager.MapSceneManager.MapLayers,
-                CampaignManager.Instance.CampaignSaveManager.SaveData,
-                mapSceneUIManager.LayerNodeSelected);
-        }
-
         private void OnScoutAhead()
         {
-            DisableActionButtons();
+            Chosen = CampfireChoice.Scout;
+            view.SetChoicesInteractable(false);
             if (mapOverviewPanel != null) mapOverviewPanel.Close();
             int activeLayer = mapSceneUIManager.MapSceneManager.GetActiveChapterIndex();
             mapSceneUIManager.MapSceneManager.RevealNodesInNextLayers(activeLayer, 100);
             if (mapOverviewPanel != null) mapOverviewPanel.Refresh();
 
-            if (!campaignSaveManager.HasRoomForConsumable())
+            string description;
+            string found;
+            if (campaignSaveManager.HasRoomForConsumable())
             {
-                NotificationManager.Instance.ErrorNotification(LocalizationManager.Instance.GetText("noRoomForConsumable"));
-                ShowResult(
-                    LocalizationManager.Instance.GetText("CampfireScoutAhead"),
-                    LocalizationManager.Instance.GetText("CampfireScoutAheadDesc"));
-                return;
+                int bookNumber = campaignSaveManager.SaveData.bookNumber;
+                ConsumableEnum consumable = ConsumableData.GetWeightedConsumable(bookNumber, campaignSaveManager.GetSeededRandom());
+                campaignSaveManager.AquireConsumable(consumable);
+                found = Text(consumable.ToString() + "Name");
+                description = string.Format(Text("CampfireScoutFoundDesc"), found, ScoutGold);
+            }
+            else
+            {
+                NotificationManager.Instance.ErrorNotification(Text("noRoomForConsumable"));
+                found = Text("campfireNothing");
+                description = string.Format(Text("CampfireScoutGoldDesc"), ScoutGold);
             }
 
-            int bookNumber = campaignSaveManager.SaveData.bookNumber;
-            ConsumableEnum consumable = ConsumableData.GetWeightedConsumable(bookNumber, campaignSaveManager.GetSeededRandom());
-            string consumableName = LocalizationManager.Instance.GetText(consumable.ToString() + "Name");
-            campaignSaveManager.AquireConsumable(consumable);
-            ShowResult(
-                LocalizationManager.Instance.GetText("CampfireScoutAhead"),
-                string.Format(LocalizationManager.Instance.GetText("CampfireScavengedDesc"), consumableName));
+            CampaignManager.Instance.GoldManager.ModifyGold(ScoutGold, Text("CampfireScoutAhead"));
+            LockChoice(CampfireChoice.Scout);
+            ShowResult(CampfireChoice.Scout, Text("CampfireScoutAhead"), description,
+                new List<(string, string)>
+                {
+                    (Text("Gold"), $"+{ScoutGold} {TabletopTavernConstants.GOLD_SPRITE_STRING}"),
+                    (Text("campfireCaptionFound"), found),
+                    (Text("campfireCaptionReveals"), Text("campfireThisAct")),
+                });
         }
 
-        private void ShowResult(string title, string description)
+        private void ShowResult(CampfireChoice choice, string title, string description, List<(string, string)> cells)
         {
             IAudioRequester.Instance.PlaySFX(SFXData.ChoiceMade);
-            SetOptionsVisible(false);
-            if (resultTitleText != null) resultTitleText.text = title;
-            if (resultDescriptionText != null) resultDescriptionText.text = description;
-            if (resultPanel != null) resultPanel.CGEnable();
+            view.SetHeader(Text("campfireReadyTitle"), Text("campfireReadySub"));
+            view.ShowResult(choice, title, description, cells);
+            SetContinueVisible(true);
         }
 
-        private void SetOptionsVisible(bool visible)
+        private void SetContinueVisible(bool visible)
         {
-            if (visible) optionsPanel.FadeInAsync();
-            else optionsPanel.FadeOutAsync();
+            if (continueButton != null) continueButton.gameObject.SetActive(visible);
         }
+
+        private static string Text(string key) => LocalizationManager.Instance.GetText(key);
 
         public override async void ClosePanel()
         {
             CloseFeedback();
+            view.ClearSlots();
             campaignSaveManager.RemoveZeroHealthSquads();
             await Task.Delay(200);
             panelCanvasGroup.FadeOutAsync();

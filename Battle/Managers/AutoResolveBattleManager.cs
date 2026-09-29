@@ -16,6 +16,8 @@ namespace TJ.Engagement
         public int TargetIndex;
         public string UniqueID;
         public int UnitsSlain;
+        // Health removed from enemy models, overkill excluded, as the live battle counts it.
+        public int DamageDealt;
         public int finalHealth;
         public int healthPerKill;
         public float armorMitigation;
@@ -131,6 +133,8 @@ namespace TJ.Engagement
         // into a log line.
         private const int MAX_AUTORESOLVE_ROUNDS = 10000;
         private bool _isGarrisonBattle;
+        // Set from the run in SetUpArmies; a custom or test battle leaves it off.
+        private bool _bloodPact;
         // Only Load() sets the garrison flag, and Load() needs a campaign. The difficulty sim
         // sets it directly.
         internal bool IsGarrisonBattle { set => _isGarrisonBattle = value; }
@@ -276,10 +280,32 @@ namespace TJ.Engagement
     internal static AutoResolveSquad GenerateAutoResolveSquadStats(SquadToLoad _squadToLoad, int _squadIndex, Team _team, CampaignSaveManager campaignSaveManager = null, bool allowGearModifiers = true, AutoResolveHeroContext hero = default)
     {
         bool useCampaign = allowGearModifiers && campaignSaveManager != null;
-        return GenerateAutoResolveSquadStats(_squadToLoad, _squadIndex, _team,
+        AutoResolveSquad squad = GenerateAutoResolveSquadStats(_squadToLoad, _squadIndex, _team,
             useCampaign ? (Func<GearID, bool>)campaignSaveManager.CheckForGear : null,
             useCampaign && campaignSaveManager.SaveData.battleFieldPreset.weather == Weather.Rain,
             hero);
+        if (useCampaign) ApplyOrdeals(ref squad, _team, campaignSaveManager.SaveData);
+        if (useCampaign) ApplyEventLeadership(ref squad, _team, campaignSaveManager.SaveData);
+        return squad;
+    }
+    // Mirrors SquadManager.RegisterSquad, floor included.
+    private static void ApplyEventLeadership(ref AutoResolveSquad squad, Team team, CampaignSaveData run)
+    {
+        if (run.eventBattleEffects == null) return;
+        int change = team == Team.Enemy ? run.eventBattleEffects.enemyLeadership : run.eventBattleEffects.playerLeadership;
+        if (change == 0) return;
+        squad.squadStats.Leadership = Mathf.Max(squad.squadStats.Leadership + change, TabletopTavernConstants.MORALE_BREAK_THRESHOLD * 2);
+    }
+    // The stat Ordeals, applied as EntityWatcher, SquadManager and the charge system apply them in a live battle.
+    private static void ApplyOrdeals(ref AutoResolveSquad squad, Team team, CampaignSaveData run)
+    {
+        if (team == Team.Enemy && run.HasOrdeal(OrdealId.UnbrokenRanks))
+            squad.squadStats.Leadership += OrdealRegistry.UNBROKEN_RANKS_LEADERSHIP;
+        if (team != Team.Player) return;
+        if (run.HasOrdeal(OrdealId.ShortQuivers) && TabletopTavernConstants.Shoots(squad.squadStats.unitType))
+            squad.squadStats.Ammunition = (int)(squad.squadStats.Ammunition * OrdealRegistry.SHORT_QUIVERS_AMMUNITION);
+        if (run.HasOrdeal(OrdealId.BluntedCharge))
+            squad.ChargeBonus /= 2;
     }
     // Gear, weather and hero as plain inputs. The game passes them from the campaign save through
     // the overload above; the difficulty sim (Tests.Editor) passes them as data, because it has no
@@ -309,16 +335,16 @@ namespace TJ.Engagement
         // on the same local the rest of this method reads, so a rule reaches the simulation the way
         // it reaches the live battle. Accuracy rules are in percent points; this method holds a
         // fraction.
+        float HeroBonus(UnitStat stat, float current)
+        {
+            float total = HeroBonusRuleEvaluator.SumHeroStatBonus(stat, _squadToLoad.UnitName, hero.HeroID, squadStats, hero.EnemyRace, current);
+            if (hero.OnlySakuraUnits)
+                total += HeroBonusRuleEvaluator.SumFactionStatBonus(stat, hero.HeroRace, current);
+            return total;
+        }
+
         if (hero.HasHero && _team == hero.Side)
         {
-            float HeroBonus(UnitStat stat, float current)
-            {
-                float total = HeroBonusRuleEvaluator.SumHeroStatBonus(stat, _squadToLoad.UnitName, hero.HeroID, squadStats, hero.EnemyRace, current);
-                if (hero.OnlySakuraUnits)
-                    total += HeroBonusRuleEvaluator.SumFactionStatBonus(stat, hero.HeroRace, current);
-                return total;
-            }
-
             meleeAttack += (int)HeroBonus(UnitStat.MeleeAttack, meleeAttack);
             meleeDefense += (int)HeroBonus(UnitStat.MeleeDefense, meleeDefense);
             accuracy += HeroBonus(UnitStat.Accuracy, accuracy * 100f) / 100f;
@@ -328,7 +354,6 @@ namespace TJ.Engagement
             missileStrength += (int)HeroBonus(UnitStat.MissileStrength, missileStrength);
             ChargeBonus += (int)HeroBonus(UnitStat.ChargeBonus, ChargeBonus);
             squadStats.Leadership += HeroBonus(UnitStat.Leadership, squadStats.Leadership);
-            squadStats.Ammunition += (int)HeroBonus(UnitStat.Ammunition, squadStats.Ammunition);
             // The simulation reads these three off the stat copy; ChargeCount, ExplosionRange and
             // ExplosionForce have no model here and are left alone.
             squadStats.attackCooldown = Mathf.Max(0.1f, squadStats.attackCooldown + HeroBonus(UnitStat.AttackCooldown, squadStats.attackCooldown));
@@ -363,10 +388,12 @@ namespace TJ.Engagement
                     meleeAttack += GearData.GetGear(GearID.ConscriptionOrders).GearModifierValue;
                     meleeDefense += GearData.GetGear(GearID.ConscriptionOrders).GearModifierValue;
                 }
-                if(hasGear(GearID.JoustingLances) && (squadStats.SquadAttributes.StandardShields || squadStats.SquadAttributes.HeavyShields)) 
-                    meleeDefense += GearData.GetGear(GearID.JoustingLances).GearModifierValue;
-                if(hasGear(GearID.GnomishArmorers) && squadStats.RarityTier == UnitRarity.Rare)
-                    meleeDefense += GearData.GetGear(GearID.GnomishArmorers).GearModifierValue;
+                if(hasGear(GearID.JoustingLances) && squadStats.unitSize == UnitSize.Cavalry)
+                    WeaponStrength += GearData.GetGear(GearID.JoustingLances).GearModifierValue;
+                if(hasGear(GearID.GnomishArmorers) && squadStats.RarityTier == UnitRarity.Uncommon)
+                    squadStats.Armor += GearData.GetGear(GearID.GnomishArmorers).GearModifierValue;
+                if(hasGear(GearID.Shungite) && squadStats.RarityTier == UnitRarity.Uncommon)
+                    meleeAttack += GearData.GetGear(GearID.Shungite).GearModifierValue;
                 if(hasGear(GearID.WellHonedAxes) && squadStats.SquadAttributes.ArmorPiercing) //must apply after diamond tipped arrows
                     meleeAttack += GearData.GetGear(GearID.WellHonedAxes).GearModifierValue;
                 if(hasGear(GearID.RavensEye) && squadStats.RarityTier != UnitRarity.Common && unitType == UnitType.Ranged) 
@@ -376,10 +403,13 @@ namespace TJ.Engagement
             }
         }
 
-        // The block chances UnitSetUpSystem gives every shielded unit, either team. Tower Shields is
-        // commented out in the live setup, so it changes nothing here either.
+        // The block chances UnitSetUpSystem gives every shielded unit, either team.
         if (squadStats.SquadAttributes.HeavyShields) shieldBlockChance = AutoResolveSimulation.Model.HeavyShieldBlock;
         else if (squadStats.SquadAttributes.StandardShields) shieldBlockChance = AutoResolveSimulation.Model.StandardShieldBlock;
+        // Tower Shields replaces the trait chance after it is set, as UnitSetUpSystem does.
+        if (hasGear != null && _team == Team.Player && hasGear(GearID.TowerShields)
+            && (squadStats.SquadAttributes.StandardShields || squadStats.SquadAttributes.HeavyShields))
+            shieldBlockChance = GearData.GetGear(GearID.TowerShields).GearModifierValue / 100f;
 
         int totalHealth = _squadToLoad.SquadCurrentHealth;
         float armorMitigation = (float)squadStats.Armor/(float)(squadStats.Armor + 100f);
@@ -415,6 +445,10 @@ namespace TJ.Engagement
             // mage branch, folded into the stat copy so HandleMageCasts can just read Ammunition.
             squadStats.Ammunition += _squadToLoad.UnitPrestige * TabletopTavernConstants.PRESTIGE_AMMO_BONUS_MAGE;
         }
+
+        // Percent ammo rules scale the pool after prestige, Deep Quivers and Powder Reserves, as EntityWatcher does.
+        if (hero.HasHero && _team == hero.Side)
+            squadStats.Ammunition += (int)HeroBonus(UnitStat.Ammunition, squadStats.Ammunition);
 
         if (squadStats.SquadAttributes.Overdraw)
             range *= TabletopTavernConstants.OVERDRAW_RANGE_MULTIPLIER;
@@ -469,6 +503,7 @@ namespace TJ.Engagement
         playerArmyIsDefeated = false;
         enemyArmyIsDefeated = false;
 
+        _bloodPact = CampaignManager.Instance.CampaignSaveManager.SaveData.HasOrdeal(OrdealId.BloodPact);
         AutoResolveHeroContext hero = AutoResolveHeroContext.From(
             CampaignManager.Instance.CampaignSaveManager.SaveData.heroID, playerArmy, enemyArmy);
         for (int i = 0; i < playerArmy.Length; i++) {
@@ -502,6 +537,7 @@ namespace TJ.Engagement
         }
         playerAutoResolveStats = new AutoResolveSquad[playerArmy.Length];
         _mageAlphaStrikeApplied = false;
+        _bloodPact = false;
         playerArmyIsDefeated = false;
 
         for (int i = 0; i < playerArmy.Length; i++) {
@@ -594,8 +630,10 @@ namespace TJ.Engagement
         AutoResolveSimulation.Initialize(playerAutoResolveStats, enemyAutoResolveStats);
         AssignTargets();
         HandleMageCasts();
+        // Blood Pact scales both sides' hits on the player, as BloodPactSystem does in a live battle.
+        float bloodPact = _bloodPact ? OrdealMask.BLOOD_PACT_DAMAGE : 1f;
         bool active = AutoResolveSimulation.Tick(playerAutoResolveStats, enemyAutoResolveStats,
-            _isGarrisonBattle ? GARRISON_AUTORESOLVE_BONUS : 1f, unitsSlainData);
+            (_isGarrisonBattle ? GARRISON_AUTORESOLVE_BONUS : 1f) * bloodPact, unitsSlainData, bloodPact);
         _idleSeconds = active ? 0 : _idleSeconds + 1;
         CheckArmyStatus();
     }
@@ -660,8 +698,8 @@ namespace TJ.Engagement
                 case UnitStat.Accuracy:
                     // Floor at zero, not one: a melee squad already sits at zero accuracy, and a
                     // floor of one would have a debuff RAISE it. A zero-accuracy shooter simply
-                    // lands no hits.
-                    squad.squadStats.attackAccuracy = math.max(0f, squad.squadStats.attackAccuracy + value);
+                    // lands no hits. The spell value is in percent points; attackAccuracy is a fraction.
+                    squad.squadStats.attackAccuracy = math.max(0f, squad.squadStats.attackAccuracy + value / 100f);
                     return true;
                 case UnitStat.Leadership:
                     // HasRouted reads Leadership, so draining it makes a squad break with more models
@@ -770,6 +808,11 @@ namespace TJ.Engagement
                     // not alter UnitsAlive - so picking purely by size re-picks the same squad every
                     // charge and dumps the whole pool on it, which zeroed an archer's accuracy
                     // outright. Fewest charges received first, biggest squad as the tie-break.
+                    // An accuracy debuff goes to squads that shoot while any stands, as MageSquadFindTargetSystem picks.
+                    bool shootersOnly = false;
+                    if (mageSpell.MageTargetPriority == MageTargetPriority.RangedEnemyFirst)
+                        for (int i = 0; i < pool.Length && !shootersOnly; i++)
+                            shootersOnly = !ineligible(i) && TabletopTavernConstants.Shoots(pool[i].squadStats.unitType);
                     int[] chargesApplied = new int[pool.Length];
                     for (int spent = 0; spent < charges; spent++)
                     {
@@ -777,6 +820,7 @@ namespace TJ.Engagement
                         for (int i = 0; i < pool.Length; i++)
                         {
                             if (ineligible(i)) continue;
+                            if (shootersOnly && !TabletopTavernConstants.Shoots(pool[i].squadStats.unitType)) continue;
                             if (pick == -1) { pick = i; continue; }
                             if (chargesApplied[i] < chargesApplied[pick] ||
                                 (chargesApplied[i] == chargesApplied[pick] && pool[i].UnitsAlive > pool[pick].UnitsAlive))
@@ -840,9 +884,11 @@ namespace TJ.Engagement
             }
         }
 
-        CastFrom(playerAutoResolveStats, enemyAutoResolveStats, playerAutoResolveStats, 1f);
+        // Mages are squads, so Blood Pact reaches both sides' casts.
+        float bloodPact = _bloodPact ? OrdealMask.BLOOD_PACT_DAMAGE : 1f;
+        CastFrom(playerAutoResolveStats, enemyAutoResolveStats, playerAutoResolveStats, bloodPact);
         CastFrom(enemyAutoResolveStats, playerAutoResolveStats, enemyAutoResolveStats,
-            _isGarrisonBattle ? GARRISON_AUTORESOLVE_BONUS : 1f);
+            (_isGarrisonBattle ? GARRISON_AUTORESOLVE_BONUS : 1f) * bloodPact);
     }
     // internal: the difficulty sim counts routed squads with the same rule the loop uses.
     internal static bool HasRouted(AutoResolveSquad squad)
@@ -926,6 +972,7 @@ namespace TJ.Engagement
                     UnitsStart = stats[i].maxUnits,
                     UnitsEnd = unitsEnd,
                     Kills = stats[i].UnitsSlain,
+                    Damage = stats[i].DamageDealt,
                     Status = unitsEnd <= 0 ? "Dead" : stats[i].Broken ? "Broke" : "Stand",
                 });
                 break;
@@ -937,6 +984,7 @@ namespace TJ.Engagement
         string playerKey = GetPlayerArmyKey();
         List<SquadKillsStored> squadKillsStored = new();
         List<SquadLossesStored> squadLossesStored = new();
+        List<SquadDamageStored> squadDamageStored = new();
         // Debug.Log($"playerAutoResolveStats length: {playerAutoResolveStats.Length}");
         // Debug.Log($"playerArmy length: {playerArmy.Length}");
         for (int i = 0; i < playerAutoResolveStats.Length; i++)
@@ -952,6 +1000,7 @@ namespace TJ.Engagement
                         playerAutoResolveStats[i].finalHealth = math.max(0, playerAutoResolveStats[i].finalHealth);
                         playerArmy[j].SquadCurrentHealth = playerAutoResolveStats[i].finalHealth;
                         squadKillsStored.Add(new SquadKillsStored() { SquadGUID = playerArmy[j].UniqueID, Kills = playerAutoResolveStats[i].UnitsSlain });
+                        squadDamageStored.Add(new SquadDamageStored() { SquadGUID = playerArmy[j].UniqueID, Damage = playerAutoResolveStats[i].DamageDealt });
                         // UnitsAlive is ceiling-rounded from pooled health, so it can read as 1 even when only a
                         // sliver of a unit's health remains - floor-dividing finalHealth avoids undercounting losses by 1.
                         int endingUnits = playerAutoResolveStats[i].healthPerKill > 0 ? playerAutoResolveStats[i].finalHealth / playerAutoResolveStats[i].healthPerKill : playerAutoResolveStats[i].UnitsAlive;
@@ -971,6 +1020,7 @@ namespace TJ.Engagement
                     //clamping health to 0
                     enemyAutoResolveStats[i].finalHealth = math.max(0, enemyAutoResolveStats[i].finalHealth);
                     enemyArmy[j].SquadCurrentHealth = enemyAutoResolveStats[i].finalHealth;
+                    squadDamageStored.Add(new SquadDamageStored() { SquadGUID = enemyArmy[j].UniqueID, Damage = enemyAutoResolveStats[i].DamageDealt });
                     // Debug.Log($"Unit {enemyArmy[j].UnitName} now at {enemyArmy[j].SquadCurrentHealth} health");
                 }
             }
@@ -1007,7 +1057,7 @@ namespace TJ.Engagement
             }
             if(_save){
                 AnalyticsBattleReport report = GameEventTracker.TryBuild("battleEnded", () => BuildBattleReport());
-                CampaignManager.Instance.CampaignSaveManager.SaveSquadsPostAutoresolve(playerArmy, enemyArmy, enemyArmyIsDefeated, squadKillsStored, squadLossesStored, report);
+                CampaignManager.Instance.CampaignSaveManager.SaveSquadsPostAutoresolve(playerArmy, enemyArmy, enemyArmyIsDefeated, squadKillsStored, squadLossesStored, squadDamageStored, report);
             }
         } else {
             //reset unit counts to max unit counts this is just for testing in editor

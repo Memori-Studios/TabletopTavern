@@ -10,13 +10,18 @@ namespace TJ
         // ArmyGenerationRuleData (mod-overridable) instead of hardcoded here - see
         // ArmyGenerationRuleData.DefaultEnemyPrestigeRules / DefaultEnemyArmyRules / DefaultTownGarrisonRules.
         private const int ENEMY_PRESTIGE_SEED_OFFSET = 104729; // decorrelate from the deck-shuffle RNG in CreateArmyFromUnitsByTier
+        // Elite Guard draws its squad on its own stream, so the rest of the army is the same as without the card.
+        private const int ELITE_GUARD_SEED_OFFSET = 7727;
 
         // DifficultyMod 10 / DifficultyMod 14: gives enemy squads a chance to spawn already prestiged, scaling with Act and difficulty
-        private static SquadToLoad[] ApplyEnemyPrestige(SquadToLoad[] _squads, int _actNumber, int _seed, bool _enhanced)
+        private static SquadToLoad[] ApplyEnemyPrestige(SquadToLoad[] _squads, int _actNumber, int _seed, bool _enhanced, bool _doubleChance = false)
         {
             if (_squads.Length == 0) return _squads;
 
             EnemyPrestigeRule profile = ArmyGenerationRuleData.ResolveEnemyPrestigeProfile(_actNumber, _enhanced);
+            // Veteran Hosts on a level that already runs the enhanced table.
+            if (_doubleChance)
+                profile.ChancePerSquad = Mathf.Min(TabletopTavernConstants.ENDLESS_PRESTIGE_CHANCE_CAP, profile.ChancePerSquad * 2f);
 
             System.Random random = new(_seed + ENEMY_PRESTIGE_SEED_OFFSET);
 
@@ -51,7 +56,7 @@ namespace TJ
             return _squads;
         }
 
-        public static SquadToLoad[] GenerateTownGarrison(TownSize _townSize, int _seed, List<UnitTier> unitsPool, bool difficultyImperator, int _bookNumber, bool enemyPrestigeEligible, bool enemyPrestigeEnhanced)
+        public static SquadToLoad[] GenerateTownGarrison(TownSize _townSize, int _seed, List<UnitTier> unitsPool, bool difficultyImperator, int _bookNumber, bool enemyPrestigeEligible, bool enemyPrestigeEnhanced, bool eliteGuard = false, bool doublePrestigeChance = false)
         {
             // Garrisons don't field cavalry or outriders — filter them out before picking units
             unitsPool = unitsPool.FindAll(u =>
@@ -61,8 +66,26 @@ namespace TJ
             TierCount[] tierCounts = ArmyGenerationRuleData.ResolveTownGarrisonTierCounts(_townSize, _bookNumber, difficultyImperator);
 
             SquadToLoad[] garrison = CreateArmyFromUnitsByTier(tierCounts, unitsPool, _seed);
-            if (enemyPrestigeEligible) garrison = ApplyEnemyPrestige(garrison, _bookNumber, _seed, enemyPrestigeEnhanced);
+            if (eliteGuard) garrison = AddEliteSquad(garrison, unitsPool, _seed);
+            if (enemyPrestigeEligible) garrison = ApplyEnemyPrestige(garrison, _bookNumber, _seed, enemyPrestigeEnhanced, doublePrestigeChance);
             return garrison;
+        }
+        /// <summary>Elite Guard: one more tier 4 squad (tier 3 when the pool has none), never past the deployment cap.</summary>
+        public static SquadToLoad[] AddEliteSquad(SquadToLoad[] _army, List<UnitTier> _unitsPool, int _seed)
+        {
+            if (_army.Length >= TabletopTavernConstants.ENDLESS_ENEMY_SQUAD_CAP) return _army;
+            List<UnitName> deck = new();
+            foreach (int tier in new[] { 4, 3 })
+            {
+                foreach (UnitTier u in _unitsPool)
+                    if (u.tier == tier) deck.Add(u.unitName);
+                if (deck.Count > 0) break;
+            }
+            if (deck.Count == 0) return _army;
+
+            System.Random random = new(_seed + ELITE_GUARD_SEED_OFFSET);
+            List<SquadToLoad> squads = new(_army) { new SquadToLoad(deck[random.Next(deck.Count)]) };
+            return squads.ToArray();
         }
         private static SquadToLoad[] CreateArmyFromUnitsByTier(TierCount[] _tierCounts, List<UnitTier> _unitsPool, int _seed)
         {
@@ -102,12 +125,13 @@ namespace TJ
             }
             return squads.ToArray();
         }
-        public static SquadToLoad[] GenerateEnemyArmy(int _boardNumber, int _battlesFought, int _seed, bool _finalBattle, List<UnitTier> unitsPool, bool knightDifficulty, bool enemyPrestigeEligible, bool enemyPrestigeEnhanced)
+        public static SquadToLoad[] GenerateEnemyArmy(int _boardNumber, int _battlesFought, int _seed, bool _finalBattle, List<UnitTier> unitsPool, bool knightDifficulty, bool enemyPrestigeEligible, bool enemyPrestigeEnhanced, bool eliteGuard = false, bool doublePrestigeChance = false)
         {
             TierCount[] tierCounts = ArmyGenerationRuleData.ResolveEnemyArmyTierCounts(_boardNumber, _finalBattle, knightDifficulty, _battlesFought);
 
             SquadToLoad[] army = CreateArmyFromUnitsByTier(tierCounts, unitsPool, _seed);
-            if (enemyPrestigeEligible) army = ApplyEnemyPrestige(army, _boardNumber, _seed, enemyPrestigeEnhanced);
+            if (eliteGuard) army = AddEliteSquad(army, unitsPool, _seed);
+            if (enemyPrestigeEligible) army = ApplyEnemyPrestige(army, _boardNumber, _seed, enemyPrestigeEnhanced, doublePrestigeChance);
             return army;
         }
 

@@ -165,6 +165,8 @@ namespace TJ.Map
             campaignSaveManager.OnGearChanged += ReloadGear;
             campaignSaveManager.OnArmyStructureChanged += ArmyStructureChanged;
             campaignSaveManager.OnConsumablesChanged += ReloadConsumables;
+            campaignSaveManager.OnOrdealsChanged -= OrdealsChanged;
+            campaignSaveManager.OnOrdealsChanged += OrdealsChanged;
             InputHandler.Instance.SecondaryActionPressed += CloseAllPopUps;
             InputHandler.Instance.OnToggleFreeCameraMode += ToggleFreeCameraMode;
 
@@ -222,6 +224,15 @@ namespace TJ.Map
             string difficultLevelTitleLocalized = LocalizationManager.Instance.GetText("Difficulty");
             difficultyTooltipTrigger.SetUpToolTip(_title: $"{difficultLevelTitleLocalized}: {difficultyLocalized}", _description: additionalModifiersDesc);
         }
+        // An Ordeal can switch off gear, consumables, a faction passive or a spell slot, and change the gold loss per turn.
+        private void OrdealsChanged()
+        {
+            UpdateHeroNameAndRace();
+            ReloadGear();
+            ReloadConsumables();
+            ReloadSpells();
+            OnGoldChanged(campaignSaveManager.SaveData.goldAmount);
+        }
         private void UpdateHeroNameAndRace()
         {
             Hero hero = HeroData.GetHeroByID(campaignSaveManager.SaveData.heroID);
@@ -242,7 +253,15 @@ namespace TJ.Map
                 heroBonusText1string += "\n" + koboldProgress;
             }
             heroNameTooltipTrigger.SetUpToolTip(_title: heroNameLocalized, _description: KeywordText.ForTooltip(heroBonusText1string));
-            heroRaceTooltipTrigger.SetUpToolTip(_title: heroRaceLocalized, _description: raceBonusTextstring);
+
+            OrdealId countering = OrdealRegistry.CounteringOrdeal(campaignSaveManager.SaveData.ordeals, hero.Race);
+            heroRaceText.alpha = countering != OrdealId.None ? 0.5f : 1f;
+            heroRaceTooltipTrigger.SetUpToolTip(new TooltipContent
+            {
+                Title = heroRaceLocalized,
+                Body = raceBonusTextstring,
+                Footer = countering != OrdealId.None ? OrdealRegistry.InactiveNote(countering) : "",
+            });
         }
         public void ArmyStructureChanged()
         {
@@ -479,7 +498,7 @@ namespace TJ.Map
                 SpellData spellData = spells != null && i < spells.Length ? spells[i] : null;
                 // Hotkey 0 renders no digit: there is nothing to press on the map.
                 spellCastButtons[i].LoadSpellUI(spellData, null, 0);
-                spellCastButtons[i].SetLocked(SpellLoadout.IsSlotLocked(i));
+                spellCastButtons[i].SetLocked(Memori.SaveData.SaveDataHandler.IsCampaignSlotLocked(i));
                 spellCastButtons[i].SetReadOnly();
             }
         }
@@ -721,7 +740,11 @@ namespace TJ.Map
                 flavorText += $"\n(+{CampaignManager.Instance.GoldManager.GetBaseInterest() + bonusFromOmenOfFamine}) <sprite name=GoldSprite> {ironBankLocalized}";
             }
 
-            goldTooltipTrigger.SetUpToolTip(_description: $"+{CampaignManager.Instance.GoldManager.GetTotalInterest()} <sprite name=GoldSprite> {interestLocalized}", _flavorText: flavorText);
+            string description = $"+{CampaignManager.Instance.GoldManager.GetTotalInterest()} <sprite name=GoldSprite> {interestLocalized}";
+            int ordealLoss = OrdealRegistry.GoldLostPerTurn(campaignSaveManager.SaveData);
+            if (ordealLoss > 0)
+                description += $"\n<color={ColorData.Negative}>-{ordealLoss}</color> <sprite name=GoldSprite> {LocalizationManager.Instance.GetText("OrdealGoldLossPerTurn")}";
+            goldTooltipTrigger.SetUpToolTip(_description: description, _flavorText: flavorText);
 
             ReloadGear();
         }
@@ -863,6 +886,7 @@ namespace TJ.Map
             campaignSaveManager.OnGearChanged -= ReloadGear;
             campaignSaveManager.OnArmyStructureChanged -= ArmyStructureChanged;
             campaignSaveManager.OnConsumablesChanged -= ReloadConsumables;
+            campaignSaveManager.OnOrdealsChanged -= OrdealsChanged;
         }
         public void DestroyEmptySquadCards()
         {

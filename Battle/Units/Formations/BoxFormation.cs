@@ -210,6 +210,12 @@ public class BoxFormation : MonoBehaviour
                 selectedSquadEntityAndEntitiesCountDict.Add(squadId, count);
             }
         }
+        // Enemy squads sit outside TrueSquadOrder; keep selection order so points match TeleportUnits.
+        foreach (int squadId in BattleManager.Instance.UnitSelectionManager.SelectedSquadIds)
+        {
+            if (squadId < 0 && _selectedSquadEntityAndEntitiesCountDict.TryGetValue(squadId, out int count))
+                selectedSquadEntityAndEntitiesCountDict[squadId] = count;
+        }
     }
     public void CalculateUnitDepthAndWidthForSpawn(int unitCount, float _spread)
     {

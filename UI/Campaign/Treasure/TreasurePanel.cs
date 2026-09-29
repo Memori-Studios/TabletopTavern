@@ -34,16 +34,13 @@ namespace TJ.Treasure
 
         [Header("Map Node Treasure")]
         [SerializeField] private MemoriCanvasGroup gearRewardCanvasGroup;
-        [SerializeField] private Transform gearCardTreasureParent;
-        [SerializeField] private GearCardTreasurePanel gearCardTreasurePrefab;
-        [SerializeField] private GearCardTreasurePanel consumableCardTreasurePrefab;
-        [SerializeField] private GameObject separatorPrefab;
-        private GearCardTreasurePanel[] gearCardHordeRewards;
-        private GearCardTreasurePanel _consumableCardReward;
-        private GameObject _separator;
-        private TMP_Text _separatorText;
+        [SerializeField] private ChoicePanelView view;
         [SerializeField] private GameObject gearFullWarning;
         [SerializeField] private MemoriButtonV2 skipGearButton;
+        // The item art overhangs the card's diamond mount a little, as the old rows did.
+        const float ItemIconSize = 84f;
+        const int PickedHoldMs = 600;
+        bool rewardPicked;
 
         [Header("Shop Rewards")]
         [SerializeField] private MemoriCanvasGroup shopRewardCanvasGroup;
@@ -102,30 +99,47 @@ namespace TJ.Treasure
             OpenFeedback.PlayFeedbacks();
             // await Task.Delay(500);
 
-            gearCardHordeRewards = new GearCardTreasurePanel[count];
             List<GearID> gearList = campaignSaveManager.DrawRandomGear(count);
-            gearFullWarning.SetActive(!campaignSaveManager.CanAquireGear());
+            bool gearFull = !campaignSaveManager.CanAquireGear();
+            // The count line shows a full bag in red now; the banner's old warning icon would sit on top of it.
+            gearFullWarning.SetActive(false);
+            rewardPicked = false;
 
-            for (int i = 0; i < gearCardHordeRewards.Length; i++)
+            view.Clear();
+            string takeLabel = Text("choiceClickToTake");
+            string takenLabel = Text("choiceTaken");
+            for (int i = 0; i < gearList.Count; i++)
             {
-                gearCardHordeRewards[i] = Instantiate(gearCardTreasurePrefab, gearCardTreasureParent);
-                gearCardHordeRewards[i].LoadGearCardReward(gearList[i]);
-                gearCardHordeRewards[i].OnGearCardSelected += SelectGearReward;
+                GearID gearID = gearList[i];
+                Gear gear = GearData.GetGear(gearID);
+                ChoiceCardView card = view.AddCard();
+                string description = string.Format(Text(gearID + "Desc"), gear.GearModifierValue);
+                card.Load(SpriteData.GetSprite(gear.GearName), Text(gearID + "Name"), Text(gear.GearRarity.ToString()),
+                    ColorData.GetGearRarityColor(gear.GearRarity), description, takeLabel, takenLabel);
+                card.ShowArtIcon(ItemIconSize);
+                card.SetNew(!SaveDataHandler.GetGearIDsCollected().Contains((int)gearID));
+                if (gearFull) card.SetBlocked(Text("NoRoomForGear"));
+                card.Chosen += chosen => SelectGearReward(gearID, chosen);
             }
 
+            view.ShowWide(loadConsumable);
             if (loadConsumable)
             {
-                _separator = Instantiate(separatorPrefab, gearCardTreasureParent);
-                _separatorText = _separator.GetComponentInChildren<TMP_Text>();
-                string separatorLocalized = "~ " + LocalizationManager.Instance.GetText("orConsumable") + " ~";
-                _separatorText.text = separatorLocalized;
-
                 int bookNumber = campaignSaveManager.SaveData.bookNumber;
                 ConsumableEnum randomConsumable = ConsumableData.GetWeightedConsumable(bookNumber, campaignSaveManager.GetSeededRandom() + count);
-                _consumableCardReward = Instantiate(consumableCardTreasurePrefab, gearCardTreasureParent);
-                _consumableCardReward.LoadConsumableCardReward(randomConsumable);
-                _consumableCardReward.OnConsumableCardSelected += SelectConsumableReward;
+                ChoiceCardView card = view.AddWideCard();
+                string description = CampaignManager.Instance.ConsumableManager.GetConsumableDescription(randomConsumable);
+                card.Load(SpriteData.GetSprite(randomConsumable.ToString()), Text(randomConsumable + "Name"), null, Color.clear,
+                    description, takeLabel, takenLabel);
+                card.ShowArtIcon(ItemIconSize * 0.8f);
+                if (!campaignSaveManager.HasRoomForConsumable()) card.SetBlocked(Text("NoRoomForConsumable"));
+                card.Chosen += chosen => SelectConsumableReward(randomConsumable, chosen);
             }
+
+            view.SetCounts(CountLine());
+            view.WireNavigation();
+            view.PlayOpen();
+            view.FocusFirstCard();
 
             skipGearButton.Button.onClick.RemoveAllListeners();
             skipGearButton.Button.onClick.AddListener(Continue);
@@ -133,57 +147,67 @@ namespace TJ.Treasure
 
             gearRewardCanvasGroup.FadeInAsync(0.25f);
         }
-        private void SelectGearReward(GearID gearID)
+        private static string Text(string key) => LocalizationManager.Instance.GetText(key);
+        // "Gear 1 / 5 · Consumables 1 / 3", a full count in the bad colour so a full bag shows before the click.
+        private string CountLine()
         {
+            CampaignSaveData save = campaignSaveManager.SaveData;
+            string Count(int held, int max)
+            {
+                string colour = held >= max ? ColorData.Negative : "#ECE6D8";
+                return $"<color={colour}>{held} / {max}</color>";
+            }
+            return $"{Text("treasureGear")}  {Count(save.Gear.Count, campaignSaveManager.MaxGear)}   <color=#6C777B>·</color>   "
+                + $"{Text("treasureConsumables")}  {Count(save.consumables.Count, campaignSaveManager.ConsumableCapacity)}";
+        }
+        private void SelectGearReward(GearID gearID, ChoiceCardView chosen)
+        {
+            if (rewardPicked) return;
             if (!campaignSaveManager.CanAquireGear())
             {
-                string errorLocalized = LocalizationManager.Instance.GetText("No space for gear");
-                NotificationManager.Instance.ErrorNotification(errorLocalized);
+                NotificationManager.Instance.ErrorNotification(Text("No space for gear"));
                 return;
             }
 
-            for (int i = 0; i < gearCardHordeRewards.Length; i++)
-            {
-                gearCardHordeRewards[i].OnGearCardSelected -= SelectGearReward;
-                gearCardHordeRewards[i].NotifyOfSelection(gearID);
-            }
-
-            if (_consumableCardReward != null)
-            {
-                _consumableCardReward.OnConsumableCardSelected -= SelectConsumableReward;
-                _consumableCardReward.DarkenCard();
-            }
-
+            rewardPicked = true;
             campaignSaveManager.AquireGear(gearID);
-            skipGearButton.gameObject.SetActive(false);
-            CloseGearPanel();
+            ShowPicked(chosen);
         }
-        private void SelectConsumableReward(ConsumableEnum consumableEnum)
+        private void SelectConsumableReward(ConsumableEnum consumableEnum, ChoiceCardView chosen)
         {
+            if (rewardPicked) return;
             if (!campaignSaveManager.HasRoomForConsumable())
             {
-                string errorLocalized = LocalizationManager.Instance.GetText("NoRoomForConsumable");
-                NotificationManager.Instance.ErrorNotification(errorLocalized);
+                NotificationManager.Instance.ErrorNotification(Text("NoRoomForConsumable"));
                 return;
             }
 
-            for (int i = 0; i < gearCardHordeRewards.Length; i++)
-            {
-                gearCardHordeRewards[i].OnGearCardSelected -= SelectGearReward;
-                gearCardHordeRewards[i].DarkenCard();
-            }
-
-            _consumableCardReward.OnConsumableCardSelected -= SelectConsumableReward;
-            _consumableCardReward.PlayPurchaseFeedbacks();
-
+            rewardPicked = true;
             campaignSaveManager.AquireConsumable(consumableEnum);
+            ShowPicked(chosen);
+        }
+        // Saved already; the others pop away, the chosen card turns gold and holds, then the panel fades.
+        private async void ShowPicked(ChoiceCardView chosen)
+        {
             skipGearButton.gameObject.SetActive(false);
+            bool firstPop = true;
+            foreach (ChoiceCardView card in view.Cards)
+            {
+                if (card == chosen) continue;
+                card.PopAway(firstPop);
+                firstPop = false;
+            }
+            if (view.WideCard != null && view.WideCard != chosen) view.WideCard.PopAway(firstPop);
+            chosen.ShowPicked();
+            await Task.Delay(PickedHoldMs);
+            if (this == null) return;
             CloseGearPanel();
         }
         private async void CloseGearPanel()
         {
             gearRewardCanvasGroup.FadeOutAsync(0.25f);
             await Task.Delay(250);
+            if (this == null) return;
             Continue();
         }
         public void LoadTreasurePanelFromShop(GearID _gearItemEnum)
@@ -329,28 +353,7 @@ namespace TJ.Treasure
         }
         private void ResetCards()
         {
-            for (int i = 0; i < gearCardHordeRewards.Length; i++)
-            {
-                if (gearCardHordeRewards[i] != null)
-                {
-                    gearCardHordeRewards[i].OnGearCardSelected -= SelectGearReward;
-                    Destroy(gearCardHordeRewards[i].gameObject);
-                    gearCardHordeRewards[i] = null;
-                }
-            }
-
-            if (_separator != null)
-            {
-                Destroy(_separator);
-                _separator = null;
-            }
-
-            if (_consumableCardReward != null)
-            {
-                _consumableCardReward.OnConsumableCardSelected -= SelectConsumableReward;
-                Destroy(_consumableCardReward.gameObject);
-                _consumableCardReward = null;
-            }
+            view.Clear();
         }
         public override void ClosePanel()
         {

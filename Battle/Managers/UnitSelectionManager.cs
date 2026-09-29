@@ -32,6 +32,12 @@ public class UnitSelectionManager : MonoBehaviour
     private int squadToAttack = 0;
     private bool unitsAreSelected;
     private bool EnemySquadsSelected => selectedSquadIds.Count > 0 && selectedSquadIds.All(id => id < 0);
+    /// <summary>Custom battle lets the player place enemy squads only while deploying with the Enemy side toggled on.</summary>
+    public bool CanRepositionEnemySquads =>
+        BattleManager.Instance.BattleSaveManager.IsCustomBattle &&
+        BattleManager.Instance.GamePhase == GamePhase.Deployment &&
+        BattleManager.Instance.SelectedTeam == Team.Enemy;
+    private bool CanCommandSelectedSquads => !EnemySquadsSelected || CanRepositionEnemySquads;
     private bool IsHoveringEnemySquad => previousHoveredSquad < 0;
     private int _lastSelectSFXFrame = -1;
     private float timer = 0;
@@ -121,7 +127,7 @@ public class UnitSelectionManager : MonoBehaviour
         }
 
         // A tapped Alt with nothing to reposition would block box-select until tapped again.
-        if (InputHandler.Instance.RepositioningSelectedUnits && (!unitsAreSelected || EnemySquadsSelected))
+        if (InputHandler.Instance.RepositioningSelectedUnits && (!unitsAreSelected || !CanCommandSelectedSquads))
             InputHandler.Instance.ReleaseRepositionTap();
 
         if (battleInputManager.RepositioningSelectedUnits)
@@ -204,15 +210,16 @@ public class UnitSelectionManager : MonoBehaviour
     private void HandleSelectedUnits()
     {
         if (!unitsAreSelected) return;
-        if (EnemySquadsSelected) return;
+        if (!CanCommandSelectedSquads) return;
 
         Team team = EnemySquadsSelected ? Team.Enemy : Team.Player;
 
         //check if all selected units are outriders
 
         // Hero rules (built-in or modded) can grant Outrider, so read them instead of a hero id check.
+        // Custom battle enemies spawn on their base attributes only, so no hero id for them.
         bool outrider = true;
-        int activeHeroID = HeroBonusManager.Instance.ActiveHeroID;
+        int activeHeroID = team == Team.Player ? HeroBonusManager.Instance.ActiveHeroID : -1;
         foreach (UnitName squadUnitName in SelectedSquadUnitNames)
         {
             if (!HeroBonusManager.UnitHasAttribute(squadUnitName, activeHeroID, UnitAttribute.Outrider))
@@ -284,7 +291,7 @@ public class UnitSelectionManager : MonoBehaviour
                     // Debug.Log($"Minimum distance from initial click not hit, holding previous rotation");
                     HoldPreviousRotation();
                     positionDrawer.Formation.GeneratePointPositions();
-                    positionDrawer.MovePositionToMouse(GetMousePositionOffsetByFormationCenter());
+                    positionDrawer.MovePositionToMouse(GetMousePositionOffsetByFormationCenter(!EnemySquadsSelected));
                     // Debug.Log($"Moving position to mouse: {GetMousePositionOffsetByFormationCenter()}");
                 }
             }
@@ -311,7 +318,7 @@ public class UnitSelectionManager : MonoBehaviour
     private void HandleRotateFormation()
     {
         RefreshSelectedUnitCounts();
-        battleInputManager.SetAngle(-90f);
+        battleInputManager.SetAngle(DefaultFacingAngle);
         positionDrawer.SetLookRotation(Quaternion.Euler(0, battleInputManager.Angle, 0));
 
         BattleManager.Instance.SetCursorMode(CursorMode.MouseDown);
@@ -447,6 +454,9 @@ public class UnitSelectionManager : MonoBehaviour
         int clickedIndex = trueOrder.IndexOf(_squadId);
         if (clickedIndex < 0) return;
 
+        // A range runs over player squads only, so an inspected enemy squad drops out instead of joining it.
+        selectedSquadIds.RemoveAll(id => id < 0);
+
         int minIndex = int.MaxValue;
         int maxIndex = int.MinValue;
         foreach (int id in selectedSquadIds)
@@ -497,6 +507,12 @@ public class UnitSelectionManager : MonoBehaviour
     {
         if (battleInputManager.AddingToSelectedUnits)
         {
+            // Never mix sides: the move preview has no points for the other side's squads.
+            if (_selectedSquadIds.Count > 0)
+            {
+                bool addingEnemies = _selectedSquadIds[0] < 0;
+                selectedSquadIds.RemoveAll(id => (id < 0) != addingEnemies);
+            }
             for (int i = 0; i < _selectedSquadIds.Count; i++)
             {
                 if (!selectedSquadIds.Contains(_selectedSquadIds[i]))
@@ -668,9 +684,11 @@ public class UnitSelectionManager : MonoBehaviour
     }
     private void HoldPreviousRotation()
     {
-        battleInputManager.SetAngle(-90f);// Default angle if no rotation is applied
+        battleInputManager.SetAngle(DefaultFacingAngle);// Default angle if no rotation is applied
         positionDrawer.PositionsParent.rotation = Quaternion.Euler(0, battleInputManager.Angle, 0);
     }
+    // Enemy squads face the player's side of the field, the same as their spawn preview.
+    private float DefaultFacingAngle => EnemySquadsSelected ? 90f : -90f;
     private void GetSelectedUnitsCount(Dictionary<int, float3> SEwidthAndDepth, Dictionary<int, UnitType> SEunitTypes, bool silent = false)
     {
         // Debug.Log($"GetSelectedUnitsCount");
@@ -1121,6 +1139,15 @@ public class UnitSelectionManager : MonoBehaviour
                 }
             }
         }
+        // Enemy squads are not in TrueSquadOrder; without this their units never get Selected.
+        if (CanRepositionEnemySquads)
+        {
+            for (int j = 0; j < squadEntities.Length; j++)
+            {
+                if (entityManager.GetComponentData<SquadEntity>(squadEntities[j]).SquadId < 0)
+                    sortedSquadEntities.Add(squadEntities[j]);
+            }
+        }
 
         foreach (var squadEntity in sortedSquadEntities)
         {
@@ -1187,6 +1214,10 @@ public class UnitSelectionManager : MonoBehaviour
             {
                 sortedSEwidthAndDepth[squadId] = widthDepth;
             }
+        }
+        foreach (KeyValuePair<int, float3> kvp in SEwidthAndDepth)
+        {
+            if (kvp.Key < 0) sortedSEwidthAndDepth[kvp.Key] = kvp.Value;
         }
         // Debug.Log($"Selected squads width and depth: {string.Join(", ", sortedSEwidthAndDepth.Select(kvp => $"{kvp.Key}: ({kvp.Value.x}, {kvp.Value.y}, {kvp.Value.z})"))}");
         SEwidthAndDepth = sortedSEwidthAndDepth;

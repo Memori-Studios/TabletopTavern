@@ -147,12 +147,11 @@ public class ShapesDrawingManager : ImmediateModeShapeDrawer
 
         // Before the transparent pass: the squad flags do not write depth, so they must draw after this to sit on top.
         using( Draw.Command( cam, UnityEngine.Rendering.Universal.RenderPassEvent.AfterRenderingSkybox ) ){
-            // The leash shows through units and terrain, as the Attack Arrow prefab does (ZTest Always).
+            // The leash and the spell ring show through units and terrain, as the Attack Arrow prefab does
+            // (ZTest Always): forest shell grass stands taller than _groundOffset and swallowed a depth-tested ring.
             Draw.ZTest = UnityEngine.Rendering.CompareFunction.Always;
             if(_leashAlpha > 0f) DrawLeash();
             if(_ringAlpha <= 0f) return;
-            // Normal depth test: units in front hide the drawing, as a ground decal should.
-            Draw.ZTest = UnityEngine.Rendering.CompareFunction.LessEqual;
             DrawAreaBand();
 
             Color ringColor = _spellRingColor * _spellRingIntensity;

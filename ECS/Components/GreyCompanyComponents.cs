@@ -14,7 +14,7 @@ public struct ArmyLossesTriggeredPlayer : IComponentData { }
 public struct ArmyLossesTriggeredEnemy : IComponentData { }
 public struct ArmyLossesPenaltyTag: IComponentData, IEnableableComponent { }
 
-public struct CampaignSaveDataHolder : IComponentData { public bool IsCustomBattle; public GearIDsSerialized Gear; public int ActiveHeroID; public Race PlayerHeroRace; public Race EnemyRace; public bool OnlySakuraUnits; public int EnemyWarlordHeroID; public Race EnemyWarlordRace; public bool EnemyOnlySakuraUnits; }
+public struct CampaignSaveDataHolder : IComponentData { public bool IsCustomBattle; public GearIDsSerialized Gear; public int ActiveHeroID; public Race PlayerHeroRace; public Race EnemyRace; public bool OnlySakuraUnits; public int EnemyWarlordHeroID; public Race EnemyWarlordRace; public bool EnemyOnlySakuraUnits; public ulong OrdealMask; public int EventLeadershipPlayer; public int EventLeadershipEnemy; }
 public struct MainCamera : IComponentData { }
 public struct NeedsToBeProcessed : IComponentData { public float Delay; }
 
@@ -132,6 +132,10 @@ public struct RemoveChargeBonusTag : IComponentData { }
 /// Added and removed by BattlefieldBonusSystem, so the aura's radius and duration govern its lifetime.
 /// </summary>
 public struct ChargeEmpoweredTag : IComponentData { public float BonusImpact; }
+// A charge that won Rally the Banners' boost; SquadEngageInCombatSystem turns it into a landed event on contact.
+public struct EmpoweredChargeTag : IComponentData { }
+// One-shot event for the squad flag: an empowered charge just made contact.
+public struct EmpoweredChargeLandedTag : IComponentData { }
 public struct StartChargeTag : IComponentData { }
 public struct PreviousSquadCommandComponent : IComponentData { public SquadCommand Command; }
 public struct SquadCommandChangedTag : IComponentData { public SquadCommand OldCommand; public SquadCommand NewCommand; }
@@ -299,6 +303,8 @@ public struct SpellEntity : IComponentData {
     public bool HitsSingleUnit;
     // Spell ordinal to write into SpellStatusBufferElement on each squad hit; 0 = no status icon.
     public int StatusSpellId;
+    // Knockback-only blast (a Bombardment shell): throws the units in its radius but adds no damage.
+    public bool SkipsDamage;
 }
 // public struct UnitHitBySpell : IComponentData { public float3 SpellPosition; public float SpellForce; public float3 InitHitLocation;}
 public struct BattleOver : IComponentData {public bool PlayerWon; }
@@ -319,7 +325,14 @@ public struct BattleOver : IComponentData {public bool PlayerWon; }
 }
 [System.Serializable] public struct SquadDamageBufferElement : IBufferElementData {
     public int SquadId;
+    // Uncapped, as morale reads it. Credited is the same hit capped at the model's remaining health.
     public int DamageAmount;
+    public int Credited;
+}
+// Damage dealt per squad this battle, on a singleton so a squad that dies or withdraws keeps its total.
+[System.Serializable] public struct SquadDamageTotalElement : IBufferElementData {
+    public int SquadId;
+    public int Total;
 }
 
 [InternalBufferCapacity(1)]

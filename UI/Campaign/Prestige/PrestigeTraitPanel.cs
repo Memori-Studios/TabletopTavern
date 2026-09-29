@@ -1,37 +1,43 @@
 using TJ.Map;
 using TJ;
 using UnityEngine;
-using UnityEngine.UI;
 using Memori.Utilities;
 using Memori.Audio;
+using Memori.Localization;
+using Memori.UI;
 using System.Threading.Tasks;
 using System.Collections.Generic;
 using Memori.SaveData;
 using System;
 using MoreMountains.Feedbacks;
+using TJ.Recruit;
 
 namespace TJ.Prestige
 {
     public class PrestigeTraitPanel : MapPanel
     {
-        [SerializeField] private SquadBattleInfo squadBattleInfo;
-        [SerializeField] private Transform traitCardParent;
-        [SerializeField] private PrestigeTraitCard traitCardPrefab;
+        // The squad opens one level down, so the pick shows the step up to Prestige III as a reward.
+        private const int SHOWN_PRESTIGE_BEFORE_PICK = 1;
+        private const int MAX_PRESTIGE = 2;
+
+        [SerializeField] private ChoicePanelView view;
+        [SerializeField] private float pickedHoldSeconds = 0.6f;
+        [SerializeField] private float fadeOutSeconds = 0.25f;
 
         [Header("Unit Prefab")]
         [SerializeField] private Transform prefabHolder;
         [SerializeField] private MMF_Player dropInAnimation;
         [SerializeField] private Camera troopCamera;
         [SerializeField] private GameObject troopLights;
-        [SerializeField] private RawImage troopImage;
 
         MemoriCanvasGroup memoriCanvasGroup;
         CampaignSaveManager campaignSaveManager;
         MapSceneUIManager mapSceneUIManager;
 
-        readonly List<PrestigeTraitCard> traitCards = new();
         SquadToLoad currentSquad;
         Action onResolved;
+        RecruitCard recruitCard;
+        bool picked;
 
         Transform prefabObject;
         RaceBasePrefab baseObject;
@@ -42,7 +48,6 @@ namespace TJ.Prestige
         {
             memoriCanvasGroup = GetComponent<MemoriCanvasGroup>();
             memoriCanvasGroup.CGDisable();
-            squadBattleInfo.gameObject.SetActive(false);
         }
         public void SetUp(CampaignSaveManager _campaignSaveManager, MapSceneUIManager _mapSceneUIManager)
         {
@@ -53,38 +58,57 @@ namespace TJ.Prestige
         {
             currentSquad = squad;
             onResolved = _onResolved;
+            picked = false;
 
-            squadBattleInfo.gameObject.SetActive(true);
-            SquadToLoad displaySquad = new(squad.UnitName, 1);
-            squadBattleInfo.SetUpCampaign(displaySquad, Team.Player);
+            view.Clear();
+            string title = string.Format(LocalizationManager.Instance.GetText("prestigePickTitle"), MemoriUI.ConvertNumberToRomanNumeral(MAX_PRESTIGE + 1));
+            view.SetTitle(title, LocalizationManager.Instance.GetText("PrestigeDes"));
+
+            recruitCard = view.ShowRecruitCard();
+            recruitCard.SetUpDisplay(squad, troopCamera.targetTexture, SHOWN_PRESTIGE_BEFORE_PICK, UnitAttribute.None);
             LoadUnitPrefabAsync(squad.UnitName);
 
-            ClearCards();
+            string footer = LocalizationManager.Instance.GetText("choiceClickToLearn");
+            string done = LocalizationManager.Instance.GetText("choiceLearned");
             foreach (UnitAttribute trait in eligibleTraits)
             {
-                PrestigeTraitCard card = Instantiate(traitCardPrefab, traitCardParent);
-                card.LoadTraitCard(trait);
-                card.OnTraitCardSelected += SelectTrait;
-                traitCards.Add(card);
+                ChoiceCardView card = view.AddCard();
+                card.Load(PrestigeTraitIcons.Get(trait), LocalizationManager.Instance.GetText(trait.ToString()), null, Color.clear,
+                    LocalizationManager.Instance.GetText(trait.ToString() + "Desc"), footer, done);
+                UnitAttribute chosenTrait = trait;
+                card.Chosen += chosen => SelectTrait(chosenTrait, chosen);
             }
+            view.WireNavigation();
 
             memoriCanvasGroup.CGEnable();
-            OpenFeedback.PlayFeedbacks();
+            if (OpenFeedback != null) OpenFeedback.PlayFeedbacks();
+            view.PlayOpen();
             IAudioRequester.Instance.PlaySFX(SFXData.OpenUI);
+            view.FocusFirstCard();
         }
-        private async void SelectTrait(UnitAttribute trait)
+        private async void SelectTrait(UnitAttribute trait, ChoiceCardView chosen)
         {
-            foreach (PrestigeTraitCard card in traitCards)
+            if (picked) return;
+            picked = true;
+
+            bool firstPop = true;
+            foreach (ChoiceCardView card in view.Cards)
             {
-                card.OnTraitCardSelected -= SelectTrait;
-                card.NotifyOfSelection(trait);
+                if (card == chosen) continue;
+                card.PopAway(firstPop);
+                firstPop = false;
             }
+            chosen.ShowPicked();
 
             campaignSaveManager.ResolvePrestigeTraitChoice(currentSquad.UniqueID, trait);
             IAudioRequester.Instance.PlaySFX(SFXData.PrestigeUnit);
+            if (recruitCard != null) recruitCard.ShowPrestige(MAX_PRESTIGE, trait);
 
-            memoriCanvasGroup.FadeOutAsync(0.25f);
-            await Task.Delay(250);
+            await Task.Delay(Mathf.RoundToInt(pickedHoldSeconds * 1000f));
+            if (this == null) return;
+            memoriCanvasGroup.FadeOutAsync(fadeOutSeconds);
+            await Task.Delay(Mathf.RoundToInt(fadeOutSeconds * 1000f));
+            if (this == null) return;
 
             Action resolved = onResolved;
             ClosePanel();
@@ -93,16 +117,10 @@ namespace TJ.Prestige
         public override void ClosePanel()
         {
             memoriCanvasGroup.CGDisable();
-            CloseFeedback();
-            squadBattleInfo.gameObject.SetActive(false);
+            if (OpenFeedback != null) CloseFeedback();
             HideUnitPrefab();
-            ClearCards();
-        }
-        private void ClearCards()
-        {
-            foreach (PrestigeTraitCard card in traitCards)
-                if (card != null) Destroy(card.gameObject);
-            traitCards.Clear();
+            view.Clear();
+            recruitCard = null;
         }
 
         private async void LoadUnitPrefabAsync(UnitName unitName)
@@ -144,7 +162,6 @@ namespace TJ.Prestige
             prefabObject.SetParent(baseObject.transform);
 
             troopCamera.enabled = true;
-            troopImage.enabled = true;
             troopLights.SetActive(true);
         }
         private void ClearUnitPrefab()
@@ -157,12 +174,14 @@ namespace TJ.Prestige
         }
         private void HideUnitPrefab()
         {
+            hoverCts?.Cancel();
             if (prefabObject != null)
                 Destroy(prefabObject.gameObject);
+            if (baseObject != null)
+                Destroy(baseObject.gameObject);
             ReleaseRecruitmentPrefab();
             troopCamera.enabled = false;
             troopLights.SetActive(false);
-            troopImage.enabled = false;
         }
         private void ReleaseRecruitmentPrefab()
         {

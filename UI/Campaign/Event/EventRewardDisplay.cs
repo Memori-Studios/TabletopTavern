@@ -45,7 +45,32 @@ public class EventRewardDisplay : MonoBehaviour
                 eventRewardText.text = isPositive ? "+" : "";
                 eventRewardText.text += (eventRewardOutcome.Value*100).ToString() + "% ";
                 eventRewardText.text += localizedEventOutcomeModifier;
-            } else {
+
+                if (CampaignManager.Instance.CampaignSaveManager.IsEventHealthLossBlocked(eventRewardOutcome.Value))
+                {
+                    string blockingGear = LocalizationManager.Instance.GetText(GearID.MichaelsSecretStuff + "Name");
+                    eventRewardText.text = $"<s>{eventRewardText.text}</s> ({blockingGear})";
+                }
+            }
+            else if(eventRewardOutcome.EventOutcomeModifierEnum is EventOutcomeModifierEnum.LoseGear or EventOutcomeModifierEnum.LoseSquad or EventOutcomeModifierEnum.LosePrestige)
+            {
+                eventOutcomeImage.sprite = SpriteData.GetSprite(eventRewardOutcome.EventOutcomeModifierEnum.ToString());
+                eventOutcomeImage.color = ColorData.GetEventOutcomeColor("NegativeReputation");
+                eventRewardText.text = $"{localizedEventOutcomeModifier}: {_extraInfo}";
+            }
+            else if(eventRewardOutcome.EventOutcomeModifierEnum is EventOutcomeModifierEnum.NextBattleLeadership or EventOutcomeModifierEnum.NextBattleEnemyLeadership or EventOutcomeModifierEnum.NextBattleMana)
+            {
+                eventOutcomeImage.sprite = SpriteData.GetSprite(eventRewardOutcome.EventOutcomeModifierEnum.ToString());
+                eventOutcomeImage.color = ColorData.GetEventOutcomeColor(eventRewardOutcome.EventOutcomeModifierEnum.ToString());
+                eventRewardText.text = $"{(eventRewardOutcome.Value > 0 ? "+" : "")}{eventRewardOutcome.Value} {localizedEventOutcomeModifier}";
+            }
+            else if(eventRewardOutcome.EventOutcomeModifierEnum == EventOutcomeModifierEnum.NextBattleFixture)
+            {
+                eventOutcomeImage.sprite = SpriteData.GetSprite(eventRewardOutcome.EventOutcomeModifierEnum.ToString());
+                eventOutcomeImage.color = ColorData.GetEventOutcomeColor(eventRewardOutcome.EventOutcomeModifierEnum.ToString());
+                eventRewardText.text = $"{LocalizationManager.Instance.GetText(eventRewardOutcome.Fixture.ToString())} ({localizedEventOutcomeModifier})";
+            }
+            else {
                 eventOutcomeImage.sprite = SpriteData.GetSprite(eventRewardOutcome.EventOutcomeModifierEnum.ToString());
                 eventOutcomeImage.color = ColorData.GetEventOutcomeColor(eventRewardOutcome.EventOutcomeModifierEnum.ToString());
                 eventRewardText.text = eventRewardOutcome.Value != 1 ? eventRewardOutcome.Value.ToString() + " " : " ";

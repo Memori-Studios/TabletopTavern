@@ -241,7 +241,7 @@ namespace TJ.GuideEditor
                         Term(T("Guide_archers_FlankLabel", "Projectiles from behind"), T("Guide_archers_Flank", "They ignore shields. See Flanking.")))),
 
                 Topic("mages", chUnits, T("Guide_mages_Title", "Mages"),
-                    "A mage is a one-model unit that casts its spell at targets in range. It deploys with the back line and walks into range on its own.",
+                    "A mage is a one-model unit that casts its spell at targets in range. It deploys with the back line and walks into range to cast.",
                     "The blue ring is the cast range. Hover a mage to see its spell card.",
                     "Mages.mp4", Cond.PlayerArmyContainsMage, 1, new[] { "spells", "actions" },
                     Block(GuideBlockType.Terms, T("Guide_mages_Casting", "Casting"), false,
@@ -249,7 +249,7 @@ namespace TJ.GuideEditor
                         Term(T("Guide_mages_ChargesLabel", "Charges"), T("Guide_mages_Charges", "Each cast spends one charge from the bar under its flag, and the bar below counts down to the next cast. With no charges left, the mage fights on in melee.")),
                         Term(T("Guide_mages_MeleeLabel", "In melee"), T("Guide_mages_Melee", "A mage does not cast while it is locked in melee."))),
                     Block(GuideBlockType.Terms, T("Guide_mages_Orders", "Your orders"), false,
-                        Term("MageFreeCastTitle", T("Guide_mages_Free", "On by default: the mage picks its own targets. Off: it casts only when you tell it to."), "@ToggleAutoRetarget"),
+                        Term("MageFreeCastTitle", T("Guide_mages_Free", "Off: the mage casts only when you tell it to. On: it picks its own targets. Mages start with it off unless you change it in Settings."), "@ToggleAutoRetarget"),
                         Term(T("Guide_mages_AimLabel", "Aim a cast"), T("Guide_mages_Aim", "Select the mage and click its spell tile above the card, or hold the key and press its number. Then click the target. It walks into range if it must."), "@SpellMenu + 4 - 0"),
                         Term("MageHoldSpellsTitle", T("Guide_mages_Hold", "The mage stops casting until you give an order. It keeps its charges."), "@CeaseFireCommand"))),
 
