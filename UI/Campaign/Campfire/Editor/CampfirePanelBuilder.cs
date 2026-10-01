@@ -665,6 +665,7 @@ namespace TJ.Campfire.EditorTools
             BuildChoosing(root, so);
             BuildTrain(root, so);
             BuildResult(root, so);
+            Dress(root, "Mount", new Vector2(130f, 130f));
 
             Ref(so, "restIcon", healIcon);
             Ref(so, "trainIcon", prestigeIcon);
@@ -673,6 +674,59 @@ namespace TJ.Campfire.EditorTools
             Ref(so, "slotPrefab", slotPart.GetComponent<CampfireTrainSlot>());
             so.ApplyModifiedPropertiesWithoutUndo();
         }
+
+        #region Synty dressing
+        // ui-design.md, Art richness: the shared crest on the panel's top edge, the shared divider in each column split,
+        // and one pulsing glow behind the focal element. Runs after Build and finds its targets by name.
+        const string CrestPath = "Assets/Data/Prefabs/UI/Reuseable/Ornaments/Panel Crest.prefab";
+        const string DividerPath = "Assets/Data/Prefabs/UI/Reuseable/Ornaments/Column Divider.prefab";
+        const string SyntyGlow = "Assets/Synty/InterfaceFantasyMenus/Sprites/FX/SPR_FantasyMenus_FX_Glow_01.png";
+
+        static void Dress(RectTransform panel, string focalName, Vector2 glowSize)
+        {
+            GameObject crest = AssetDatabase.LoadAssetAtPath<GameObject>(CrestPath);
+            GameObject divider = AssetDatabase.LoadAssetAtPath<GameObject>(DividerPath);
+            Sprite glow = AssetDatabase.LoadAssetAtPath<Sprite>(SyntyGlow);
+            if (crest == null || divider == null || glow == null) { Debug.LogError("Synty dressing assets missing."); return; }
+
+            PrefabUtility.InstantiatePrefab(crest, panel);
+
+            // Column splits are one-unit-wide "Divider" cells; the shared divider replaces their plain "Line".
+            var cells = new List<Transform>();
+            foreach (RectTransform t in panel.GetComponentsInChildren<RectTransform>(true))
+            {
+                if (t.name != "Divider" || t.Find("Line") == null) continue;
+                LayoutElement cell = t.GetComponent<LayoutElement>();
+                if (cell != null && cell.preferredWidth > 0f && cell.preferredWidth <= 2f) cells.Add(t);
+            }
+            foreach (Transform cell in cells)
+            {
+                Object.DestroyImmediate(cell.Find("Line").gameObject);
+                PrefabUtility.InstantiatePrefab(divider, cell);
+            }
+
+            Transform focal = null;
+            foreach (Transform t in panel.GetComponentsInChildren<Transform>(true))
+            {
+                if (t.name != focalName) continue;
+                if (focalName == "Mount" && (t.parent == null || t.parent.name != "Header")) continue;
+                focal = t;
+                break;
+            }
+            if (focal == null) { Debug.LogWarning("Synty dressing: no focal '" + focalName + "' under " + panel.name); return; }
+            Image glowImage = Img(Rect("Focal Glow", focal), glow, new Color(0.914f, 0.753f, 0.416f, 0.32f));
+            Ignore(glowImage.gameObject);
+            glowImage.transform.SetAsFirstSibling();
+            RectTransform gr = glowImage.rectTransform;
+            gr.anchorMin = gr.anchorMax = new Vector2(0.5f, 0.5f);
+            gr.pivot = new Vector2(0.5f, 0.5f);
+            gr.sizeDelta = glowSize;
+            gr.anchoredPosition = Vector2.zero;
+            System.Type idle = System.Type.GetType("Memori.UI.UIIdleGlow, Memori.UI");
+            if (idle != null) glowImage.gameObject.AddComponent(idle);
+            else Debug.LogError("Synty dressing: Memori.UI.UIIdleGlow not found.");
+        }
+        #endregion
 
         static void BuildHeader(RectTransform root, SerializedObject so)
         {

@@ -186,6 +186,7 @@ namespace TJ.Shop
                     else shopConsumables[slot - 5].MarkSoldOut();
                 }
                 outlines = GetComponentsInChildren<Outline>();
+                TabletopTavern.Analytics.NodeLog.Try("shop offer", LogShopOffer);
             }
 
             IAudioRequester.Instance.PlaySFX(SFXData.OpenUI);
@@ -365,6 +366,8 @@ namespace TJ.Shop
         }
         public void PurchasePack(CardPackData _cardPackData, int _cost)
         {
+            TabletopTavern.Analytics.NodeLog.Try("shop buy", () => TabletopTavern.Analytics.NodeLog.Add("buys",
+                new Dictionary<string, object> { { "k", "pack" }, { "id", _cardPackData.packID.ToString() }, { "price", _cost } }));
             string localizedString = LocalizationManager.Instance.GetText("Shop");
             CampaignManager.Instance.GoldManager.ModifyGold(-_cost, localizedString);
             IAudioRequester.Instance.PlaySFX(SFXData.Purchase);
@@ -399,6 +402,16 @@ namespace TJ.Shop
                 gearPacksPurchased++;
                 gearPack.RefreshPrice();
             }
+        }
+        // Every item on the shelf with the price it showed, so skipped items count as well as bought ones.
+        private void LogShopOffer()
+        {
+            foreach (CardPack pack in new[] { gearPack, cardPack1, cardPack2, cardPack3, cardPack4 })
+                TabletopTavern.Analytics.NodeLog.Add("offer", new Dictionary<string, object>
+                    { { "k", "pack" }, { "id", pack.PackId.ToString() }, { "price", pack.Cost }, { "out", pack.SoldOut } });
+            foreach (ShopConsumable consumable in shopConsumables)
+                TabletopTavern.Analytics.NodeLog.Add("offer", new Dictionary<string, object>
+                    { { "k", "cons" }, { "id", consumable.ConsumableType.ToString() }, { "price", consumable.Price }, { "out", consumable.SoldOut } });
         }
         public void ConsumablePurchased()
         {

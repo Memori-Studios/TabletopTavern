@@ -45,6 +45,7 @@ namespace TJ.Spells
             // render nothing at all.
             Spell.LesserMending,
             Spell.LesserEmbers,
+            Spell.RallyTheBanners,
         };
 
         #region Renown upgrades

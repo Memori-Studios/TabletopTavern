@@ -26,6 +26,9 @@ namespace TJ.Shop
         ShopPanel shopPanel;
         int cost, _discount;
         bool soldOut;
+        public int PackId => cardPackData.packID;
+        public int Cost => cost;
+        public bool SoldOut => soldOut;
         public void SetUp(CardPackData _cardPackData, ShopPanel _shopPanel, int discount)
         {
             IAudioRequester.Instance.PlaySFX(SFXData.ShopItem);

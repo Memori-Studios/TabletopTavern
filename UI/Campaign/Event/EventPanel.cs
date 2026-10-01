@@ -89,6 +89,9 @@ namespace TJ.Event
         int rollBonus = 0;
         int roll = 0;
         int selectedChoiceIndex;
+        // For the node log: dice thrown this event (a reroll adds one) and whether a Fateshine Elixir set the roll.
+        int rollsThisEvent;
+        bool fateshineUsed;
         // A d20 locked before a quit; RollDice shows it instead of drawing a new one.
         int resumeRoll = 0;
         bool eventRolled = false;
@@ -182,6 +185,8 @@ namespace TJ.Event
                 ? System.Array.Find(gc_Events, x => x.TableKey == resume.eventKey)
                 : null;
             gc_Event = resumeEvent != null ? resumeEvent : GetRandomEvent();
+            rollsThisEvent = 0;
+            fateshineUsed = false;
             string chapterLocalized = LocalizationManager.Instance.GetText("Chapter");
             chapterNumberText.text = $"{chapterLocalized} {MemoriUI.ConvertNumberToRomanNumeral(_chapter + 1)}";
 
@@ -288,6 +293,7 @@ namespace TJ.Event
 
             await Task.Delay(500);
             campaignSaveManager.RecordEventOutcome(EventData.HistoryEntry(gc_Event, _index, eventRollOutcome));
+            TabletopTavern.Analytics.NodeLog.Try("event", () => LogEventOutcome(_index, eventReward));
             campaignSaveManager.AddEventReward(eventReward);
             eventRewardsDisplay.LoadEventRewards(eventReward);
         }
@@ -303,6 +309,7 @@ namespace TJ.Event
             eventDescriptionText.text = "";
 
             rollBonus = 0;
+            rollsThisEvent++;
             if (resumeRoll > 0)
             {
                 roll = resumeRoll;
@@ -314,6 +321,7 @@ namespace TJ.Event
                 roll = random.Next(1, 21);
                 if (campaignSaveManager.FateshineElixirArmed)
                 {
+                    fateshineUsed = true;
                     roll = 20;
                     campaignSaveManager.ConsumeFateshineElixir();
                 }
@@ -497,6 +505,29 @@ namespace TJ.Event
                 _eventSceneInstance = null;
                 AddressablesManager.Instance.Release(_eventScenePrefab.AssetGUID);
             }
+        }
+        // The choice, the roll against what it needed, and the reward, so each event's odds and payouts can be read.
+        private void LogEventOutcome(int _index, EventReward _reward)
+        {
+            bool rolled = selectedChoice.Kind == EventChoiceKind.Roll;
+            var rewards = new List<Dictionary<string, object>>();
+            List<EventOutcomeModifier> modifiers = _reward.EventOutcome.EventOutcomeModifiers;
+            if (modifiers != null)
+                foreach (EventOutcomeModifier modifier in modifiers)
+                    rewards.Add(new Dictionary<string, object> { { "k", modifier.EventOutcomeModifierEnum.ToString() }, { "v", (double)modifier.Value } });
+            TabletopTavern.Analytics.NodeLog.Set("event", new Dictionary<string, object>
+            {
+                { "key", gc_Event.TableKey },
+                { "choice", _index },
+                { "kind", selectedChoice.Kind.ToString() },
+                { "needed", rolled ? (object)selectedChoice.minimumRollNeeded : null },
+                { "roll", rolled ? (object)roll : null },
+                { "bonus", rolled ? (object)rollBonus : null },
+                { "rolls", rollsThisEvent },
+                { "fateshine", fateshineUsed },
+                { "outcome", eventRollOutcome.ToString() },
+                { "rewards", rewards },
+            });
         }
         public void CompleteEvent()
         {

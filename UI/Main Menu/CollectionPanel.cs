@@ -11,6 +11,7 @@ using UnityEngine;
 using UnityEngine.EventSystems;
 using UnityEngine.InputSystem;
 using UnityEngine.UI;
+using Memori.UI;
 
 namespace TJ.MainMenu
 {
@@ -166,6 +167,9 @@ namespace TJ.MainMenu
             records.SetUp();
             BuildRail();
             WireTabs();
+            AddHoverMotion();
+            // Keys and a controller stay inside the codex instead of wandering onto the menu behind the overlay.
+            ContainedNavigation.Attach(gameObject);
             Localize();
             detail.Localize();
             RefreshCounts();
@@ -176,6 +180,7 @@ namespace TJ.MainMenu
         public void OpenPanel()
         {
             _canvasGroup.CGEnable();
+            RestartPanelFade(UIJuice.Open(_canvasGroup.GetComponent<CanvasGroup>()));
             // Selection stays empty: automatic UI navigation would wander onto the menu behind the overlay.
             if (EventSystem.current != null) EventSystem.current.SetSelectedGameObject(null);
             ShowGear();
@@ -184,10 +189,41 @@ namespace TJ.MainMenu
         public void ClosePanel()
         {
             if (EventSystem.current != null) EventSystem.current.SetSelectedGameObject(null);
-            _canvasGroup.CGDisable();
+            // Clicks stop at once; the scene manager waits UIJuice.CloseTime for the fade before unloading.
+            _canvasGroup.interactable = false;
+            _canvasGroup.blocksRaycasts = false;
+            RestartPanelFade(CloseRoutine());
             StopPending();
             records.Hide();
             if (_rig != null) _rig.Clear();
+        }
+
+        private Coroutine _panelFade;
+
+        private void RestartPanelFade(IEnumerator routine)
+        {
+            if (_panelFade != null) StopCoroutine(_panelFade);
+            _panelFade = StartCoroutine(routine);
+        }
+
+        private IEnumerator CloseRoutine()
+        {
+            yield return UIJuice.Close(_canvasGroup.GetComponent<CanvasGroup>());
+            _canvasGroup.CGDisable();
+        }
+
+        // Tabs, filters and the Close button carry a hover sound but no motion; plain buttons without their own
+        // hover code get the shared bloom.
+        private void AddHoverMotion()
+        {
+            foreach (Button b in GetComponentsInChildren<Button>(true))
+            {
+                if (b.GetComponent<UIHoverSFX>() == null || b.GetComponent<MemoriButtonV2>() != null) continue;
+                bool ownHover = false;
+                foreach (MonoBehaviour mb in b.GetComponents<MonoBehaviour>())
+                    if (mb is IPointerEnterHandler && !(mb is Selectable) && !(mb is UIHoverSFX)) ownHover = true;
+                if (!ownHover) UIHoverBloom.Attach(b.gameObject);
+            }
         }
 
         /// <summary>
@@ -643,7 +679,9 @@ namespace TJ.MainMenu
                     if (_faction == null || _tab != FactionTab.Units) return;
                     UnitName unit = _faction.Units[index];
                     bool found = _unitFound.Contains(unit);
-                    detail.ShowUnit(unit, _faction.Race, found);
+                    // A hovered unit is measured against the kept one, Total War style.
+                    int kept = PinnedIndex();
+                    detail.ShowUnit(unit, _faction.Race, found, index != kept ? (UnitName?)_faction.Units[kept] : null);
                     if (loadModel) _rig.ShowUnit(unit, _faction.Race, found);
                     if (found && _unitSeen.Add(unit))
                     {

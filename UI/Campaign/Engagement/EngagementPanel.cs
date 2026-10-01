@@ -76,23 +76,13 @@ namespace TJ.Engagement
         #endregion
 
         #region Report
-        private struct SquadReport
-        {
-            public UnitName Unit;
-            public int Damage;
-            public int Kills;
-            public int Lost;
-        }
         // Copied when the result shows: a lost run erases the save before the player can hover Detailed stats.
-        private readonly List<SquadReport> squadReports = new();
+        private readonly List<DamageReportRow> squadReports = new();
         // The other side of the same battle; Kills or Lost of -1 means the save did not keep it.
-        private readonly List<SquadReport> enemyReports = new();
+        private readonly List<DamageReportRow> enemyReports = new();
         private string reportSubtitle;
         private int reportSlain, reportTroopsLost, reportSquadsLost, reportEnemyDestroyed, reportEnemyTotal;
         private Race reportHeroRace;
-        // One table is 600 wide; the enemy's sits beside it with a 24 gap.
-        private const float DamageTooltipWidth = 600f;
-        private const float DamageTooltipBothWidth = 1224f;
         // Army slots 0 to 9 fight; 10 and up are reserves.
         private const int DeployedSlots = 10;
         #endregion
@@ -258,7 +248,8 @@ namespace TJ.Engagement
                         DifficultyRules.EnemyPrestigeEligible(difficulty),
                         OrdealRegistry.EnemyPrestigeEnhanced(campaignSaveManager.SaveData),
                         campaignSaveManager.SaveData.HasOrdeal(OrdealId.EliteGuard),
-                        OrdealRegistry.DoubleEnemyPrestigeChance(campaignSaveManager.SaveData)
+                        OrdealRegistry.DoubleEnemyPrestigeChance(campaignSaveManager.SaveData),
+                        DifficultyRules.SpellsExtraSquad(difficulty)
                     );
 
                     if (CampaignManager.Instance.GearManager.CheckForGear(GearID.BearSpray))
@@ -423,10 +414,12 @@ namespace TJ.Engagement
             }
         }
         // Companion check to the stall handling above, for the case where the run *did* complete but the
-        // results came up invisible. Alpha 0 with the results still up is never a legitimate state.
+        // results came up invisible. Alpha 0 with the results still up is only legitimate while a picker is open.
         private void VerifyEngagementResultVisible()
         {
             if (!_showedEngagementResult) return;
+            // The recruit and conscript pickers hide the card on purpose while they are open.
+            if (openPicker != Picker.None) return;
             if (engagementPanelCanvasGroup.alpha > 0f) return;
 
             Debug.LogError("[EngagementPanel] Engagement result is on screen but the panel is at alpha 0 - forcing it visible so the player isn't stranded.");
@@ -675,6 +668,14 @@ namespace TJ.Engagement
             if (engagementType == EngagementType.Horde)
                 recruitsRarity = campaignSaveManager.SaveData.bookNumber == 1 ? UnitRarity.Uncommon : UnitRarity.Rare;
 
+            TabletopTavern.Analytics.NodeLog.Try("battle rewards", () => TabletopTavern.Analytics.NodeLog.Set("rw", new Dictionary<string, object>
+            {
+                { "bounty", goldRewardAmount },
+                { "ransom", ransomAmount },
+                { "cons", generateConsumable ? consumableEnum.ToString() : null },
+                { "recRar", recruitsRarity.ToString() },
+            }));
+
             conscriptedUnitNames = null;
             if (campaignSaveManager.SaveData.enemyArmy == null || campaignSaveManager.SaveData.enemyArmy.Length == 0) return;
             //get 3 random units from enemy army
@@ -872,7 +873,7 @@ namespace TJ.Engagement
                 string id = squad.UniqueID;
                 bool fought = damage.ContainsKey(id) || kills.ContainsKey(id) || losses.ContainsKey(id);
                 if (!fought) continue;
-                var report = new SquadReport
+                var report = new DamageReportRow
                 {
                     Unit = squad.UnitName,
                     Damage = damage.TryGetValue(id, out int d) ? d : 0,
@@ -900,7 +901,7 @@ namespace TJ.Engagement
                 {
                     string id = squad.UniqueID;
                     if (string.IsNullOrEmpty(id)) continue;
-                    var report = new SquadReport
+                    var report = new DamageReportRow
                     {
                         Unit = squad.UnitName,
                         Damage = damage.TryGetValue(id, out int d) ? d : 0,
@@ -931,61 +932,8 @@ namespace TJ.Engagement
         }
         private static string Warn(string text, bool warn, string colour) => warn ? $"<color={colour}>{text}</color>" : text;
 
-        private TooltipContent BuildDamageTooltip()
-        {
-            bool bothSides = enemyReports.Count > 0;
-            var content = new TooltipContent
-            {
-                Title = Text("engagementDamageTitle"),
-                Subtitle = bothSides ? reportSubtitle : Text("engagementDamageSub"),
-                Icon = view.DamageIcon,
-                IconColor = ParseColour("#E9C06A"),
-                Accent = ColorData.GetRaceDisplayColor(reportHeroRace),
-                Detail = Text("engagementDamageFooter"),
-                Width = bothSides ? DamageTooltipBothWidth : DamageTooltipWidth,
-                RowCaptions = new[] { Text(bothSides ? "engagementYourArmy" : "engagementColSquad"), Text("engagementDamageTitle"), Text("engagementColKills"), Text("engagementColLost") },
-                SideRowCaptions = new[] { Text("engagementEnemyHost"), Text("engagementDamageTitle"), Text("engagementColKills"), Text("engagementColLost") },
-            };
-            int total = 0, top = 1;
-            foreach (SquadReport report in squadReports)
-            {
-                total += report.Damage;
-                top = Mathf.Max(top, report.Damage);
-            }
-            // One scale for both armies, so the bars compare across the two tables.
-            foreach (SquadReport report in enemyReports) top = Mathf.Max(top, report.Damage);
-            content.Stats.Add(new TooltipStat { Value = total.ToString("N0"), Label = Text("engagementTotalDamage"), IconColor = Color.white });
-            content.Stats.Add(new TooltipStat { Value = reportSlain.ToString("N0"), Label = Text("engagementCellSlain"), IconColor = Color.white });
-            content.Stats.Add(new TooltipStat { Value = reportTroopsLost.ToString("N0"), Label = Text("engagementTroopsLost"), Warn = reportTroopsLost > 0, IconColor = Color.white });
-            content.Stats.Add(new TooltipStat { Value = reportSquadsLost == 0 ? Text("engagementNone") : reportSquadsLost.ToString(), Label = Text("engagementCellSquadsLost"), Warn = reportSquadsLost > 0, IconColor = Color.white });
-
-            string negative = ColorData.Negative;
-            foreach (SquadReport report in squadReports)
-            {
-                content.Rows.Add(new TooltipRow
-                {
-                    Icon = TabletopTavernData.Instance.GetUnitIcon(report.Unit),
-                    Label = Text(report.Unit.ToString()),
-                    Bar = (float)report.Damage / top,
-                    Value = report.Damage.ToString("N0"),
-                    ColumnA = report.Kills.ToString(),
-                    ColumnB = report.Lost > 0 ? $"<color={negative}>-{report.Lost}</color>" : "0",
-                });
-            }
-            foreach (SquadReport report in enemyReports)
-            {
-                content.SideRows.Add(new TooltipRow
-                {
-                    Icon = TabletopTavernData.Instance.GetUnitIcon(report.Unit),
-                    Label = Text(report.Unit.ToString()),
-                    Bar = (float)report.Damage / top,
-                    Value = report.Damage.ToString("N0"),
-                    ColumnA = report.Kills < 0 ? "-" : report.Kills.ToString(),
-                    ColumnB = report.Lost < 0 ? "-" : report.Lost > 0 ? $"-{report.Lost}" : "0",
-                });
-            }
-            return content;
-        }
+        private TooltipContent BuildDamageTooltip() =>
+            DamageReportTooltip.Build(squadReports, enemyReports, reportSubtitle, view.DamageIcon, reportHeroRace, reportSlain, reportTroopsLost, reportSquadsLost);
         private static Color ParseColour(string hex) => ColorUtility.TryParseHtmlString(hex, out Color colour) ? colour : Color.white;
         #endregion
 
@@ -1420,6 +1368,7 @@ namespace TJ.Engagement
         public override void ClosePanel()
         {
             Debug.Log("[Map] Closing EngagementPanel");
+            IAudioRequester.Instance.PlaySFX(SFXData.CloseUI);
             _showedEngagementResult = false;
             mapSceneUIManager.HUDPanel.HideConsumablesBlocker();
             StartCoroutine(CampaignManager.Instance.MapCamera.LerpFocusedOnNodeVolume(0f, 0.25f));

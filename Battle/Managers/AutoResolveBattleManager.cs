@@ -43,6 +43,8 @@ namespace TJ.Engagement
         [NonSerialized] public int HordeStacks;         // Crashing Horde stacks this second, player side only
         [NonSerialized] public float ChargeWindow;      // seconds of charge bonus left
         [NonSerialized] public float MoveSeconds;       // seconds spent closing on the current target
+        [NonSerialized] public float SprintSeconds;     // seconds of the final sprint at the current target
+        [NonSerialized] public float WearyTimer;        // seconds until the squad can charge again
         [NonSerialized] public float EngagedSeconds;
         [NonSerialized] public float FlankedTimer;
         [NonSerialized] public float OnFireTimer;
@@ -452,6 +454,8 @@ namespace TJ.Engagement
 
         if (squadStats.SquadAttributes.Overdraw)
             range *= TabletopTavernConstants.OVERDRAW_RANGE_MULTIPLIER;
+        if (squadStats.SquadAttributes.SwiftStride)
+            squadStats.Speed *= TabletopTavernConstants.SWIFT_STRIDE_SPEED_MULTIPLIER;
 
         // Steady Aim waives the Fire-at-Will accuracy penalty, and auto-resolve has no fire modes.
         // Squads default to Volley, so the live trait only pays off while the player is in rapid
@@ -743,6 +747,11 @@ namespace TJ.Engagement
                 if (charges <= 0) continue;
 
                 float applications = ApplicationCount(mageSpell);
+                // Potent Magic scales every number the spell lands. Wide Weave grows the area, so models caught go with its square.
+                float potency = TabletopTavernConstants.SpellPotency(mageSquad.squadStats.SquadAttributes);
+                float radiusScale = TabletopTavernConstants.SpellRadiusScale(mageSquad.squadStats.SquadAttributes);
+                int aoeModelsHit = (int)math.round(TabletopTavernConstants.MAGE_AOE_MODELS_HIT * radiusScale * radiusScale);
+                float magnitude = mageSpell.ScaledModifierValue(potency);
                 bool onAllies = mageSpell.MageTargetPriority == MageTargetPriority.FriendlyNearestEnemy;
                 AutoResolveSquad[] pool = onAllies ? _allies : _foes;
 
@@ -759,8 +768,7 @@ namespace TJ.Engagement
                 // ---- a heal is effective HP, added straight back to the pool ----
                 if (mageSpell.HealsInsteadOfDamage)
                 {
-                    int healPerCast = math.max(1, (int)(mageSpell.SpellModifierValue * applications
-                                                        * TabletopTavernConstants.MAGE_AOE_MODELS_HIT));
+                    int healPerCast = math.max(1, (int)(magnitude * applications * aoeModelsHit));
                     for (int spent = 0; spent < charges; spent++)
                     {
                         int pick = -1, worstMissing = 0;
@@ -780,7 +788,7 @@ namespace TJ.Engagement
                 if (mageSpell.BracesTarget || mageSpell.MarksTarget)
                 {
                     float delta = mageSpell.MarksTarget
-                        ? mageSpell.SpellModifierValue / 100f
+                        ? magnitude / 100f
                         : -TabletopTavernConstants.AUTORESOLVE_BRACE_DAMAGE_REDUCTION;
                     for (int spent = 0; spent < charges; spent++)
                     {
@@ -834,11 +842,11 @@ namespace TJ.Engagement
                         if (mageSpell.BonusStats != null && mageSpell.BonusStats.Count > 0)
                         {
                             foreach (var bonus in mageSpell.BonusStats)
-                                applied |= ApplyStat(ref pool[pick], bonus.UnitStat, bonus.Value);
+                                applied |= ApplyStat(ref pool[pick], bonus.UnitStat, bonus.Value * potency);
                         }
                         else
                         {
-                            applied = ApplyStat(ref pool[pick], mageSpell.BonusUnitStat, mageSpell.SpellModifierValue);
+                            applied = ApplyStat(ref pool[pick], mageSpell.BonusUnitStat, magnitude);
                         }
                         if (!applied) break;   // a stat this simulation cannot model - stop burning charges
                     }
@@ -871,8 +879,9 @@ namespace TJ.Engagement
                     if (healthLeft <= 0) continue;
 
                     // The blast cannot catch more models than the squad still has standing.
-                    int modelsHit = math.min(TabletopTavernConstants.MAGE_AOE_MODELS_HIT, targetSquad.UnitsAlive);
-                    int perCast   = math.max(1, (int)(mageSpell.SpellModifierValue * applications * modelsHit * _bonusModifier));
+                    int modelsHit = math.min(aoeModelsHit, targetSquad.UnitsAlive);
+                    float ward    = targetSquad.squadStats.SquadAttributes.SpellWard ? TabletopTavernConstants.SPELL_WARD_DAMAGE_MULTIPLIER : 1f;
+                    int perCast   = math.max(1, (int)(magnitude * applications * modelsHit * _bonusModifier * ward));
 
                     int castsSpent = math.min(chargesLeft, (healthLeft + perCast - 1) / perCast);
                     int damage     = math.min(castsSpent * perCast, healthLeft);

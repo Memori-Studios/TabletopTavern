@@ -11,7 +11,7 @@ namespace TJ.MainMenu
 
         public void Set(string name, string tag, string text)
         {
-            title.text = string.IsNullOrEmpty(tag) ? name : $"{name}  <size=70%><color=#8E8672><uppercase>{tag}</uppercase></color></size>";
+            title.text = string.IsNullOrEmpty(tag) ? name : $"{name}  <size=70%><color=#A99F8A><uppercase>{tag}</uppercase></color></size>";
             title.gameObject.SetActive(!string.IsNullOrEmpty(name));
             KeywordText.Apply(body, text);
         }

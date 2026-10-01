@@ -207,10 +207,13 @@ partial struct UnitSetUpSystem : ISystem
                 // it has no use for. A mage's reach and cadence live on MageCast instead, and that
                 // is what prestige Range writes to since there is no ShootAttack.Range to raise.
                 // MeleeAttack is still added unconditionally below, so it defends itself in melee.
+                // Far Cast scales before prestige Range is added, the same order Overdraw uses.
+                float castRange = squadStats.SquadAttributes.FarCast ? range * TabletopTavernConstants.FAR_CAST_RANGE_MULTIPLIER : range;
+                float castCooldown = squadStats.SquadAttributes.Quickcast ? TabletopTavernConstants.QUICKCAST_COOLDOWN : rateOfFire;
                 entityCommandBuffer.AddComponent(entity, new MageCast {
-                    Range = range,
-                    Cooldown = rateOfFire,
-                    Timer = rateOfFire,
+                    Range = castRange,
+                    Cooldown = castCooldown,
+                    Timer = castCooldown,
                 });
             }
             else if(squadStats.unitType != UnitType.Melee)
@@ -404,9 +407,17 @@ partial struct UnitSetUpSystem : ISystem
                 entityCommandBuffer.AddComponent(entity, new PhysicalDamageMultiplier { Value = 0.5f });
                 entityCommandBuffer.AddComponent(entity, new MagicalDamageMultiplier { Value = 0.5f });
             }
-            if (squadStats.SquadAttributes.ThickScales)
+            if (squadStats.SquadAttributes.ThickScales || squadStats.SquadAttributes.ProjectileWard)
             {
-                entityCommandBuffer.AddComponent(entity, new MissileResistance { DamageMultiplier = 0.75f });
+                float missileMultiplier = (squadStats.SquadAttributes.ThickScales ? 0.75f : 1f)
+                    * (squadStats.SquadAttributes.ProjectileWard ? TabletopTavernConstants.PROJECTILE_WARD_DAMAGE_MULTIPLIER : 1f);
+                entityCommandBuffer.AddComponent(entity, new MissileResistance { DamageMultiplier = missileMultiplier });
+            }
+            // Ethereal already halves magic damage through the same component, so the two multiply.
+            if (squadStats.SquadAttributes.SpellWard)
+            {
+                float magicMultiplier = TabletopTavernConstants.SPELL_WARD_DAMAGE_MULTIPLIER * (squadStats.SquadAttributes.Ethereal ? 0.5f : 1f);
+                entityCommandBuffer.AddComponent(entity, new MagicalDamageMultiplier { Value = magicMultiplier });
             }
 
             if (squadStats.unitType == UnitType.Artillery)

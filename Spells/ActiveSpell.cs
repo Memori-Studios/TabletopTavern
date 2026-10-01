@@ -47,6 +47,12 @@ public class ActiveSpell : MonoBehaviour
     private Team sourceTeam = Team.Player;
     private int sourceSquadId = 0;
 
+    // The caster's Potent Magic and Wide Weave; both stay 1 for a hotbar cast. Read these, never the raw SpellData fields.
+    private float potency = 1f;
+    private float radiusScale = 1f;
+    private float Radius => spellData.SpellRadius * radiusScale;
+    private float Magnitude => spellData.ScaledModifierValue(potency);
+
     // Placement spells (Starstep, Raise Dead): the formation the player drew before confirming.
     // Null for every other cast. The summon branch spawns onto it; the teleport branch has already
     // been applied by SpellManager at placement time and only plays the visuals here.
@@ -77,9 +83,12 @@ public class ActiveSpell : MonoBehaviour
 
     public void Load(SpellData _spellData, float3 position, Entity _targetSquadEntity = default,
                      Team _sourceTeam = Team.Player, int _sourceSquadId = 0,
-                     SpellPlacement _placement = null, bool _effectHandledByCaster = false)
+                     SpellPlacement _placement = null, bool _effectHandledByCaster = false,
+                     float _potency = 1f, float _radiusScale = 1f)
     {
         spellData = _spellData;
+        potency = _potency;
+        radiusScale = _radiusScale;
         // A mage's auto-cast always names the squad it aimed at; a ground spell stays where it landed instead of following it.
         targetSquadEntity = spellData.SpellTargetingType == SpellTargetingType.World ? Entity.Null : _targetSquadEntity;
         sourceTeam = _sourceTeam;
@@ -97,11 +106,12 @@ public class ActiveSpell : MonoBehaviour
             {
                 if (visualAddon.warmupEffect != null) visualAddon.warmupEffect.SetActive(false);
                 if (visualAddon.castEffect != null) visualAddon.castEffect.SetActive(false);
-                if (visualAddon.authoredRadius > 0f) visual.transform.localScale = Vector3.one * (spellData.SpellRadius / visualAddon.authoredRadius);
-                if (visualAddon.hideAreaBand && areaDisc != null) areaDisc.enabled = false;
+                if (visualAddon.authoredRadius > 0f) visual.transform.localScale = Vector3.one * (Radius / visualAddon.authoredRadius);
+                if ((visualAddon.hideAreaBand || visualAddon.hideAreaRing) && areaDisc != null) areaDisc.enabled = false;
+                if (visualAddon.hideAreaRing && areaScaleRoot != null) areaScaleRoot.gameObject.SetActive(false);
             }
         }
-        SetAreaDisplay(spellData.SpellRadius);
+        SetAreaDisplay(Radius);
 
         StartCoroutine(WarmUpSpell());
     }
@@ -272,7 +282,7 @@ public class ActiveSpell : MonoBehaviour
                 HuntersMarkTag mark = new()
                 {
                     RemainingDuration = spellData.SpellDuration,
-                    DamageMultiplier = 1f + spellData.SpellModifierValue / 100f
+                    DamageMultiplier = 1f + Magnitude / 100f
                 };
                 if (entityManager.HasComponent<HuntersMarkTag>(targetSquadEntity))
                     ecb.SetComponent(targetSquadEntity, mark);
@@ -314,9 +324,9 @@ public class ActiveSpell : MonoBehaviour
             ecb.AddComponent(trapEntity, new SnareTrapEntity
             {
                 Position = transform.position,
-                TriggerRadius = spellData.SpellRadius * 0.4f,
-                BlastRadius = spellData.SpellRadius,
-                Damage = spellData.SpellModifierValue,
+                TriggerRadius = Radius * 0.4f,
+                BlastRadius = Radius,
+                Damage = Mathf.RoundToInt(Magnitude),
                 SpellForce = spellData.SpellForce,
                 OwnerTeam = sourceTeam,
                 RemainingArmedTime = spellData.SpellDuration
@@ -363,7 +373,7 @@ public class ActiveSpell : MonoBehaviour
                         Value = value,
                         Guid = Guid.NewGuid(),
                         OriginationPoint = transform.position,
-                        Range = spellData.SpellRadius,
+                        Range = Radius,
                         Applied = false,
                         TargetedUnit = 0,
                         StatusSpellId = statusSpellId
@@ -381,7 +391,7 @@ public class ActiveSpell : MonoBehaviour
                 // squad, and each routes through the generic per-unit stat switch in BattlefieldBonusSystem
                 // via the SpellStatBonus enum. Removal is per-stat, so they clear independently too.
                 foreach (SpellBonusStat bonusStat in spellData.BonusStats)
-                    CreateBonusApplicator(bonusStat.UnitStat, BattlefieldBonusEnum.SpellStatBonus, bonusStat.Value);
+                    CreateBonusApplicator(bonusStat.UnitStat, BattlefieldBonusEnum.SpellStatBonus, bonusStat.Value * potency);
             }
 
             // Single-bonus spell (morale rate, wind, weapon strength, etc.) - the original path, where
@@ -389,7 +399,7 @@ public class ActiveSpell : MonoBehaviour
             // own BonusType (Rally's charge aura) can carry flat BonusStats alongside it.
             bool hasOwnBonusType = spellData.BonusType != BattlefieldBonusEnum.None && spellData.BonusType != BattlefieldBonusEnum.SpellStatBonus;
             if (!hasBonusStats || hasOwnBonusType)
-                CreateBonusApplicator(spellData.BonusUnitStat, spellData.BonusType, spellData.SpellModifierValue);
+                CreateBonusApplicator(spellData.BonusUnitStat, spellData.BonusType, Magnitude);
         }
         else
         {
@@ -402,10 +412,11 @@ public class ActiveSpell : MonoBehaviour
             DamageBufferElement damageBufferElement = new ()
             {
                 DamageType = spellData.HealsInsteadOfDamage ? DamageType.Healing : DamageType.Magical,
+                HealIsPercentOfMax = spellData.HealsInsteadOfDamage && spellData.HealsPercentOfMaxHealth,
                 // Load-bearing: an element with no source defaults to Melee and takes the 0.25 melee
                 // knob in ApplyDamageSystem, which is how every spell landed at a quarter until TT-78.
                 DamageSource = DamageSource.Spell,
-                AttackStrength = spellData.SpellModifierValue,
+                AttackStrength = Mathf.RoundToInt(Magnitude),
                 TeamOfSource = spellData.TargetTeam == Team.Neutral ? Team.Neutral : sourceTeam,
                 DamageSourceSquadId = sourceSquadId
             };
@@ -414,7 +425,7 @@ public class ActiveSpell : MonoBehaviour
                 && spellData.HitSoundRepeatInterval > 0f && spellData.HitSoundRepeatCount > 0;
             if (pulsed)
             {
-                damageBufferElement.AttackStrength = Mathf.CeilToInt((float)spellData.SpellModifierValue / (spellData.HitSoundRepeatCount + 1));
+                damageBufferElement.AttackStrength = Mathf.CeilToInt(Magnitude / (spellData.HitSoundRepeatCount + 1));
                 StartCoroutine(DamagePulses(damageBufferElement));
             }
             List<(float delay, Vector3 position)> shells = pulsed && spellData.ShellKnockbackRadius > 0f ? CastEffectShells() : null;
@@ -432,7 +443,7 @@ public class ActiveSpell : MonoBehaviour
             Entity = spellEntity,
             DamageBufferElement = damageBufferElement,
             SpellPosition = transform.position,
-            SpellRadius = spellData.SpellRadius,
+            SpellRadius = Radius,
             IsOneOff = spellData.IsOneOff,
             SpellForce = force,
             RemainingDuration = spellData.SpellDuration,
@@ -504,7 +515,7 @@ public class ActiveSpell : MonoBehaviour
         EntityManager entityManager = World.DefaultGameObjectInjectionWorld.EntityManager;
         using EntityQuery query = entityManager.CreateEntityQuery(ComponentType.ReadOnly<Unit>(), ComponentType.ReadOnly<Unity.Transforms.LocalTransform>());
         using var units = query.ToEntityArray(Unity.Collections.Allocator.Temp);
-        float reach = spellData.SpellRadius + UnitBodyRadius;
+        float reach = Radius + UnitBodyRadius;
         float3 centre = transform.position;
         foreach (Entity unit in units)
         {
@@ -552,7 +563,7 @@ public class ActiveSpell : MonoBehaviour
         float leadTime = Mathf.Max(0f, duration - flashWarningDuration);
         yield return new WaitForSeconds(leadTime);
 
-        Coroutine flashCoroutine = StartCoroutine(FlashArea(spellData.SpellRadius));
+        Coroutine flashCoroutine = StartCoroutine(FlashArea(Radius));
         // Looping addon art drains over the warning second instead of cutting at Destroy; one-shots run out on their own.
         if (visualAddon != null)
         {
@@ -569,7 +580,7 @@ public class ActiveSpell : MonoBehaviour
         if (visualAddon != null)
             foreach (SpellAddonRise risen in visualAddon.GetComponentsInChildren<SpellAddonRise>())
                 if (risen.SinksWithArea) risen.Sink(radiusAnimationDuration);
-        yield return AnimateAreaSize(spellData.SpellRadius, shrinkCurve);
+        yield return AnimateAreaSize(Radius, shrinkCurve);
 
         Destroy(gameObject);
     }

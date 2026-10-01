@@ -19,5 +19,7 @@ namespace TJ.Spells
         public bool hideWarmupOnCast = false;
         // Art that marks its own edge (Shieldwall's shields) hides the area band, which draws over everything at that radius.
         public bool hideAreaBand = false;
+        // A spell that tags one squad (Hunter's Mark) has no area to show, so the band and the edge particles both hide.
+        public bool hideAreaRing = false;
     }
 }

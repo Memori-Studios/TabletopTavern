@@ -391,20 +391,22 @@ namespace TJ
                 if (!cooldownBar.gameObject.activeSelf) cooldownBar.gameObject.SetActive(true);
                 cooldownBar.value = progress;
             }
-            void HandleExhausted()
+            void HandleChargeBonus()
             {
-                if (EntityManager.HasComponent<ExhaustedTag>(squadEntity))
+                if (EntityManager.HasComponent<ChargeBonus>(squadEntity))
                 {
-                    if (!healthBarGO.IsExhausted)
-                    {
-                        // if (squadId > 0 && hasntNotifiedOfExhausted)
-                        // {
-                        //     hasntNotifiedOfExhausted = false;
-                        //     NotificationManager.Instance.DisplayNotification("One of your units has exhausted all Charges!");
-                        // }
-                        healthBarGO.SetExhausted(true);
-                    }
+                    float elapsed = EntityManager.GetComponentData<ChargeBonus>(squadEntity).ChargeTime;
+                    healthBarGO.SetChargeBonus(true, 1f - elapsed / TabletopTavernConstants.TIME_TO_REMOVE_CHARGE_BONUS);
                 }
+                else if (healthBarGO.ChargeBonusActive)
+                    healthBarGO.SetChargeBonus(false, 0f);
+            }
+            void HandleWeary()
+            {
+                if (EntityManager.HasComponent<WearyTag>(squadEntity))
+                    healthBarGO.SetWeary(true, EntityManager.GetComponentData<WearyTag>(squadEntity).Remaining / TabletopTavernConstants.CHARGE_WEARY_TIME);
+                else if (healthBarGO.IsWeary)
+                    healthBarGO.SetWeary(false, 0f);
             }
             void HandleWeaponStrengthBonuses()
             {
@@ -671,7 +673,8 @@ namespace TJ
             HandleMoraleBar();
             HandleAmmoBar();
             HandleCooldownBar();
-            HandleExhausted();
+            HandleChargeBonus();
+            HandleWeary();
             HandleWeaponStrengthBonuses();
             HandleArmorSundered();
             HandleSpellStatus();
@@ -817,6 +820,7 @@ namespace TJ
             if (healthBarGO == null || isGate) return;
             healthBarGO.SetCharge(_squads.Contains(squadId));
         }
+
         private void OnTerrifiedSquadsChanged(List<int> _squads)
         {
             if (healthBarGO == null || isGate) return;

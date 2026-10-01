@@ -5,31 +5,34 @@ using UnityEngine.EventSystems;
 namespace TJ.MainMenu
 {
     /// <summary>
-    /// Put this on a warband loadout block (Army / Gear / Spells) to focus that section when the
-    /// pointer enters it, so the source column follows the mouse instead of needing a click.
-    ///
-    /// There is deliberately no OnPointerExit: focus is "last hovered wins" and persists after the
-    /// pointer leaves, because the player's next move is to cross into the source column and click
-    /// something there. Clearing focus on exit would close the list they were reaching for.
-    ///
-    /// The block root needs a raycast-target Image covering it (a transparent one is fine) or the
-    /// gaps between its slots will not register as hovered - the same requirement SpellBrowseMenu
-    /// has.
+    /// Sits on a warband loadout block (Army / Gear / Spells): a left-click on the block's open space focuses
+    /// that section, and hovering the block reports in and out so it can show a faint highlight. Cards and slots
+    /// with their own click handler keep their clicks. Needs a raycast-target Image covering the block, or
+    /// clicks between its slots are missed.
     /// </summary>
-    public class WarbandSectionHoverArea : MonoBehaviour, IPointerEnterHandler
+    public class WarbandSectionHoverArea : MonoBehaviour, IPointerClickHandler, IPointerEnterHandler, IPointerExitHandler
     {
         [SerializeField] private WarbandSection section;
 
-        private Action<WarbandSection> onHovered;
+        private Action<WarbandSection> onClicked;
+        private Action<WarbandSection, bool> onHovered;
 
-        public void SetUp(Action<WarbandSection> _onHovered)
+        public void SetUp(Action<WarbandSection> _onClicked, Action<WarbandSection, bool> _onHovered)
         {
+            onClicked = _onClicked;
             onHovered = _onHovered;
         }
 
-        public void OnPointerEnter(PointerEventData eventData)
+        // Moving onto a slot inside the block sends no exit here: Core's input module sends hover to parents.
+        public void OnPointerEnter(PointerEventData eventData) => onHovered?.Invoke(section, true);
+
+        public void OnPointerExit(PointerEventData eventData) => onHovered?.Invoke(section, false);
+
+        public void OnPointerClick(PointerEventData eventData)
         {
-            onHovered?.Invoke(section);
+            // Right-click is the menu's back gesture (MainMenu.OnSecondaryActionPressed).
+            if (eventData.button != PointerEventData.InputButton.Left) return;
+            onClicked?.Invoke(section);
         }
     }
 }

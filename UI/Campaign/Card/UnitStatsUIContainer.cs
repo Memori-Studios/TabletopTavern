@@ -12,7 +12,19 @@ public class UnitStatsUIContainer : MonoBehaviour
     [SerializeField] private UnitStatUI unitStatUIPrefab;
     [SerializeField] private Transform unitAttributesParent;
 
-    public void Load(UnitName _unitName, bool _applyGearBonuses, int _prestige, UnitAttribute _prestigeTrait = UnitAttribute.None)
+    // Set on a compare panel: each row shows its difference from the same stat here.
+    UnitStatsUIContainer compareBase;
+    // Set on the base: the compare panel whose differences go stale when these stats change.
+    UnitStatsUIContainer comparer;
+    List<UnitStatUI> loadedRows = new();
+
+    public void CompareAgainst(UnitStatsUIContainer _base)
+    {
+        compareBase = _base;
+        _base.comparer = this;
+    }
+
+    public void Load(UnitName _unitName, bool _applyGearBonuses, int _prestige, UnitAttribute _prestigeTrait = UnitAttribute.None, Unity.Entities.Entity _liveSquad = default)
     {
         List<UnitStatValue> unitStats = TabletopTavernData.Instance.GetUnitStatsForDisplay( _unitName);
         List<UnitStatUI> unitStatUI = unitAttributesParent.GetComponentsInChildren<UnitStatUI>().ToList();
@@ -45,7 +57,21 @@ public class UnitStatsUIContainer : MonoBehaviour
         }
 
         for(int i = 0; i< unitStatUI.Count; i++) {
-            unitStatUI[i].LoadUnitStatUI(unitStats[i], _prestige, _unitName, _applyGearBonuses, _prestigeTrait);
+            unitStatUI[i].LoadUnitStatUI(unitStats[i], _prestige, _unitName, _applyGearBonuses, _prestigeTrait, _liveSquad);
+        }
+        loadedRows = unitStatUI;
+
+        if (compareBase != null) ApplyDeltas();
+        else if (comparer != null) comparer.ApplyDeltas();
+    }
+    // A stat the base squad lacks (Range on a melee unit) gets no chip.
+    void ApplyDeltas()
+    {
+        foreach (UnitStatUI row in loadedRows)
+        {
+            UnitStatUI match = compareBase.loadedRows.Find(r => r.Stat == row.Stat);
+            if (match == null) row.HideDelta();
+            else row.ShowDelta(row.Total - match.Total);
         }
     }
     public void Refresh()

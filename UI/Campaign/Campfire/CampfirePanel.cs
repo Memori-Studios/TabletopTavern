@@ -1,6 +1,7 @@
 using System.Collections.Generic;
 using System.Threading.Tasks;
 using Memori.Audio;
+using Memori.UI;
 using Memori.Localization;
 using Memori.Notifications;
 using Memori.Utilities;
@@ -36,7 +37,7 @@ namespace TJ.Campfire
         // Indexed by act - 1; endless acts keep the act 3 values.
         private static readonly int[] TrainCostToFirstLevelByAct = { 10, 20, 30 };
         private static readonly int[] TrainCostToSecondLevelByAct = { 20, 40, 60 };
-        private static readonly int[] ScoutGoldByAct = { 5, 15, 25 };
+        private static readonly int[] ScoutGoldByAct = { 10, 20, 35 };
 
         private int ActIndex => Mathf.Clamp(campaignSaveManager.SaveData.bookNumber, 1, ScoutGoldByAct.Length) - 1;
         private int TrainCostToFirstLevel => TrainCostToFirstLevelByAct[ActIndex];
@@ -91,11 +92,13 @@ namespace TJ.Campfire
             SetContinueVisible(false);
             if (continueButton != null) continueButton.interactable = true;
 
-            panelCanvasGroup.FadeInAsync();
+            panelCanvasGroup.CGEnable();
+            StartCoroutine(UIJuice.Open(panelCanvasGroup.GetComponent<CanvasGroup>(), view.transform as RectTransform));
             IAudioRequester.Instance.PlaySFX(SFXData.OpenUI);
 
             if (TryResumeLockedChoice()) return;
             ShowChoosing();
+            view.StaggerChoices();
         }
 
         private void FillChoices()
@@ -355,7 +358,7 @@ namespace TJ.Campfire
             view.ClearSlots();
             campaignSaveManager.RemoveZeroHealthSquads();
             await Task.Delay(200);
-            panelCanvasGroup.FadeOutAsync();
+            panelCanvasGroup.FadeOutAsync(UIJuice.CloseTime);
         }
     }
 }

@@ -78,6 +78,12 @@ public class UnitSelectionManager : MonoBehaviour
             battleInputManager.CancelPendingMouseActions(unitsAreSelected);
             return;
         }
+        // A click made while the spell wheel is open belongs to the wheel, never to the battlefield.
+        if (BattleManager.Instance.SpellManager.WheelOwnsMouse)
+        {
+            battleInputManager.CancelPendingMouseActions(unitsAreSelected);
+            return;
+        }
 
         if (UnityEngine.EventSystems.EventSystem.current.IsPointerOverGameObject())
         {

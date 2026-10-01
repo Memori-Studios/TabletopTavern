@@ -125,6 +125,11 @@ partial struct SpellSystem : ISystem
 
                     if (SystemAPI.HasComponent<Health>(hitEntity) && SystemAPI.GetComponent<Health>(hitEntity).Value <= 0) continue;
 
+                    // Same team rule as ApplyDamageSystem, so a squad the spell skips never shows its status icon.
+                    bool sameTeam = SystemAPI.GetComponent<Unit>(hitEntity).Team == damageBufferElement.TeamOfSource;
+                    bool heals = damageBufferElement.DamageType == DamageType.Healing;
+                    if (damageBufferElement.TeamOfSource != Team.Neutral && sameTeam != heals) continue;
+
                     if (!spellEntity.ValueRO.SkipsDamage)
                         SystemAPI.GetBuffer<DamageBufferElement>(hitEntity).Add(damageBufferElement);
 

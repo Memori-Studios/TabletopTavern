@@ -16,7 +16,7 @@ partial struct SquadChargeBonusApplicationSystem : ISystem
         state.RequireForUpdate<SquadStatsData>();
     }
     // Not Burst-compiled: applying hero ChargeBonus rules calls into HeroBonusManager (managed
-    // collections, LocalizationManager). Runs once per charge-start event per squad (gated by
+    // collections, LocalizationManager). Runs once per landed charge per squad (gated by
     // ApplyChargeBonusTag, removed after processing) - not a per-frame hot path.
     public void OnUpdate(ref SystemState state)
     {
@@ -33,27 +33,6 @@ partial struct SquadChargeBonusApplicationSystem : ISystem
             >())
         {
             entityCommandBuffer.RemoveComponent<ApplyChargeBonusTag>(squad.SelfEntity);
-            // Debug.Log($"SquadChargeBonusApplicationSystem: applying charge bonus to squad {squad.SquadId}");
-
-            // Rally the Banners: carries the squad through terrain that would otherwise cancel the
-            // charge outright, and adds to the impact. Read before the suppression check so the
-            // exemption applies.
-            bool empowered = SystemAPI.HasComponent<ChargeEmpoweredTag>(squad.SelfEntity);
-
-            if (!empowered &&
-               (SystemAPI.HasComponent<InForestTag>(squad.SelfEntity) ||
-                SystemAPI.HasComponent<InSwampTag>(squad.SelfEntity) ||
-                (WeatherRuleData.Rain.RemovesChargeBonus && SystemAPI.HasComponent<InRainTag>(squad.SelfEntity))))
-            {
-                Debug.LogWarning($"SquadChargeBonusApplicationSystem: Squad {squad.SquadId} is in forest or swamp or rain, dont apply charge bonus.");
-                continue;
-            }
-
-            if (squad.TargetSquadEntity != Entity.Null && SystemAPI.HasComponent<GarrisonGateSquadTag>(squad.TargetSquadEntity))
-            {
-                Debug.LogWarning($"SquadChargeBonusApplicationSystem: Squad {squad.SquadId} is charging a gate, dont apply charge bonus.");
-                continue;
-            }
 
             SquadStats squadStats = statsBlob.GetStats(squad.UnitName);
             int bonus = squadStats.ChargeBonus;
@@ -68,14 +47,8 @@ partial struct SquadChargeBonusApplicationSystem : ISystem
                 bonus += (int)heroBonus;
             }
 
-            if (empowered)
-            {
-                bonus += (int)SystemAPI.GetComponent<ChargeEmpoweredTag>(squad.SelfEntity).BonusImpact;
-                entityCommandBuffer.AddComponent<EmpoweredChargeTag>(squad.SelfEntity);
-            }
-            // A charge that won no boost clears a mark that an earlier, cancelled charge left behind.
-            else if (SystemAPI.HasComponent<EmpoweredChargeTag>(squad.SelfEntity))
-                entityCommandBuffer.RemoveComponent<EmpoweredChargeTag>(squad.SelfEntity);
+            // Rally the Banners adds flat; a side or rear charge then scales the whole bonus.
+            bonus = (int)((bonus + ApplyChargeBonusTag.FlatBonus) * ApplyChargeBonusTag.Multiplier);
 
             // Blunted Charge: the player's whole charge bonus is halved, Rally the Banners included.
             if (squad.Team == Team.Player && !campaignSaveDataHolder.IsCustomBattle && OrdealMask.Has(campaignSaveDataHolder.OrdealMask, OrdealId.BluntedCharge))

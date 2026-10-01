@@ -236,8 +236,18 @@ namespace TJ.Town
         {
             townPanelCanvasGroup.FadeInAsync(0.25f);
         }
+        private void LogTownChoice(string choice)
+        {
+            TabletopTavern.Analytics.NodeLog.Try("town", () => TabletopTavern.Analytics.NodeLog.Set("town", new Dictionary<string, object>
+            {
+                { "size", townSaveData.townSize.ToString() },
+                { "race", townSaveData.townRace.ToString() },
+                { "act", choice },
+            }));
+        }
         private void OnSackTown()
         {
+            LogTownChoice("sack");
             CampaignManager.Instance.MapSceneUIManager.EngagementPanel.LoadEngagementPanelFromTown();
             townPanelCanvasGroup.FadeOutAsync(0.25f);
             HideEnemyCompany();
@@ -320,6 +330,7 @@ namespace TJ.Town
         }
         private void OnEnterTown()
         {
+            LogTownChoice("enter");
             townSaveData.townInteractionStatus = TownInteractionStatus.Entered;
             IAudioRequester.Instance.PlaySFX(SFXData.EnterTown);
 
@@ -359,6 +370,9 @@ namespace TJ.Town
         public void OnLootGoldButtonClicked()
         {
             string localizedString = LocalizationManager.Instance.GetText("Loot Gold");
+            int looted = townSaveData.bountyAmount + ActBonus();
+            TabletopTavern.Analytics.NodeLog.Try("town loot", () => TabletopTavern.Analytics.NodeLog.Add("loot",
+                new Dictionary<string, object> { { "k", "gold" }, { "v", looted } }));
             goldManager.ModifyGold(townSaveData.bountyAmount + ActBonus(), localizedString);
             townSaveData.bountyAmount = 0;
             campaignSaveManager.SetTownData(townSaveData);
@@ -431,7 +445,8 @@ namespace TJ.Town
             StartCoroutine(CampaignManager.Instance.MapCamera.LerpFocusedOnNodeVolume(0f, 0.25f));
             HideEnemyCompany();
 
-            townPanelCanvasGroup.FadeOutAsync(0.25f);
+            IAudioRequester.Instance.PlaySFX(SFXData.CloseUI);
+            townPanelCanvasGroup.FadeOutAsync(UIJuice.CloseTime);
         }
         public void DisableTownCanvasesOnLoss()
         {

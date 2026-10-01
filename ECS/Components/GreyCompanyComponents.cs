@@ -85,10 +85,15 @@ public struct InMeleeRange : IComponentData, IEnableableComponent { }
 public struct DisengageFromCombat : IComponentData, IEnableableComponent { public Entity newTargetSquad; }
 public struct CausesTerrorTag : IComponentData { }
 public struct StalwartTag : IComponentData { }
-public struct ExhaustedTag : IComponentData { }
+// A squad that landed a charge cannot sprint again until this runs out.
+public struct WearyTag : IComponentData { public float Remaining; }
+// On a squad under an attack order. ChargeTime counts seconds of sprint, not seconds since the order.
 public struct ChargeSquad : IComponentData { public float ChargeTime; }
+// The squad's units carry the sprint speed multiplier; ChargeSprintSystem divides it back out when this goes.
+public struct SprintingTag : IComponentData { }
 public struct ChargeBonus : IComponentData { public float ChargeTime; }
-public struct ApplyChargeBonusTag : IComponentData { }
+public struct ApplyChargeBonusTag : IComponentData { public float Multiplier; public float FlatBonus; }
+public enum ChargeImpactKind : byte { Charge, FlankCharge, Blocked }
 public struct ChargeBonusReductionTag : IComponentData { public float ReductionPercent; }
 public struct MonsterTag : IComponentData { public float KnockbackRange; public int KnockbackInitialDamage; }
 public struct RetreatingUnit : IComponentData, IEnableableComponent { }
@@ -127,13 +132,13 @@ public struct ThrowUnit : IComponentData {
 #endregion
 public struct RemoveChargeBonusTag : IComponentData { }
 /// <summary>
-/// Rally the Banners. On a squad, adds BonusImpact to the charge bonus SquadChargeBonusApplicationSystem
-/// grants, and exempts that squad from the forest/swamp/rain suppression that otherwise cancels it outright.
+/// Rally the Banners. On a squad, adds BonusImpact to the charge bonus its next charge grants, and lets
+/// that squad sprint through the forest, swamp and rain that otherwise stop a charge.
 /// Added and removed by BattlefieldBonusSystem, so the aura's radius and duration govern its lifetime.
 /// </summary>
 public struct ChargeEmpoweredTag : IComponentData { public float BonusImpact; }
-// A charge that won Rally the Banners' boost; SquadEngageInCombatSystem turns it into a landed event on contact.
-public struct EmpoweredChargeTag : IComponentData { }
+// Marks the attack itself, so the boost survives the squad leaving the banner's circle before contact.
+public struct EmpoweredChargeTag : IComponentData { public float BonusImpact; }
 // One-shot event for the squad flag: an empowered charge just made contact.
 public struct EmpoweredChargeLandedTag : IComponentData { }
 public struct StartChargeTag : IComponentData { }
@@ -147,7 +152,8 @@ public struct RangedMeleeConverter : IComponentData, IEnableableComponent
 }
 public struct FormationNeedsToBeProcessed : IComponentData { public int indexRemoved; public float3 squadPosition; }
 public struct FormationEngagedInCombat : IComponentData { public Entity EngagementEntity; public bool WasCharging; }
-public struct OnFormationsCollide : IComponentData { public float3 Position; }
+// One-shot event on the charging squad: a charge just made contact.
+public struct OnFormationsCollide : IComponentData { public float3 Position; public ChargeImpactKind Kind; }
 public struct OnExplosionShake : IComponentData { public float3 Position; }
 public struct FormationEngagedInRangedCombat : IComponentData { }
 public struct FormationShapeChanged : IComponentData { }
@@ -319,6 +325,8 @@ public struct BattleOver : IComponentData {public bool PlayerWon; }
 [System.Serializable] public struct BloodBufferElement : IBufferElementData {
     public float3 Position;
     public bool IsExplosion;
+    // The unit that bled; its faction picks the splat colour. Unused for explosions.
+    public UnitName UnitName;
 }
 [System.Serializable] public struct DustCloudBufferElement : IBufferElementData {
     public float3 Position;
@@ -346,6 +354,8 @@ public struct BattleOver : IComponentData {public bool PlayerWon; }
     public bool FlankAttack;
     public bool Flaming;
     public bool SourceIsArtillery;
+    // A Healing element whose AttackStrength is a percent of the receiver's max health.
+    public bool HealIsPercentOfMax;
 }
 #endregion
 public struct CavalryFlankingTag : IComponentData { }

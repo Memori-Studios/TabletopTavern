@@ -584,7 +584,7 @@ namespace TJ.Map
                         line.Start = startPos;
                         line.End = endPos;
                         line.Color = pathDefaultColor;
-                        line.Thickness = 0.005f;
+                        line.Thickness = MapNode.PATH_THICKNESS;
                         line.Geometry = LineGeometry.Volumetric3D;
                         line.SortingOrder = -1;
 

@@ -26,6 +26,12 @@ namespace TJ.Map
         [SerializeField] private GameObject selectionParticles;
         [SerializeField] private QuickOutline.Outline outline;
 
+        [Header("Route Mark")]
+        [SerializeField] private Disc routeMark;
+        public const float PATH_THICKNESS = 0.005f;
+        private const float PLANNED_PATH_THICKNESS = 0.009f;
+        private const float MARKED_OUTLINE_WIDTH = 4f;
+
         [Header("Game Object Icons")]
         [SerializeField] private TownFlag skirmishFlag;
         [SerializeField] private TownFlag townFlag, hordeFlag;
@@ -91,7 +97,7 @@ namespace TJ.Map
             townGameObject.SetActive(false);
             if (tavernGameObject != null) tavernGameObject.SetActive(false);
             if (campfireGameObject != null) campfireGameObject.SetActive(false);
-            outline.enabled = false;
+            SetLayerOutline(false);
         }
         public void SetUp(MapNodeData mapNodeData, Camera _camera, bool _surprise, Race race)
         {
@@ -268,7 +274,7 @@ namespace TJ.Map
             mMF_Player.PlayFeedbacks();
             selectionParticles.SetActive(true);
             selectable = true;
-            outline.enabled = true;
+            SetLayerOutline(true);
             // if(Value.type == NodeType.Town && !surprise) {
             //     icon.gameObject.SetActive(false);
             // } else if(Value.type == NodeType.Horde) {
@@ -278,7 +284,7 @@ namespace TJ.Map
         public void DeselectNodeLayer()
         {
             // Debug.Log($"Deselecting {Value.index}");
-            outline.enabled = false;
+            SetLayerOutline(false);
             mMF_Player.StopFeedbacks();
             selectionParticles.SetActive(false);
             iconTransform.localScale = Vector3.one;
@@ -342,21 +348,13 @@ namespace TJ.Map
                 else        { mouseOverBiomeMMF_Player.StopFeedbacks(); mouseOffBiomeMMF_Player.PlayFeedbacks(); }
             }
 
-            if (_hover && selectable)
-            {
-                IAudioRequester.Instance.PlaySFX(SFXData.MouseOverNode);
-                outline.OutlineWidth = 5f;
-                outline.OutlineColor = hoverColor;
-            }
-            else
-            {
-                outline.OutlineWidth = 2f;
-                outline.OutlineColor = defaultColor;
-            }
+            if (_hover && selectable) IAudioRequester.Instance.PlaySFX(SFXData.MouseOverNode);
+            _hovered = _hover;
+            RefreshOutline();
         }
         public void ShowPassed()
         {
-            outline.enabled = false;
+            SetLayerOutline(false);
             mMF_Player.StopFeedbacks();
             iconTransform.localScale = Vector3.one;
             // Debug.Log($"Showing passed node {Value.index}");
@@ -366,8 +364,8 @@ namespace TJ.Map
             // iconHover.gameObject.SetActive(false);
             completed = true;
             _mapNodeBase.material = passedMaterial;
-            foreach(Line line in _mapNodeData.connectedNodeLines) {
-                line.Color = passedColor;
+            for(int i = 0; i < _mapNodeData.connectedNodeLines.Count; i++) {
+                SetLineColor(i, passedColor);
             }
         }
         public void ShowCompleted(List<int> completedPath, bool activeLayer)
@@ -389,15 +387,15 @@ namespace TJ.Map
                 if (completedPath.Contains(_mapNodeData.connectedNodeIndexes[i]))
                 {
                     // Debug.Log($"Node {Value.index} is connected to {Value.connectedNodeIndexes[i]}");
-                    _mapNodeData.connectedNodeLines[i].Color = pathCompletedColor;
+                    SetLineColor(i, pathCompletedColor);
                 }
                 else if (activeLayer)
                 {
-                    _mapNodeData.connectedNodeLines[i].Color = completedColor;
+                    SetLineColor(i, completedColor);
                 }
                 else
                 {
-                    _mapNodeData.connectedNodeLines[i].Color = passedColor;
+                    SetLineColor(i, passedColor);
                 }
             }
             UpdateIcon();
@@ -414,9 +412,80 @@ namespace TJ.Map
             selectable = false;
             _mapNodeBase.material = defaultMaterial;
             for(int i = 0; i < _mapNodeData.connectedNodeLines.Count; i++) {
-                _mapNodeData.connectedNodeLines[i].Color = completedColor;
+                SetLineColor(i, completedColor);
             }
         }
+        #region Route Mark
+        private readonly List<Color> _lineBaseColors = new();
+        private readonly List<bool> _linePlanned = new();
+
+        private bool _routeMarked, _layerOutline, _hovered;
+
+        public void SetRouteMark(bool marked)
+        {
+            _routeMarked = marked;
+            RefreshOutline();
+            if (routeMark == null) return;
+            routeMark.Color = PlannedColor;
+            routeMark.gameObject.SetActive(marked);
+        }
+        private void SetLayerOutline(bool on)
+        {
+            _layerOutline = on;
+            RefreshOutline();
+        }
+        // The one writer of the outline, so the layer and hover code cannot switch off or recolour a marked node.
+        private void RefreshOutline()
+        {
+            outline.enabled = _layerOutline || _routeMarked;
+            if (_hovered && selectable)
+            {
+                outline.OutlineWidth = 5f;
+                outline.OutlineColor = hoverColor;
+            }
+            else if (_routeMarked)
+            {
+                outline.OutlineWidth = MARKED_OUTLINE_WIDTH;
+                outline.OutlineColor = PlannedColor;
+            }
+            else
+            {
+                outline.OutlineWidth = 2f;
+                outline.OutlineColor = defaultColor;
+            }
+        }
+        private static Color PlannedColor => RouteMarkColors.Glow;
+        public void SetPlannedLine(int lineIndex, bool planned)
+        {
+            if (lineIndex >= _mapNodeData.connectedNodeLines.Count) return;
+            TrackLine(lineIndex);
+            _linePlanned[lineIndex] = planned;
+            ApplyLine(lineIndex);
+        }
+        // Every path colour goes through here, so taking a mark off can put back the colour the path had under it.
+        private void SetLineColor(int lineIndex, Color color)
+        {
+            TrackLine(lineIndex);
+            _lineBaseColors[lineIndex] = color;
+            ApplyLine(lineIndex);
+        }
+        private void TrackLine(int lineIndex)
+        {
+            while (_lineBaseColors.Count <= lineIndex)
+            {
+                _lineBaseColors.Add(_mapNodeData.connectedNodeLines[_lineBaseColors.Count].Color);
+                _linePlanned.Add(false);
+            }
+        }
+        private void ApplyLine(int lineIndex)
+        {
+            Line line = _mapNodeData.connectedNodeLines[lineIndex];
+            bool planned = _linePlanned[lineIndex];
+            // Thickness is the cue that does not depend on colour.
+            line.Color = planned ? PlannedColor : _lineBaseColors[lineIndex];
+            line.Thickness = planned ? PLANNED_PATH_THICKNESS : PATH_THICKNESS;
+        }
+        #endregion
         public void Reveal()
         {
             if (!surprise) return;

@@ -1223,10 +1223,7 @@ namespace TJ.RunSetup.EditorTools
             removeImage.raycastTarget = true;
             Button removeButton = remove.gameObject.AddComponent<Button>();
             removeButton.targetGraphic = removeImage;
-            TMP_Text cross = Text("X", remove, displayDrop, 13f, Hex("FFDCD8"), "✕");
-            cross.alignment = TextAlignmentOptions.Center;
-            Stretch(cross.rectTransform);
-            CentreInk(cross);
+            CrossMark(remove);
             TMP_Text description = Text("Description", equipped, display, 12f, Flavour, "Description");
             description.gameObject.SetActive(false);
             Ignore(description.gameObject);
@@ -1396,12 +1393,14 @@ namespace TJ.RunSetup.EditorTools
             {
                 count = Text("Count", head, displayDrop, 15f, Flavour, "0 / 0");
                 count.alignment = TextAlignmentOptions.MidlineRight;
-                GetOrAdd<LayoutElement>(count.gameObject).minWidth = 44f;
+                GetOrAdd<LayoutElement>(count.gameObject).minWidth = 34f;
                 Unlocalize(count, "0 / 0");
             }
 
             if (section.HasValue)
             {
+                // WarbandPanel dims the wash and its edge together through this group on hover.
+                GetOrAdd<CanvasGroup>(wash.gameObject);
                 WarbandSectionHoverArea area = block.gameObject.AddComponent<WarbandSectionHoverArea>();
                 var so = new SerializedObject(area);
                 so.FindProperty("section").intValue = (int)section.Value;
@@ -1451,7 +1450,7 @@ namespace TJ.RunSetup.EditorTools
                 HLayout(chip, 0f, TextAnchor.MiddleCenter, new RectOffset(6, 6, 1, 1));
                 Image outline = Img(chip, squareSliced, Dim, Image.Type.Sliced);
                 outline.fillCenter = false;
-                TMP_Text tag = CapText(chip, "Text", 10.5f, Hex("9FB0B8"));
+                TMP_Text tag = CapText(chip, "Text", 10.5f, Cap);
                 Localize(tag, tagKey);
             }
             body = Text("Body", texts, display, 15f, Body, "Body");
@@ -1512,7 +1511,7 @@ namespace TJ.RunSetup.EditorTools
 
         static void Step(RectTransform parent, string number, string key, bool on)
         {
-            Color colour = on ? Gold : Hex("6F7E86");
+            Color colour = on ? Gold : Cap;
             RectTransform step = Rect("Step " + number, parent);
             HLayout(step, 7f, TextAnchor.MiddleLeft, new RectOffset());
             RectTransform dot = Rect("Dot", step);
@@ -1603,6 +1602,19 @@ namespace TJ.RunSetup.EditorTools
             Centre(plus, 20f, 20f);
             Centre(Img(Rect("Across", plus), solid, Hex("4F616B")).rectTransform, 20f, 2f);
             Centre(Img(Rect("Down", plus), solid, Hex("4F616B")).rectTransform, 2f, 20f);
+        }
+
+        // Drawn from two bars, because the display font has no "✕" glyph and draws a box instead.
+        static void CrossMark(RectTransform parent)
+        {
+            RectTransform cross = Rect("X", parent);
+            Centre(cross, 10f, 10f);
+            for (int i = 0; i < 2; i++)
+            {
+                Image bar = Img(Rect(i == 0 ? "Bar A" : "Bar B", cross), solid, Hex("FFDCD8"));
+                Centre(bar.rectTransform, 12f, 2f);
+                bar.rectTransform.localEulerAngles = new Vector3(0f, 0f, i == 0 ? 45f : -45f);
+            }
         }
 
         static RectTransform Mount(RectTransform parent, string name, float size, Sprite icon, float iconSize)

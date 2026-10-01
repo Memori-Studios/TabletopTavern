@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using Memori.Tooltip;
 using TJ.Ordeals;
 using TJ.Prestige;
 using TJ.Recruit;
@@ -34,7 +35,8 @@ namespace TJ.Choice.EditorTools
         public const string TreasurePanelPath = PartFolder + "/Treasure Panel UI.prefab";
         const string ScenePath = "Assets/Scenes/Map.unity";
         const string BasicBackgroundPath = "Assets/Data/Prefabs/UI/Reuseable/Basic Background.prefab";
-        const string ButtonBasePath = "Assets/Data/Prefabs/UI/Reuseable/Buttons/Button Base.prefab";
+        const string StandardButtonPath = "Assets/Data/Prefabs/UI/Reuseable/Buttons/Button - Standard.prefab";
+        const string FateshineIconPath = "Assets/Art/Icons/Consumables/FateshineElixir.png";
         const string RecruitCardPath = "Assets/Data/Prefabs/UI/Recruit/Recruit Card.prefab";
         const string OrdealIconPath = "Assets/Data/Prefabs/UI/Map/Ordeal Panel/Ordeal Icon.prefab";
         const string SheetPath = "Assets/Scripts/Memori.Tooltip/Art/TooltipSheet.png";
@@ -58,6 +60,11 @@ namespace TJ.Choice.EditorTools
         const float OrdealCardGap = 36f;
         const float RecruitGap = 48f;
         const float CardPadding = 28f;
+        // Wide enough for the longest label (Russian, 208 at the 14 minimum) inside the 50 + 14 label margins.
+        static readonly Vector2 RerollButtonSize = new(290f, 50f);
+        const float RerollIconSize = 30f;
+        const float RerollPlatePadX = 28f;
+        const float RerollPlatePadY = 14f;
 
         #region Treasure layout
         // Gaps sized so a hovered card (1.15, lifted 20, with its halo) clears the count line above and the Or line below.
@@ -93,6 +100,7 @@ namespace TJ.Choice.EditorTools
         static readonly Color FocusBlue = Hex("3FB6FF", 0.35f);
         static readonly Color PickedGold = Hex("E9C06A", 0.7f);
         static readonly Color HoverTintColour = Hex("3FB6E0", 0.07f);
+        static readonly Color Flavour = Hex("A99F8A");
         // The centre glow peaks stronger than the old flat fill, since it fades to nothing at the sides.
         const float BandGlowAlpha = 0.22f;
         const float BandHeight = 44f;
@@ -102,8 +110,8 @@ namespace TJ.Choice.EditorTools
         static Sprite mount, solid, glow, edgeFade;
         static Image.Type glowType;
         static float glowPixelsPerUnit;
-        static Sprite prestigeIcon, swordsIcon, lockIcon, flagIcon, goldIcon;
-        static GameObject basicBackground, recruitCardPrefab, ordealIconPrefab;
+        static Sprite prestigeIcon, swordsIcon, lockIcon, flagIcon, goldIcon, fateshineIcon;
+        static GameObject basicBackground, recruitCardPrefab, ordealIconPrefab, standardButton;
 
         static void LoadAssets()
         {
@@ -116,14 +124,10 @@ namespace TJ.Choice.EditorTools
             sheet.TryGetValue("TooltipSolid", out solid);
             if (mount == null || solid == null) Debug.LogError("ChoicePanelBuilder: tooltip sheet sprites missing.");
 
-            // The focus glow of the button family, so a focused card reads like a focused button.
-            GameObject buttonBase = Load<GameObject>(ButtonBasePath);
-            Transform highlight = buttonBase != null ? buttonBase.transform.Find("Background/UI Assets/Selection Highlight") : null;
-            Image highlightImage = highlight != null ? highlight.GetComponent<Image>() : null;
-            if (highlightImage == null) Debug.LogError("ChoicePanelBuilder: Button Base has no Selection Highlight image.");
-            glow = highlightImage != null ? highlightImage.sprite : null;
-            glowType = highlightImage != null ? highlightImage.type : Image.Type.Simple;
-            glowPixelsPerUnit = highlightImage != null ? highlightImage.pixelsPerUnitMultiplier : 1f;
+            // Hover halo and picked glow use the ModernUIPack flat shadow, the project's highlight sprite.
+            glow = Load<Sprite>("Assets/ImportedPackages/ModernUIPack/Textures/Shadow/Flat Shadow.png");
+            glowType = Image.Type.Sliced;
+            glowPixelsPerUnit = 1f;
 
             edgeFade = Load<Sprite>("Assets/ImportedPackages/ModernUIPack/Textures/Shadow/Vertical Shadow.png");
             prestigeIcon = Load<Sprite>("Assets/Art/Icons/Events/PrestigeUnit.png");
@@ -134,6 +138,8 @@ namespace TJ.Choice.EditorTools
             basicBackground = Load<GameObject>(BasicBackgroundPath);
             recruitCardPrefab = Load<GameObject>(RecruitCardPath);
             ordealIconPrefab = Load<GameObject>(OrdealIconPath);
+            standardButton = Load<GameObject>(StandardButtonPath);
+            fateshineIcon = Load<Sprite>(FateshineIconPath);
         }
 
         static T Load<T>(string path) where T : Object
@@ -174,6 +180,11 @@ namespace TJ.Choice.EditorTools
             ("ordealCardRedrawsMap", "Redraws this act's map."),
             ("treasureGear", "Gear"),
             ("treasureConsumables", "Consumables"),
+            ("prestigeReroll", "Reroll traits"),
+            ("prestigeRerollCount", "Reroll traits ({0})"),
+            ("prestigeRerollHint", "You carry a Fateshine Elixir. Drink it to deal three new traits."),
+            ("prestigeRerollTooltip", "Drink a Fateshine Elixir to replace these three traits with new ones."),
+            ("prestigeRerollNeedsElixir", "Acquire a Fateshine Elixir to reroll these traits."),
         };
 
         static StringTableCollection collection;
@@ -238,6 +249,13 @@ namespace TJ.Choice.EditorTools
             so.ApplyModifiedPropertiesWithoutUndo();
             text.text = English(key);
         }
+
+        // For text the panel fills at run time; a localizer would overwrite it on every locale change.
+        static void Unlocalize(TMP_Text text, string placeholder)
+        {
+            foreach (LocalizeStringEvent localizer in text.GetComponents<LocalizeStringEvent>()) Object.DestroyImmediate(localizer);
+            text.text = placeholder;
+        }
         #endregion
 
         #region Entry points
@@ -267,6 +285,18 @@ namespace TJ.Choice.EditorTools
             EnsureCard(false);
             EnsureWideCard(false);
             BuildPanel(TreasurePanelPath, "Treasure Panel UI", PanelKind.Treasure);
+        }
+
+        /// <summary>Builds only the Prestige panel and what it needs, leaving the Ordeal and Treasure panels as they are.</summary>
+        [MenuItem("Tabletop Tavern/Choice Panels/Rebuild Prestige Panel")]
+        public static void BuildPrestigePanel()
+        {
+            EnsureKeys();
+            LoadAssets();
+            LoadTable();
+            EnsureCard(false);
+            EnsureWideCard(false);
+            BuildPanel(PrestigePanelPath, "Prestige Panel UI", PanelKind.Prestige);
         }
 
         [MenuItem("Tabletop Tavern/Choice Panels/Reset Card Part")]
@@ -621,7 +651,43 @@ namespace TJ.Choice.EditorTools
             {
                 AddNewChip();
                 AddBandGlow();
+                AddWatermark();
             }
+        }
+
+        // A barely-there crest filling the card inside a 40 px margin, so a card with one line of text is not an empty
+        // well. It sits under the text, never takes clicks, and is added once so hand edits to it survive a rebuild.
+        static void AddWatermark()
+        {
+            GameObject root = PrefabUtility.LoadPrefabContents(CardPath);
+            try
+            {
+                Transform lift = root.transform.Find("Pop/Lift");
+                if (lift == null) { Debug.LogError("ChoicePanelBuilder: Choice Card has no Pop/Lift; watermark not added."); return; }
+                if (lift.Find("Watermark") != null) return;
+                Sprite crest = AssetDatabase.LoadAssetAtPath<Sprite>("Assets/Synty/InterfaceFantasyMenus/Sprites/Crests/SPR_FantasyMenus_Crest_Brackets_06_Blue.png");
+                if (crest == null) { Debug.LogError("ChoicePanelBuilder: watermark sprite missing."); return; }
+                Image mark = Img(Rect("Watermark", lift), crest, new Color(1f, 1f, 1f, 4f / 255f), Image.Type.Sliced);
+                mark.raycastTarget = false;
+                mark.preserveAspect = true;
+                mark.pixelsPerUnitMultiplier = 2f;
+                RectTransform r = mark.rectTransform;
+                r.anchorMin = Vector2.zero;
+                r.anchorMax = Vector2.one;
+                r.pivot = new Vector2(0.5f, 0f);
+                r.sizeDelta = new Vector2(-80f, -120f);
+                r.anchoredPosition = new Vector2(0f, 40f);
+                Transform content = lift.Find("Content");
+                if (content != null) mark.transform.SetSiblingIndex(content.GetSiblingIndex());
+                Normalize(root);
+                PrefabUtility.SaveAsPrefabAsset(root, CardPath);
+                Debug.Log($"ChoicePanelBuilder: added the tracery watermark to {CardPath}");
+            }
+            finally
+            {
+                PrefabUtility.UnloadPrefabContents(root);
+            }
+            cardPart = AssetDatabase.LoadAssetAtPath<GameObject>(CardPath);
         }
 
         // Swaps a card part's inset band fill for the centre glow under the frame, in place, keeping hand edits to the part.
@@ -1013,7 +1079,7 @@ namespace TJ.Choice.EditorTools
             // Shrinks the whole stack when UI Scale leaves a smaller canvas than it needs.
             UIFitToCanvas fit = stack.gameObject.AddComponent<UIFitToCanvas>();
             var fitSo = new SerializedObject(fit);
-            fitSo.FindProperty("designSize").vector2Value = prestige ? new Vector2(1480f, 800f) : new Vector2(1300f, 800f);
+            fitSo.FindProperty("designSize").vector2Value = prestige ? new Vector2(1480f, 880f) : new Vector2(1300f, 800f);
             fitSo.ApplyModifiedPropertiesWithoutUndo();
 
             BuildTitle(stack, so, prestige);
@@ -1029,6 +1095,7 @@ namespace TJ.Choice.EditorTools
                 HLayout(cards, PrestigeCardGap, TextAnchor.MiddleCenter, new RectOffset());
                 Ref(so, "recruitSlot", slot);
                 Ref(so, "recruitCardPrefab", recruitCardPrefab.GetComponent<RecruitCard>());
+                BuildRerollRow(stack, so);
             }
             else
             {
@@ -1040,6 +1107,61 @@ namespace TJ.Choice.EditorTools
             Ref(so, "cardPrefab", cardPart.GetComponent<ChoiceCardView>());
             so.FindProperty("cardSize").vector2Value = prestige ? PrestigeCardSize : OrdealCardSize;
             so.ApplyModifiedPropertiesWithoutUndo();
+        }
+
+        // The Fateshine reroll under the Prestige cards: a Standard button in a Pop wrapper the panel pulses, and a hint line.
+        // The row lands on the army bar, so it sits on the game's Basic Background to stay readable.
+        static void BuildRerollRow(RectTransform stack, SerializedObject so)
+        {
+            RectTransform row = Rect("Reroll Row", stack);
+            int padX = Mathf.RoundToInt(RerollPlatePadX);
+            HLayout(row, 18f, TextAnchor.MiddleCenter, new RectOffset(padX, padX, 0, 0));
+            Fixed(row.gameObject, -1f, RerollButtonSize.y);
+
+            GameObject background = Instance(basicBackground, row, "Basic Background");
+            Stretch((RectTransform)background.transform, 0f, 0f, -RerollPlatePadY, -RerollPlatePadY);
+            Ignore(background);
+
+            RectTransform pop = Rect("Pop", row);
+            Fixed(pop.gameObject, RerollButtonSize.x, RerollButtonSize.y);
+            CanvasGroup group = pop.gameObject.AddComponent<CanvasGroup>();
+            GameObject button = Instance(standardButton, pop, "Reroll");
+            Stretch((RectTransform)button.transform);
+            TMP_Text label = Child<TMP_Text>(button.transform, "Button Label");
+            Unlocalize(label, English("prestigeReroll"));
+            label.alignment = TextAlignmentOptions.Center;
+            label.enableAutoSizing = true;
+            label.fontSizeMin = 14f;
+            label.fontSizeMax = 20f;
+            label.textWrappingMode = TextWrappingModes.NoWrap;
+            label.margin = new Vector4(50f, 0f, 14f, 0f);
+            Image icon = Child<Image>(button.transform, "Icon");
+            if (icon != null)
+            {
+                icon.gameObject.SetActive(true);
+                icon.sprite = fateshineIcon;
+                icon.color = Color.white;
+                icon.preserveAspect = true;
+                RectTransform iconRect = icon.rectTransform;
+                iconRect.anchorMin = iconRect.anchorMax = new Vector2(0f, 0.5f);
+                iconRect.pivot = new Vector2(0.5f, 0.5f);
+                iconRect.sizeDelta = new Vector2(RerollIconSize, RerollIconSize);
+                iconRect.anchoredPosition = new Vector2(30f, 0f);
+            }
+            MemoriTooltipTrigger tooltip = GetOrAdd<MemoriTooltipTrigger>(button);
+
+            TMP_Text hint = Text("Hint", row, displayDrop, 16f, Flavour, English("prestigeRerollHint"));
+            hint.fontStyle = FontStyles.Italic;
+
+            row.gameObject.SetActive(false);
+            Ref(so, "rerollRow", row.gameObject);
+            Ref(so, "rerollPop", pop);
+            Ref(so, "rerollGroup", group);
+            Ref(so, "rerollIcon", icon);
+            Ref(so, "rerollButton", button.GetComponent<Button>());
+            Ref(so, "rerollLabel", label);
+            Ref(so, "rerollTooltip", tooltip);
+            Ref(so, "rerollHint", hint);
         }
 
         // The scene's title banner stays above, so the stack is a count line, the gear cards, then the Or line and wide card.

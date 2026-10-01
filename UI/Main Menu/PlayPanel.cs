@@ -162,8 +162,22 @@ namespace TJ.MainMenu
             if (rosterCount > 0) EventSystem.current.SetSelectedGameObject(tiles[openingIndex].gameObject);
 
             startingGearLocked = !SaveDataHandler.IsMetaprogressionNodeUnlocked(_startingArmyUnlockMetaprogressionModel);
+            // The camera door is the arrival sound; the hero and screen this panel picks for itself stay silent.
+            silentSetUp = true;
             LoadHeroes(openingHero);
             ShowCommanderScreen();
+            silentSetUp = false;
+        }
+
+        private bool silentSetUp;
+        private Coroutine screenSwap;
+
+        // The incoming screen fades in and rises a little; the outgoing one is already hidden by CGDisable.
+        private void PlayScreenSwap(MemoriCanvasGroup incoming)
+        {
+            if (screenSwap != null) StopCoroutine(screenSwap);
+            screenSwap = StartCoroutine(UIJuice.Open(incoming.GetComponent<CanvasGroup>(), incoming.transform as RectTransform, UIJuice.SwapTime, 16f));
+            if (!silentSetUp) IAudioRequester.Instance.PlaySFX(SFXData.CardFlip);
         }
 
         public override async void ClosePanel()
@@ -186,7 +200,7 @@ namespace TJ.MainMenu
             commanderScreen.CGEnable();
             warbandScreen.CGDisable();
             SetFireplaceShadowsLive(true);
-            IAudioRequester.Instance.PlaySFX(SFXData.ButtonHover);
+            PlayScreenSwap(commanderScreen);
         }
 
         public void ShowWarbandScreen()
@@ -209,7 +223,9 @@ namespace TJ.MainMenu
 
             warbandScreen.CGEnable();
             commanderScreen.CGDisable();
-            IAudioRequester.Instance.PlaySFX(SFXData.ButtonHover);
+            // Keys and a controller stay on the warband screen instead of wandering onto the hero roster behind it.
+            ContainedNavigation.Attach(warbandScreen.gameObject);
+            PlayScreenSwap(warbandScreen);
         }
 
         /// <summary>
@@ -298,7 +314,7 @@ namespace TJ.MainMenu
 
             LoadHeroPrefab();
 
-            IAudioRequester.Instance.PlaySFX(SFXData.SelectHero);
+            if (!silentSetUp) IAudioRequester.Instance.PlaySFX(SFXData.SelectHero);
 
             List<int> maxDifficultyComletedOnHero = SaveDataHandler.GetHeroDifficultiesCompleted(hero.HeroID);
 
@@ -343,7 +359,8 @@ namespace TJ.MainMenu
             ShowHeroDetailsBox(hero);
             startingArmySection.LoadUnitsOfRace(hero.Race);
 
-            LoadDifficulty(SaveDataHandler.GetHeroLastDifficulty(_hero.HeroID));
+            // The hero pick has its own sound; the difficulty that comes with it stays quiet.
+            LoadDifficulty(SaveDataHandler.GetHeroLastDifficulty(_hero.HeroID), true);
 
             // A different hero means a different signature spell, so the loadout is rebuilt rather
             // than carried over.
@@ -460,11 +477,11 @@ namespace TJ.MainMenu
                 LoadDifficulty(DifficultyRules.Previous(_difficultySelected));
             }
         }
-        public void LoadDifficulty(TT_Difficulty _selectedDifficulty)
+        public void LoadDifficulty(TT_Difficulty _selectedDifficulty, bool silent = false)
         {
             // A saved last difficulty can come from the other ladder.
             _difficultySelected = DifficultyRules.Normalize(_selectedDifficulty);
-            IAudioRequester.Instance.PlaySFX(SFXData.ChangeDifficulty);
+            if (!silent) IAudioRequester.Instance.PlaySFX(SFXData.ChangeDifficulty);
 
             //get selected difficulty data
             DifficultyLevel difficultyData = DifficultyData.GetDifficultyLevelData(_difficultySelected);

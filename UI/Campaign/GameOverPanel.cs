@@ -153,6 +153,8 @@ public class GameOverPanel : MonoBehaviour
         if (_unlocksNewHero && heroUnlockRow != null)
             await ShowHeroUnlockScreen();
         await FadeInStatsSequentially();
+        // Main Menu works during the fade-in; once the map unloads, the tip would open over the menu.
+        if (this == null) return;
         TutorialManager.Instance.LoadStepsFromRandomSpot(new TutorialStep[1] { TutorialData.RenownCarriesOver });
     }
 

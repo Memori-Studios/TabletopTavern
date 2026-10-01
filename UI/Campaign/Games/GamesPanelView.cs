@@ -2,6 +2,7 @@ using System.Collections;
 using TMPro;
 using UnityEngine;
 using UnityEngine.UI;
+using Memori.UI;
 
 namespace TJ.Games
 {
@@ -11,6 +12,14 @@ namespace TJ.Games
     /// </summary>
     public class GamesPanelView : MonoBehaviour
     {
+        // A click on a stake, Play or Buy a Round the player cannot afford shakes it; these buttons are switched off then.
+        public void AttachDenyFeedback()
+        {
+            foreach (GamesStakeButton stake in stakeButtons) if (stake != null) UIDenyFeedback.Attach(stake.Button);
+            UIDenyFeedback.Attach(playButton);
+            UIDenyFeedback.Attach(buyButton);
+        }
+
         public enum Table { Dice, HigherLower, Round }
 
         #region Card

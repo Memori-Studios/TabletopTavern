@@ -209,8 +209,16 @@ namespace TJ.Recruit
                 graphic.raycastTarget = false;
             }
 
-            loadInMMF.PlayFeedbacks();
-            cardParentTransform.rotation = Quaternion.Euler(0, -90, 0);
+            ShowFaceUp();
+        }
+
+        // The end state of loadInMMF without the fly-in and flip: a display card is already in place when its panel opens.
+        void ShowFaceUp()
+        {
+            cardBackGO.SetActive(false);
+            cardParentTransform.localRotation = Quaternion.identity;
+            SetTierParticlesActive(squadStats.RarityTier != UnitRarity.Common);
+            if (TryGetComponent(out Memori3DCard tilt)) tilt.enabled = true;
         }
 
         /// <summary>Redraws the stats and traits at a prestige level, so the Prestige III picker can show the step up.</summary>
@@ -372,18 +380,19 @@ namespace TJ.Recruit
         public void PlayCardFlipSFX()
         {
             IAudioRequester.Instance.PlaySFX(SFXData.CardFlip);
-            if(squadStats.RarityTier != UnitRarity.Common) 
-            {
-                _tierParticleSystem1.gameObject.SetActive(true);
-                _tierParticleSystem2.gameObject.SetActive(true);
-                _tierParticleSystem3.gameObject.SetActive(true);
-                _tierParticleSystem4.gameObject.SetActive(true);
-            }
+            if(squadStats.RarityTier != UnitRarity.Common) SetTierParticlesActive(true);
             if (displayOnly) return;
             canInteract = true;
             StartHoverMotion();
             if (isPointerOver) BeginHover();
             else recruitPanel.ReapplyHoveredCard();
+        }
+        void SetTierParticlesActive(bool active)
+        {
+            _tierParticleSystem1.gameObject.SetActive(active);
+            _tierParticleSystem2.gameObject.SetActive(active);
+            _tierParticleSystem3.gameObject.SetActive(active);
+            _tierParticleSystem4.gameObject.SetActive(active);
         }
         public void DarkenCard()
         {

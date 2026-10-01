@@ -132,6 +132,7 @@ namespace TJ.Games
             SetGamesPanelVisible(true);
             GamePlayerLoader.Instance.MoveToGames();
             panelCanvasGroup.CGEnable();
+            StartCoroutine(UIJuice.Open(panelCanvasGroup.GetComponent<CanvasGroup>(), view.transform as RectTransform));
             OpenFeedback.PlayFeedbacks();
 
             if (resuming)
@@ -141,6 +142,7 @@ namespace TJ.Games
             }
 
             UpdateAffordability(0); // argument unused; buttons read gold live
+            view.AttachDenyFeedback();
             await Task.Delay(400);
             if (this == null) return;
 
@@ -196,6 +198,8 @@ namespace TJ.Games
             }
             activeGame = TableGame.Round;
             CampaignManager.Instance.GoldManager.ModifyGold(-BuyARoundCost, Text("BuyARound"));
+            TabletopTavern.Analytics.NodeLog.Try("games round", () => TabletopTavern.Analytics.NodeLog.Set("game",
+                new System.Collections.Generic.Dictionary<string, object> { { "t", "Round" }, { "net", -BuyARoundCost } }));
             campaignSaveManager.ModifyTroopHealth(BuyARoundHealAmount);
             IAudioRequester.Instance.PlaySFX(SFXData.Purchase);
 
@@ -210,6 +214,18 @@ namespace TJ.Games
         // Writes the table's state to the snapshot; Continue then reopens it here instead of offering the bet again.
         private void LockTable(int _tableGame, int _stake, int _playerFace, int _houseFace, int _phase, int _goldChange)
         {
+            // Every table state passes through here, so the node log keeps the latest one: how the game ended.
+            TabletopTavern.Analytics.NodeLog.Try("games table", () => TabletopTavern.Analytics.NodeLog.Set("game",
+                new System.Collections.Generic.Dictionary<string, object>
+                {
+                    { "t", _tableGame == TableDice ? "Dice" : "HigherLower" },
+                    { "stake", _stake },
+                    { "p", _playerFace },
+                    { "h", _houseFace },
+                    { "wins", higherLowerWins },
+                    { "phase", _phase },
+                    { "net", _goldChange },
+                }));
             campaignSaveManager.LockNodeResult(new NodeResume
             {
                 nodeIndex  = mapSceneUIManager.LayerNodeSelected,
@@ -603,6 +619,7 @@ namespace TJ.Games
 
         public void Rewind()
         {
+            TabletopTavern.Analytics.NodeLog.Count("rewinds");
             if (activeGame == TableGame.HigherLower)
             {
                 RewindHigherLowerCall();

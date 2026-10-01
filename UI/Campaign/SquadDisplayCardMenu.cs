@@ -693,6 +693,8 @@ namespace TJ
             string leadershipLocalised = LocalizationManager.Instance.GetText("Leadership");
             string accuracyLocalised = LocalizationManager.Instance.GetText("Accuracy");
             string rangeLocalised = LocalizationManager.Instance.GetText("Range");
+            string castRangeLocalised = LocalizationManager.Instance.GetText("SpellStatCastRange");
+            string chargesLocalised = LocalizationManager.Instance.GetText("SpellStatCharges");
             string ammunitionLocalised = LocalizationManager.Instance.GetText("Ammunition");
             string andLocalised = LocalizationManager.Instance.GetText("and");
             string perLevelLocalised = LocalizationManager.Instance.GetText("PerLevel");
@@ -707,7 +709,7 @@ namespace TJ
                 // Range, Leadership and charges - no Accuracy. The branch above is an explicit
                 // whitelist and this one is neither of the first two, so without it a mage's
                 // prestige tooltip renders with no gains listed at all.
-                prestigeTooltipLocalised += $"{unitTypeTag} {unitsGainLocalised} <color={ColorData.Green}>+{TabletopTavernConstants.PRESTIGE_BONUS}</color> <color={ColorData.UnitStat}>{rangeLocalised}</color>, <color={ColorData.Green}>+{TabletopTavernConstants.PRESTIGE_BONUS}</color> <color={ColorData.UnitStat}>{leadershipLocalised}</color> {andLocalised} <color={ColorData.Green}>+{TabletopTavernConstants.PRESTIGE_AMMO_BONUS_MAGE}</color> <color={ColorData.UnitStat}>{ammunitionLocalised}</color> {perLevelLocalised}";
+                prestigeTooltipLocalised += $"{unitTypeTag} {unitsGainLocalised} <color={ColorData.Green}>+{TabletopTavernConstants.PRESTIGE_BONUS}</color> <color={ColorData.UnitStat}>{castRangeLocalised}</color>, <color={ColorData.Green}>+{TabletopTavernConstants.PRESTIGE_BONUS}</color> <color={ColorData.UnitStat}>{leadershipLocalised}</color> {andLocalised} <color={ColorData.Green}>+{TabletopTavernConstants.PRESTIGE_AMMO_BONUS_MAGE}</color> <color={ColorData.UnitStat}>{chargesLocalised}</color> {perLevelLocalised}";
             }
 
             string renameLocalised = LocalizationManager.Instance.GetText("Rename Unit");

@@ -45,6 +45,9 @@ namespace TJ
         // Original AgentLocomotion.Speed per squad entity, cached before the march cap is applied.
         private readonly Dictionary<Entity, float> _cachedCavalrySpeeds = new();
 
+        // Squad health when the march began; any loss after it releases that squad to flank.
+        private readonly Dictionary<Entity, int> _marchStartHealth = new();
+
         // Speed cap applied during the march phase; set from the slowest infantry at battle start.
         private float _cavalryMarchSpeedCap;
 
@@ -86,6 +89,7 @@ namespace TJ
             }
             _pendingFlankSquads.Clear();
             _cachedCavalrySpeeds.Clear();
+            _marchStartHealth.Clear();
             _flankingSquads.Clear();
             _flankStillSince.Clear();
             _flankLastCenter.Clear();
@@ -132,6 +136,7 @@ namespace TJ
         public void OnAggressiveStarted()
         {
             _pendingFlankSquads.Clear();
+            _marchStartHealth.Clear();
             _flanksReleased = false;
         }
 
@@ -148,6 +153,7 @@ namespace TJ
             if (attrs.Outrider) return false;
 
             _pendingFlankSquads.Add(entity);
+            _marchStartHealth[entity] = _entityManager.GetComponentData<SquadStateComponent>(entity).CurrentHealthValue;
             _entityManager.SetComponentEnabled<WaitingForCommand>(entity, false);
             ApplyCavalryMarchSpeed(entity);
             return true;
@@ -161,6 +167,7 @@ namespace TJ
         {
             WatchForStalledFlanks();
             if (_flanksReleased || _pendingFlankSquads.Count == 0) return;
+            ReleaseInterruptedMarches();
             MarchCavalryWithInfantry();
             CheckForFlankRelease();
         }
@@ -252,6 +259,34 @@ namespace TJ
             }
         }
 
+        /// <summary>
+        /// Takes squads out of the march when they were intercepted or hit before the general release.
+        /// </summary>
+        private void ReleaseInterruptedMarches()
+        {
+            for (int i = _pendingFlankSquads.Count - 1; i >= 0; i--)
+            {
+                Entity entity = _pendingFlankSquads[i];
+                if (!_entityManager.Exists(entity) || _entityManager.HasComponent<BrokenSquadTag>(entity)) continue;
+
+                // CavalryFlankingJob already sent it at an interceptor; another march order would cancel that charge.
+                if (!_entityManager.HasComponent<CavalryFlankingTag>(entity))
+                {
+                    RestoreCavalrySpeed(entity);
+                    _pendingFlankSquads.RemoveAt(i);
+                    continue;
+                }
+
+                // A marching squad ignores every target, so one under fire would stand and take it.
+                int health = _entityManager.GetComponentData<SquadStateComponent>(entity).CurrentHealthValue;
+                if (!_marchStartHealth.TryGetValue(entity, out int startHealth) || health >= startHealth) continue;
+
+                RestoreCavalrySpeed(entity);
+                OrderSquadToFlank(_entityManager.GetComponentData<SquadEntity>(entity));
+                _pendingFlankSquads.RemoveAt(i);
+            }
+        }
+
         #endregion
 
         #region Flank Release
@@ -310,8 +345,10 @@ namespace TJ
         #region Centroid and Flank X Calculation
 
         /// <summary>
-        /// Returns the average world position of all non-outrider, non-pending-cavalry enemy
-        /// squads. Used as the infantry front line reference for march pacing and release detection.
+        /// Returns the average world position of the enemy squads that fight in melee, excluding
+        /// outriders and cavalry. Used as the infantry front line reference for march pacing
+        /// and release detection. Artillery and archers stay back, and cavalry released early is off
+        /// on a flank, so counting either would pull the reference away from the fighting.
         /// Returns float3.zero if no qualifying squads exist.
         /// </summary>
         private float3 ComputeInfantryMeleeCentroid()
@@ -325,7 +362,9 @@ namespace TJ
                 if (_pendingFlankSquads.Contains(e)) continue;
 
                 SquadEntity se = _entityManager.GetComponentData<SquadEntity>(e);
-                if (TabletopTavernData.Instance.GetSquadStats(se.UnitName).SquadAttributes.Outrider) continue;
+                SquadStats stats = TabletopTavernData.Instance.GetSquadStats(se.UnitName);
+                if (stats.SquadAttributes.Outrider || !TabletopTavernConstants.FightsInMelee(stats.unitType)) continue;
+                if (TabletopTavernData.Instance.GetUnitSizeFromUnitName(se.UnitName) == UnitSize.Cavalry) continue;
 
                 centroid += _entityManager.GetComponentData<SquadMovementComponent>(e).SquadCenter;
                 count++;
@@ -349,6 +388,8 @@ namespace TJ
             foreach (Entity e in enemyEntities)
             {
                 if (_pendingFlankSquads.Contains(e)) continue;
+                // Cavalry already released is out on a flank and would widen the next flank past the formation.
+                if (TabletopTavernData.Instance.GetUnitSizeFromUnitName(_entityManager.GetComponentData<SquadEntity>(e).UnitName) == UnitSize.Cavalry) continue;
                 SquadMovementComponent em = _entityManager.GetComponentData<SquadMovementComponent>(e);
                 if (em.BoundsMin.x < leftEdge)  leftEdge  = em.BoundsMin.x;
                 if (em.BoundsMax.x > rightEdge) rightEdge = em.BoundsMax.x;

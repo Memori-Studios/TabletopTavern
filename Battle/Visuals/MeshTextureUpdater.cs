@@ -21,7 +21,12 @@ public class MeshTextureUpdater : MonoBehaviour
     // Per-renderer override; writing the RenderTexture into the shared material asset blanks its slot on any save.
     private MaterialPropertyBlock splatPropertyBlock;
     private Material splatStampMaterial;
-    private List<Vector3> splatPoints = new List<Vector3>();
+    private struct PendingSplat
+    {
+        public Vector3 Point;
+        public Color Color;
+    }
+    private List<PendingSplat> pendingSplats = new List<PendingSplat>();
     private struct Triangle
     {
         public Vector3 v0, v1, v2;
@@ -152,10 +157,10 @@ public class MeshTextureUpdater : MonoBehaviour
     private static int CellCoord(float v) => Mathf.FloorToInt(v / TriangleCellSize);
     private static long CellKey(int cx, int cz) => ((long)cx << 32) ^ (uint)cz;
 
-    public void ApplySplatAtPoint(Vector3 worldPoint, Vector2? overrideUV = null)
+    /// <summary>Queues a splat; the white splat image takes <paramref name="color"/> (as picked, not linear) as its whole colour.</summary>
+    public void ApplySplatAtPoint(Vector3 worldPoint, Color color)
     {
-        splatPoints.Add(worldPoint);
-        // Debug.Log($"Added splat point at {worldPoint}. Override UV: {overrideUV}. Total splat points: {splatPoints.Count}");
+        pendingSplats.Add(new PendingSplat { Point = worldPoint, Color = color });
     }
     public void ExplosionAtPoint(Vector3 worldPoint)
     {
@@ -183,27 +188,27 @@ public class MeshTextureUpdater : MonoBehaviour
     {
         while (true)
         {
-            if (splatPoints.Count > 0 && workingTexture != null)
+            if (pendingSplats.Count > 0 && workingTexture != null)
             {
-                int pointsToProcess = Mathf.Min(splatPoints.Count, 5);
+                int pointsToProcess = Mathf.Min(pendingSplats.Count, 5);
                 RenderTexture previous = RenderTexture.active;
                 Graphics.SetRenderTarget(workingTexture);
                 GL.PushMatrix();
                 GL.LoadPixelMatrix(0, workingTexture.width, 0, workingTexture.height);
                 for (int i = 0; i < pointsToProcess; i++)
                 {
-                    StampSplat(splatPoints[i]);
+                    StampSplat(pendingSplats[i].Point, pendingSplats[i].Color);
                 }
                 GL.PopMatrix();
                 RenderTexture.active = previous;
-                splatPoints.RemoveRange(0, pointsToProcess);
+                pendingSplats.RemoveRange(0, pointsToProcess);
             }
             yield return null;
         }
     }
 
     // Caller has the working texture bound and a pixel-space GL matrix loaded.
-    private void StampSplat(Vector3 worldPoint)
+    private void StampSplat(Vector3 worldPoint, Color color)
     {
         if (meshFilter == null || splatTextures.Length == 0) return;
 
@@ -227,7 +232,8 @@ public class MeshTextureUpdater : MonoBehaviour
         splatStampMaterial.mainTexture = splatTexture;
         splatStampMaterial.SetPass(0);
         GL.Begin(GL.QUADS);
-        GL.Color(Color.white);
+        // GL.Color reaches the shader unconverted, so a picked (sRGB) colour must go in as linear.
+        GL.Color(color.linear);
         GL.TexCoord2(0f, 0f); GL.Vertex3(centerX - half, centerY - half, 0f);
         GL.TexCoord2(0f, 1f); GL.Vertex3(centerX - half, centerY + half, 0f);
         GL.TexCoord2(1f, 1f); GL.Vertex3(centerX + half, centerY + half, 0f);

@@ -18,9 +18,14 @@ namespace TJ.Spells
         private const float GridRiseAboveHotbar = 160f;
 
         public const string PrefsKey = "TabletopTavern.SpellTestMode";
+        // Off in any build without TESTING, so a PlayerPrefs value left from a playtest build can't switch it on.
         public static bool Enabled
         {
+#if TESTING
             get => PlayerPrefs.GetInt(PrefsKey, 0) == 1;
+#else
+            get => false;
+#endif
             set => PlayerPrefs.SetInt(PrefsKey, value ? 1 : 0);
         }
 

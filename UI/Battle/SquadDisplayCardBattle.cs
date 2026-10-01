@@ -75,7 +75,7 @@ public class SquadDisplayCardBattle : SquadDisplayCard, IDragHandler, IEndDragHa
         }
 
         isMoving = entityManager.HasComponent<SquadMoveOverrideTag>(squadEntity.SelfEntity);
-        isCharging = entityManager.HasComponent<ChargeSquad>(squadEntity.SelfEntity);
+        isCharging = entityManager.HasComponent<SprintingTag>(squadEntity.SelfEntity);
         isBracing = entityManager.IsComponentEnabled<BracedTag>(squadEntity.SelfEntity);
         defensiveStance = entityManager.IsComponentEnabled<DefensiveStanceTag>(squadEntity.SelfEntity);
         inMeleeCombat = entityManager.HasComponent<InCombat>(squadEntity.SelfEntity);

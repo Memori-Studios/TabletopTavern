@@ -1,5 +1,7 @@
 using System;
+using Memori.Audio;
 using Memori.SaveData;
+using Memori.UI;
 using TMPro;
 using UnityEngine;
 using UnityEngine.EventSystems;
@@ -57,11 +59,13 @@ namespace TJ.Campfire
 
             button.onClick.RemoveAllListeners();
             if (trainable) button.onClick.AddListener(() => onPicked?.Invoke(squad));
+            if (trainable) UIHoverBloom.Attach(gameObject, null, 1.04f, false);
         }
 
         public void OnPointerEnter(PointerEventData eventData)
         {
             hoverRing.enabled = trainable;
+            if (trainable) IAudioRequester.Instance.PlaySFX(SFXData.LightMouseOver);
             onHovered?.Invoke(squad, true);
             if (!CampaignManager.HasInstance) return;
             CampaignManager.Instance.MapSceneUIManager.HUDPanel.HoverSquad(squad, true, transform);

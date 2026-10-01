@@ -100,7 +100,6 @@ namespace TJ
         private const float SPELL_BAR_MAX_STAT = 50f;
         private const float SPELL_BAR_MAX_PERCENT = 100f;
         private const float SPELL_BAR_MAX_AREA = 30f;
-        private const float SPELL_BAR_MAX_RANGE = 100f;
         private const float SPELL_BAR_MAX_COOLDOWN = 60f;
         private const float SPELL_BAR_MAX_DURATION = 30f;
 
@@ -198,7 +197,7 @@ namespace TJ
         {
             if (SettingsManager.Instance.HideSquadInfoInBattle.Value)
             {
-                tooltipCanvasGroup.CGDisable();
+                Unhover();
                 return;
             }
             EntityManager entityManager = World.DefaultGameObjectInjectionWorld.EntityManager;
@@ -282,7 +281,7 @@ namespace TJ
             if (battlefieldBonusCount != currentBonusBufferSize)
             {
                 battlefieldBonusCount = currentBonusBufferSize;
-                unitStatsUIContainer.Load(squadStats.unitName, applyGearBonuses, prestige, prestigeTrait);
+                LoadStats();
             }
             else if (entityManager.HasComponent<CrashingHordeComponent>(squadEntity.SelfEntity))
             {
@@ -290,7 +289,7 @@ namespace TJ
                 if (lastCrashingHordeStacks != currentWarbandStacks)
                 {
                     lastCrashingHordeStacks = currentWarbandStacks;
-                    unitStatsUIContainer.Load(squadStats.unitName, applyGearBonuses, prestige, prestigeTrait);
+                    LoadStats();
                 }
             }
             else if (entityManager.HasComponent<DeathcryComponent>(squadEntity.SelfEntity))
@@ -299,7 +298,7 @@ namespace TJ
                 if (lastDeathcryBonus != currentDeathcryBonus)
                 {
                     lastDeathcryBonus = currentDeathcryBonus;
-                    unitStatsUIContainer.Load(squadStats.unitName, applyGearBonuses, prestige, prestigeTrait);
+                    LoadStats();
                 }
             }
             else if (entityManager.HasComponent<HuntersPatienceComponent>(squadEntity.SelfEntity))
@@ -308,7 +307,7 @@ namespace TJ
                 if (lastHuntersPatienceBonus != currentPatienceBonus)
                 {
                     lastHuntersPatienceBonus = currentPatienceBonus;
-                    unitStatsUIContainer.Load(squadStats.unitName, applyGearBonuses, prestige, prestigeTrait);
+                    LoadStats();
                 }
             }
             else if (entityManager.HasComponent<KenseiEyeComponent>(squadEntity.SelfEntity))
@@ -317,7 +316,7 @@ namespace TJ
                 if (lastKenseiEyeStage != currentStage)
                 {
                     lastKenseiEyeStage = currentStage;
-                    unitStatsUIContainer.Load(squadStats.unitName, applyGearBonuses, prestige, prestigeTrait);
+                    LoadStats();
                 }
             }
             else if (entityManager.HasComponent<OathcarvedComponent>(squadEntity.SelfEntity))
@@ -326,7 +325,7 @@ namespace TJ
                 if (lastOathcarvedDeaths != currentDeaths)
                 {
                     lastOathcarvedDeaths = currentDeaths;
-                    unitStatsUIContainer.Load(squadStats.unitName, applyGearBonuses, prestige, prestigeTrait);
+                    LoadStats();
                 }
             }
             else if (entityManager.HasComponent<ApexHuntersComponent>(squadEntity.SelfEntity))
@@ -335,7 +334,7 @@ namespace TJ
                 if (lastApexHuntersStacks != currentStacks)
                 {
                     lastApexHuntersStacks = currentStacks;
-                    unitStatsUIContainer.Load(squadStats.unitName, applyGearBonuses, prestige, prestigeTrait);
+                    LoadStats();
                 }
             }
 
@@ -357,7 +356,7 @@ namespace TJ
                     if (lastAmmunition != currentAmmunition)
                     {
                         lastAmmunition = currentAmmunition;
-                        unitStatsUIContainer.Load(squadStats.unitName, applyGearBonuses, prestige, prestigeTrait);
+                        LoadStats();
                         if (spellChargesRow != null)
                             spellChargesRow.SetChargeCount(Mathf.Clamp(currentAmmunition, 0, spellMaxCharges));
                     }
@@ -396,8 +395,12 @@ namespace TJ
                 ? LocalizationManager.Instance.GetText("CooldownReady")
                 : string.Format(LocalizationManager.Instance.GetText("CooldownSeconds"), secondsRemaining.ToString("F1"));
         }
+        private void LoadStats() => unitStatsUIContainer.Load(squadStats.unitName, applyGearBonuses, prestige, prestigeTrait, squadEntity.SelfEntity);
         private void Load()
         {
+            // A new squad here makes any open comparison stale; callers re-open it after this.
+            HideComparison();
+
             // Hidden up front so a squad with no cooldown never inherits the previously hovered
             // squad's value for the frames before RefreshCooldown next ticks.
             if (cooldownGroup != null) cooldownGroup.SetActive(false);
@@ -415,7 +418,7 @@ namespace TJ
             unitAttributesUIContainer.Load(squadStats.unitName, applyGearBonuses, prestigeTrait);
 
             unitStatsUIContainer = GetComponent<UnitStatsUIContainer>();
-            unitStatsUIContainer.Load(squadStats.unitName, applyGearBonuses, prestige, prestigeTrait);
+            LoadStats();
 
             string displayName = LocalizationManager.Instance.GetText(squadStats.unitName.ToString());
             if (team == Team.Player && !isCustomBattle)
@@ -513,7 +516,16 @@ namespace TJ
 
             ShowSpellUI(true);
             // The card has its own spell tooltip, which lists the keywords, so the text is not hoverable.
-            RenderSpellCard(spell, LocalizationManager.Instance.GetText, KeywordText.Render(spell.GetLocalizedSpellDescription(), false));
+            float potency = TabletopTavernConstants.SpellPotency(CasterAttributes());
+            RenderSpellCard(spell, LocalizationManager.Instance.GetText, KeywordText.Render(spell.GetLocalizedSpellDescription(potency), false));
+        }
+
+        // The spell card's numbers are the ones this squad casts with, so its prestige trait is merged in.
+        private SquadAttributes CasterAttributes()
+        {
+            SquadAttributes attributes = squadStats.SquadAttributes;
+            if (prestigeTrait != UnitAttribute.None) TabletopTavernConstants.SetAttribute(ref attributes, prestigeTrait);
+            return attributes;
         }
 
         /// <summary>
@@ -627,11 +639,14 @@ namespace TJ
             string Signed(float value) => value > 0f ? $"+{Mathf.RoundToInt(value)}" : Mathf.RoundToInt(value).ToString();
 
             // What it does. One row per shape, keyed the way auto-resolve reads the same asset.
+            SquadAttributes caster = CasterAttributes();
+            float potency = TabletopTavernConstants.SpellPotency(caster);
+            float magnitude = spell.ScaledModifierValue(potency);
             bool overTime = !spell.IsOneOff && spell.TickInterval > 0f;
             if (spell.HealsInsteadOfDamage)
-                Row(overTime ? "SpellStatHealingPerSecond" : "SpellStatHealing", SpriteData.GetSprite("Health"), spell.SpellModifierValue, SPELL_BAR_MAX_HEALING);
+                Row(overTime ? "SpellStatHealingPerSecond" : "SpellStatHealing", SpriteData.GetSprite("Health"), magnitude, SPELL_BAR_MAX_HEALING);
             else if (spell.MarksTarget)
-                Row("SpellStatBonusDamage", SpriteData.GetSprite("MissileStrength"), spell.SpellModifierValue, SPELL_BAR_MAX_PERCENT, $"+{spell.SpellModifierValue}%");
+                Row("SpellStatBonusDamage", SpriteData.GetSprite("MissileStrength"), magnitude, SPELL_BAR_MAX_PERCENT, $"+{Mathf.RoundToInt(magnitude)}%");
             else if (spell.BracesTarget)
             {
                 // A brace has no magnitude worth a number; the description carries it.
@@ -639,25 +654,26 @@ namespace TJ
             else if (spell.BonusStats != null && spell.BonusStats.Count > 0)
             {
                 foreach (TJ.Spells.SpellBonusStat bonus in spell.BonusStats)
-                    Row(bonus.UnitStat.ToString(), SpriteData.GetSprite(bonus.UnitStat.ToString()), bonus.Value, SPELL_BAR_MAX_STAT, Signed(bonus.Value));
+                    Row(bonus.UnitStat.ToString(), SpriteData.GetSprite(bonus.UnitStat.ToString()), bonus.Value * potency, SPELL_BAR_MAX_STAT, Signed(bonus.Value * potency));
             }
             else if (spell.GrantsBattlefieldBonus)
             {
                 if (spell.BonusType == BattlefieldBonusEnum.LesserMoraleSpell)
-                    Row("SpellStatMoralePerSecond", SpriteData.GetSprite("Leadership"), spell.SpellModifierValue, SPELL_BAR_MAX_STAT, Signed(spell.SpellModifierValue));
+                    Row("SpellStatMoralePerSecond", SpriteData.GetSprite("Leadership"), magnitude, SPELL_BAR_MAX_STAT, Signed(magnitude));
                 else
-                    Row(spell.BonusUnitStat.ToString(), SpriteData.GetSprite(spell.BonusUnitStat.ToString()), spell.SpellModifierValue, SPELL_BAR_MAX_STAT, Signed(spell.SpellModifierValue));
+                    Row(spell.BonusUnitStat.ToString(), SpriteData.GetSprite(spell.BonusUnitStat.ToString()), magnitude, SPELL_BAR_MAX_STAT, Signed(magnitude));
             }
             else if (spell.SpellModifierValue > 0)
-                Row(overTime ? "SpellStatDamagePerSecond" : "SpellStatDamage", spellDamageSprite, spell.SpellModifierValue, SPELL_BAR_MAX_DAMAGE);
+                Row(overTime ? "SpellStatDamagePerSecond" : "SpellStatDamage", spellDamageSprite, magnitude, SPELL_BAR_MAX_DAMAGE);
 
-            if (spell.SpellRadius > 0f)
-                Row("SpellStatArea", spellAreaSprite, spell.SpellRadius, SPELL_BAR_MAX_AREA);
+            float radius = spell.SpellRadius * TabletopTavernConstants.SpellRadiusScale(caster);
+            if (radius > 0f)
+                Row("SpellStatArea", spellAreaSprite, radius, SPELL_BAR_MAX_AREA);
 
-            // The caster's reach and cadence, not the spell's: MageCast is seeded from SquadStats.
-            Row("SpellStatCastRange", SpriteData.GetSprite("Range"), squadStats.BaseRange, SPELL_BAR_MAX_RANGE);
-            Row("SpellStatCooldown", spellCooldownSprite, squadStats.rateOfFire, SPELL_BAR_MAX_COOLDOWN,
-                string.Format(text("CooldownSeconds"), Mathf.RoundToInt(squadStats.rateOfFire)));
+            // The caster's cadence, not the spell's. Reach is the stat list's Cast Range row, which carries its bonuses.
+            float cooldown = caster.Quickcast ? TabletopTavernConstants.QUICKCAST_COOLDOWN : squadStats.rateOfFire;
+            Row("SpellStatCooldown", spellCooldownSprite, cooldown, SPELL_BAR_MAX_COOLDOWN,
+                string.Format(text("CooldownSeconds"), Mathf.RoundToInt(cooldown)));
 
             if (spell.SpellDuration > 0f && !spell.IsOneOff)
                 Row("SpellStatDuration", spellDurationSprite, spell.SpellDuration, SPELL_BAR_MAX_DURATION,
@@ -759,11 +775,61 @@ namespace TJ
         }
         public void Unhover()
         {
+            // First, so a panel hidden behind its comparison is restored before it is switched off.
+            HideComparison();
             if (tooltipCanvasGroup.alpha > 0)
             {
                 tooltipCanvasGroup.CGDisable();
             }
         }
+
+        #region Compare panel
+        // The hovered squad's panel, shown in this one's place while another squad is selected. Made on first use.
+        private SquadBattleInfo comparePanel;
+        private bool hiddenForComparison;
+        // Room for the stat chips, which hang off the rows into the spell card's column.
+        private const float COMPARE_CHIP_CLEARANCE = 50f;
+
+        /// <summary>
+        /// Shows another squad in this panel's place, with each stat's difference from this one.
+        /// <paramref name="setUp"/> fills the copy through its usual SetUp call. Call it after this
+        /// panel's own SetUp, which closes any comparison already open.
+        /// </summary>
+        public void ShowComparison(System.Action<SquadBattleInfo> setUp)
+        {
+            if (comparePanel == null) CreateComparePanel();
+            setUp(comparePanel);
+            // Hide Squad Info In Battle leaves it hidden.
+            if (comparePanel.tooltipCanvasGroup.alpha == 0) return;
+
+            // It must not take the pointer: appearing under the cursor would end the hover that opened it.
+            comparePanel.tooltipCanvasGroup.blocksRaycasts = false;
+            comparePanel.tooltipCanvasGroup.interactable = false;
+            ((RectTransform)comparePanel.transform).anchoredPosition = ((RectTransform)transform).anchoredPosition;
+            // Alpha only: this panel keeps the stats the chips are measured against.
+            tooltipCanvasGroup.alpha = 0f;
+            hiddenForComparison = true;
+        }
+        public void HideComparison()
+        {
+            if (comparePanel != null) comparePanel.Unhover();
+            if (!hiddenForComparison) return;
+            hiddenForComparison = false;
+            tooltipCanvasGroup.alpha = 1f;
+        }
+        private void CreateComparePanel()
+        {
+            comparePanel = Instantiate(this, transform.parent);
+            comparePanel.name = name + " (Compare)";
+            comparePanel.isCustomBattle = isCustomBattle;
+            // Rows this panel is trimming this frame are copied with their graphics off; the copy builds its own.
+            foreach (UnitStatUI row in comparePanel.GetComponentsInChildren<UnitStatUI>(true))
+                DestroyImmediate(row.gameObject);
+            comparePanel.GetComponent<UnitStatsUIContainer>().CompareAgainst(GetComponent<UnitStatsUIContainer>());
+            if (comparePanel.spellBonusRoot != null)
+                comparePanel.spellBonusRoot.anchoredPosition += new Vector2(COMPARE_CHIP_CLEARANCE, 0f);
+        }
+        #endregion
         public void OnPointerEnter(PointerEventData eventData)
         {
             if (UnitSelectionManager.Instance == null) return;
@@ -807,7 +873,7 @@ namespace TJ
             {
                 inCombatAttribute.Load(UnitCondition.InCombat);
             }
-            isChargingAttribute.gameObject.SetActive(entityManager.HasComponent<ChargeBonus>(squadEntity.SelfEntity));
+            isChargingAttribute.gameObject.SetActive(entityManager.HasComponent<SprintingTag>(squadEntity.SelfEntity) || entityManager.HasComponent<ChargeBonus>(squadEntity.SelfEntity));
             if (isChargingAttribute.gameObject.activeSelf)
             {
                 isChargingAttribute.Load(UnitCondition.IsCharging);
@@ -817,11 +883,10 @@ namespace TJ
             {
                 isTerrifiedAttribute.Load(UnitCondition.IsTerrified);
             }
-            isExhaustedAttribute.gameObject.SetActive(entityManager.HasComponent<ExhaustedTag>(squadEntity.SelfEntity));
+            isExhaustedAttribute.gameObject.SetActive(entityManager.HasComponent<WearyTag>(squadEntity.SelfEntity));
             if (isExhaustedAttribute.gameObject.activeSelf)
             {
                 isExhaustedAttribute.Load(UnitCondition.IsExhausted);
-                isChargingAttribute.gameObject.SetActive(false);
             }
             isOutOfAmmoAttribute.gameObject.SetActive(entityManager.HasComponent<AmmuntionSpent>(squadEntity.SelfEntity));
             if (isOutOfAmmoAttribute.gameObject.activeSelf)

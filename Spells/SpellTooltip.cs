@@ -23,7 +23,12 @@ namespace TJ.Spells
             public bool IsMage;
             public int Charges, MaxCharges;
             public float Range, Cooldown;
+            // The caster's Potent Magic and Wide Weave. 0 (unset) reads as 1.
+            public float Potency, RadiusScale;
             public string CasterLine;
+
+            public float PotencyOrOne => Potency > 0f ? Potency : 1f;
+            public float RadiusScaleOrOne => RadiusScale > 0f ? RadiusScale : 1f;
         }
 
         public static TooltipContent Build(SpellData spell, Context ctx = default)
@@ -40,7 +45,7 @@ namespace TJ.Spells
                 IconColor = (Color)ColorData.HexToRgba(ColorData.Primary),
                 Accent = raceColour,
                 KeyCaps = KeyCaps(ctx.HotkeyNumber),
-                Body = Description(spell, rawDescription),
+                Body = Description(spell, rawDescription, ctx.PotencyOrOne),
                 Detail = ctx.CasterLine ?? "",
                 Footer = Footer(ctx, loc),
             };
@@ -74,11 +79,11 @@ namespace TJ.Spells
         }
 
         // The numbers are bolded before formatting, so they stand out in every locale without touching the text.
-        private static string Description(SpellData spell, string rawDescription)
+        private static string Description(SpellData spell, string rawDescription, float potency)
         {
             if (string.IsNullOrEmpty(rawDescription)) return spell.Spell.ToString();
             string description = string.Format(rawDescription, spell.SpellType,
-                $"<b>{spell.SpellModifierValue}</b>", $"<b>{spell.SpellDuration}</b>");
+                $"<b>{Mathf.RoundToInt(spell.ScaledModifierValue(potency))}</b>", $"<b>{spell.SpellDuration}</b>");
             return KeywordText.ForTooltip(description);
         }
 
@@ -100,7 +105,7 @@ namespace TJ.Spells
                 Add("SpellStatDuration", iconColour, Seconds(spell.SpellDuration), "SpellStatDuration");
 
             if (spell.SpellType == SpellType.AOE && spell.SpellRadius > 0f)
-                Add("SpellStatArea", iconColour, Mathf.RoundToInt(spell.SpellRadius).ToString(), "SpellStatArea");
+                Add("SpellStatArea", iconColour, Mathf.RoundToInt(spell.SpellRadius * ctx.RadiusScaleOrOne).ToString(), "SpellStatArea");
 
             if (ctx.IsMage)
                 Add("Range", iconColour, Mathf.RoundToInt(ctx.Range).ToString(), "SpellStatCastRange");

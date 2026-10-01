@@ -51,6 +51,8 @@ namespace TJ.Recruit
         CancellationTokenSource _cardLoadCts;
         public enum RecruitmentType { Shop, Town, Battle, Conscription }
         RecruitmentType recruitmentType = RecruitmentType.Shop;
+        // One picker opening for the node log: where it came from, what it showed, what was taken. Sent when the panel closes.
+        Dictionary<string, object> offerLog;
         // Louder than the battle bark (0.2): nothing on the map screen competes with it.
         const float RecruitBarkVolume = 0.4f;
         
@@ -164,6 +166,7 @@ namespace TJ.Recruit
 
             GearID[] recruitableGear = campaignSaveManager.SaveData.recruitableGear;
             if (recruitableGear == null) return;
+            TabletopTavern.Analytics.NodeLog.Try("recruit offer", () => BeginOfferLog("gear", recruitableGear));
 
             memoriCanvasGroup.CGEnable();
 
@@ -188,6 +191,7 @@ namespace TJ.Recruit
             skipButton.onClick.AddListener(CloseRecruitPanel);
 
             UnitName[] recruitableNames = campaignSaveManager.SaveData.recruitableUnits;
+            TabletopTavern.Analytics.NodeLog.Try("recruit offer", () => BeginOfferLog("unit", recruitableNames));
             // Debug.Log($"length of recruitable names in load recruit cards: {recruitableNames.Length}");
             recruitmentOptions = new SquadStats[recruitableNames.Length];
 
@@ -300,6 +304,7 @@ namespace TJ.Recruit
 
                 // Set before the save call: its OnArmyStructureChanged would otherwise re-run every card's combine badge.
                 hasSelectedRecruitCard = true;
+                LogPick(_squadStats.unitName.ToString(), true);
                 campaignSaveManager.PrestigeAndCombineWithRecruit(uid1, uid2);
                 mapSceneUIManager.TryDrainPendingPrestigeChoices();
             }
@@ -308,6 +313,7 @@ namespace TJ.Recruit
                 float conscriptedHealth = recruitmentType == RecruitmentType.Conscription ? ConscriptHealth() : 1;
 
                 hasSelectedRecruitCard = true;
+                LogPick(_squadStats.unitName.ToString(), false);
                 campaignSaveManager.RecruitSquad(_squadStats, conscriptedHealth, _conscripted: recruitmentType == RecruitmentType.Conscription);
             }
 
@@ -342,6 +348,7 @@ namespace TJ.Recruit
             }
 
             IAudioRequester.Instance.PlaySFX(SFXData.MerchantPurchase);
+            LogPick(_gearCard.GearID.ToString(), false);
             campaignSaveManager.AquireGear(_gearCard.GearID);
             // chooseACardPopupPrefab.SetBool("Active", false);
             _gearCard.PlayPurchaseFeedbacks();
@@ -367,8 +374,34 @@ namespace TJ.Recruit
             if (SaveDataHandler.IsMetaprogressionNodeUnlocked(_postBattleRecruitMetaprogressionModel)) return 0.75f;
             return TabletopTavernConstants.CONSCRIPT_SURVIVORS_HEALTH_PERCENTAGE;
         }
+        #region Node log
+        private void BeginOfferLog<T>(string kind, T[] offered)
+        {
+            var names = new List<string>();
+            foreach (T item in offered) names.Add(item.ToString());
+            offerLog = new Dictionary<string, object>
+            {
+                { "from", recruitmentType.ToString() },
+                { "kind", kind },
+                { "offered", names },
+                { "picked", null },
+            };
+        }
+        private void LogPick(string picked, bool combined)
+        {
+            if (offerLog == null) return;
+            offerLog["picked"] = picked;
+            if (combined) offerLog["combined"] = true;
+        }
+        #endregion
         public void CloseRecruitPanel()
         {
+            if (offerLog != null)
+            {
+                Dictionary<string, object> entry = offerLog;
+                TabletopTavern.Analytics.NodeLog.Try("recruit pick", () => TabletopTavern.Analytics.NodeLog.Add("rec", entry));
+                offerLog = null;
+            }
             _cardLoadCts?.Cancel();
             foreach (Transform child in recruitCardsParent) Destroy(child.gameObject);
             foreach (Transform child in gearCardsParent) Destroy(child.gameObject);

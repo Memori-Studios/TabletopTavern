@@ -3,6 +3,7 @@ using System.Collections;
 using System.Collections.Generic;
 using Memori.Audio;
 using Memori.Utilities;
+using Memori.UI;
 using TMPro;
 using UnityEngine;
 using UnityEngine.EventSystems;
@@ -73,6 +74,9 @@ namespace TJ
         [SerializeField] private float punchSeconds = 0.07f;
         [SerializeField] private float vanishScale = 0.9f;
         [SerializeField] private float vanishSeconds = 0.16f;
+        [SerializeField] private float dealStartScale = 0.85f;
+        [SerializeField] private float dealPeakScale = 1.06f;
+        [SerializeField] private float dealSeconds = 0.3f;
         #endregion
 
         #region Group motion fields
@@ -85,6 +89,7 @@ namespace TJ
         const float HitBoxInset = 20f;
         private bool groupHover;
         private bool breathes = true;
+        private bool movesOnHover = true;
         private int groupIndex;
         private GroupMotion groupMotion = GroupMotion.Idle;
         private bool motionActive;
@@ -99,11 +104,16 @@ namespace TJ
         /// <summary>Group hover only: raised when the card has risen in and can take its place in the hover.</summary>
         public event Action<ChoiceCardView> MotionStarted;
         public Button Button => button;
+        /// <summary>True once the enter animation has finished.</summary>
+        public bool Landed { get; private set; } = true;
 
         private bool hovered;
         private bool focused;
         private bool locked;
         private bool blocked;
+        private bool armed;
+        private float armedTime;
+        private float pressTime;
         private Coroutine liftRoutine;
         private Coroutine popRoutine;
 
@@ -163,6 +173,16 @@ namespace TJ
         }
 
         /// <summary>The footer says why the card cannot be taken right now. The card still hovers and still raises Chosen.</summary>
+        private Coroutine denyShake;
+
+        // A refused pick shakes the card face; the error notification already plays the sound.
+        public void Deny()
+        {
+            if (!isActiveAndEnabled || button == null) return;
+            if (denyShake != null) StopCoroutine(denyShake);
+            denyShake = StartCoroutine(UIJuice.Shake(button.transform as RectTransform));
+        }
+
         public void SetBlocked(string reason)
         {
             blocked = true;
@@ -171,10 +191,11 @@ namespace TJ
         }
 
         /// <summary>Switches the card to the recruit cards' group motion. The panel drives it through SetGroupMotion.</summary>
-        public void UseGroupHover(int index, bool breathe = true)
+        public void UseGroupHover(int index, bool breathe = true, bool moveOnHover = true)
         {
             groupHover = true;
             breathes = breathe;
+            movesOnHover = moveOnHover;
             groupIndex = index;
             Graphic hitBox = button.targetGraphic;
             if (hitBox != null) hitBox.raycastPadding = Vector4.one * HitBoxInset;
@@ -205,10 +226,19 @@ namespace TJ
         #endregion
 
         #region States
+        // A click only counts once the panel has armed the card, and a mouse press held from before arming never counts.
         private void Click()
         {
-            if (locked) return;
+            if (locked || !armed) return;
+            if (PointerUsedLast() && pressTime < armedTime) return;
             Chosen?.Invoke(this);
+        }
+
+        /// <summary>Lets the card take clicks. The panel calls it once every card has landed.</summary>
+        public void Arm()
+        {
+            armed = true;
+            armedTime = Time.unscaledTime;
         }
 
         /// <summary>Stops hover and clicks once any card on the panel is picked.</summary>
@@ -242,21 +272,32 @@ namespace TJ
             popRoutine = StartCoroutine(Vanish(withSound));
         }
 
-        public void PlayEnter(float delay)
+        /// <summary>Hides the card until PlayEnter shows it.</summary>
+        public void Conceal()
         {
             if (popRoutine != null) StopCoroutine(popRoutine);
+            popRoutine = null;
             pop.gameObject.SetActive(true);
             pop.localScale = Vector3.one;
+            pop.anchoredPosition = Vector2.zero;
             popGroup.alpha = 0f;
-            pop.anchoredPosition = new Vector2(0f, -enterRise);
+            Landed = false;
+        }
+
+        /// <summary>Rises in after the delay, or with deal set, pops in with a card sound.</summary>
+        public void PlayEnter(float delay, bool deal = false)
+        {
+            Conceal();
+            if (!deal) pop.anchoredPosition = new Vector2(0f, -enterRise);
             if (!isActiveAndEnabled)
             {
                 popGroup.alpha = 1f;
                 pop.anchoredPosition = Vector2.zero;
+                Landed = true;
                 StartGroupMotion();
                 return;
             }
-            popRoutine = StartCoroutine(Enter(delay));
+            popRoutine = StartCoroutine(deal ? Deal(delay) : Enter(delay));
         }
 
         private IEnumerator Enter(float delay)
@@ -269,9 +310,35 @@ namespace TJ
                 pop.anchoredPosition = new Vector2(0f, Mathf.Lerp(-enterRise, 0f, k));
                 yield return null;
             }
+            FinishEnter();
+        }
+
+        // Grows past full size in the first 60%, then settles back; fully opaque by the halfway mark.
+        private IEnumerator Deal(float delay)
+        {
+            for (float t = 0f; t < delay; t += Time.unscaledDeltaTime) yield return null;
+            IAudioRequester.Instance.PlaySFX(SFXData.CardDraw);
+            pop.localScale = Vector3.one * dealStartScale;
+            for (float t = 0f; t < dealSeconds; t += Time.unscaledDeltaTime)
+            {
+                float p = t / dealSeconds;
+                popGroup.alpha = Mathf.Clamp01(p * 2f);
+                float scale = p < 0.6f
+                    ? Mathf.Lerp(dealStartScale, dealPeakScale, 1f - Mathf.Pow(1f - p / 0.6f, 2f))
+                    : Mathf.Lerp(dealPeakScale, 1f, Mathf.SmoothStep(0f, 1f, (p - 0.6f) / 0.4f));
+                pop.localScale = Vector3.one * scale;
+                yield return null;
+            }
+            FinishEnter();
+        }
+
+        private void FinishEnter()
+        {
             popGroup.alpha = 1f;
+            pop.localScale = Vector3.one;
             pop.anchoredPosition = Vector2.zero;
             popRoutine = null;
+            Landed = true;
             StartGroupMotion();
         }
 
@@ -300,7 +367,8 @@ namespace TJ
         {
             if (locked) return;
             hovered = true;
-            IAudioRequester.Instance.PlaySFX(SFXData.LightMouseOver);
+            // A hidden card still has its hit box, so it stays quiet until it shows.
+            if (popGroup.alpha > 0.5f) IAudioRequester.Instance.PlaySFX(SFXData.LightMouseOver);
             ShowHighlight(true, false);
             if (groupHover) HoverChanged?.Invoke(this, true);
         }
@@ -329,7 +397,9 @@ namespace TJ
 
         public void OnPointerDown(PointerEventData eventData)
         {
-            if (!groupHover || locked || eventData.button != PointerEventData.InputButton.Left) return;
+            if (eventData.button != PointerEventData.InputButton.Left) return;
+            pressTime = Time.unscaledTime;
+            if (!groupHover || locked || !armed) return;
             SetGroupMotion(GroupMotion.Pressed);
         }
 
@@ -413,7 +483,7 @@ namespace TJ
             switch (state)
             {
                 case GroupMotion.Hovered:
-                    targetScale = HoverScale; targetY = HoverLift; motionDuration = HoverInDuration; break;
+                    targetScale = movesOnHover ? HoverScale : 1f; targetY = movesOnHover ? HoverLift : 0f; motionDuration = HoverInDuration; break;
                 case GroupMotion.Neighbour:
                     targetScale = NeighbourScale; targetY = 0f; motionDuration = HoverInDuration; break;
                 case GroupMotion.Pressed:

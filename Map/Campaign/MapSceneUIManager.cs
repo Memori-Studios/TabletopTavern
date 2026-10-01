@@ -13,6 +13,7 @@ using TJ.Ordeals;
 using Memori.Audio;
 using System;
 using System.Collections.Generic;
+using Memori.UI;
 
 namespace TJ.Map
 {
@@ -73,6 +74,9 @@ namespace TJ.Map
         {
             mapSceneManager = _mapSceneManager;
             campaignSaveManager = CampaignManager.Instance.CampaignSaveManager;
+            // Keys and a controller stay inside whichever node panel is open instead of wandering onto the map behind it.
+            foreach (MapPanel panel in new MapPanel[] { townPanel, campfirePanel, tavernPanel, engagementPanel, treasurePanel })
+                if (panel != null) ContainedNavigation.Attach(panel.gameObject);
             campaignSaveManager.OnGameSaved += autoSavingIndicator.OnGameSaved;
 
             mapEscapePanel.SetUp(campaignSaveManager);
@@ -117,7 +121,7 @@ namespace TJ.Map
                 mapSceneManager.SetMapInput(false);
             }
 
-            List<UnitAttribute> options = campaignSaveManager.GetPrestigeTraitOptions(pending.UnitName);
+            List<UnitAttribute> options = campaignSaveManager.GetPrestigeTraitOffer(pending);
             prestigeTraitPanel.LoadPrestigeTraitPanel(pending, options, () => TryDrainPendingPrestigeChoices(onDrained));
         }
 

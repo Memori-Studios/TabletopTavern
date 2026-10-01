@@ -22,6 +22,11 @@ namespace TJ
         [Header("Status Effect Icons")]
         [SerializeField] private GameObject fireAtWillGO;
         [SerializeField] private GameObject chargeGO, terrifiedGO, exhaustedGO, weaponStrengthGO, armorSunderedGO, isTakingFlankingDamageGO, isFlankingGO, isOnFireGO, defensiveStanceGO, bracedGO, outOfAmmoGO;
+        [Header("Charge")]
+        // Drains as the squad recovers from a charge.
+        [SerializeField] private Image wearyFill;
+        // Ring around the charge icon; drains over the charge bonus.
+        [SerializeField] private Image chargeFill;
         [Header("Spell Status Icons")]
         // Filled in cast order from the squad's SpellStatusBufferElement (see SquadFlagGameObject.HandleSpellStatus).
         [SerializeField] private Image[] spellStatusSlots;
@@ -31,8 +36,11 @@ namespace TJ
         [SerializeField] private GameObject prestige2GO, prestige1RangedGO, prestige2RangedGO;
         // Casters get their own pair: the archer frames are drawn around a 3-bar stack and the cooldown row sits outside them.
         [SerializeField] private GameObject prestige1MageGO, prestige2MageGO;
-        private bool _isExhausted = false;
-        public bool IsExhausted => _isExhausted;
+        private bool _isWeary = false;
+        public bool IsWeary => _isWeary;
+        private bool _isSprinting = false;
+        private bool _chargeBonusActive = false;
+        public bool ChargeBonusActive => _chargeBonusActive;
         private bool _weaponStrengthBonusActive = false;
         public bool WeaponStrengthBonusActive => _weaponStrengthBonusActive;
         private bool _armorSunderedActive = false;
@@ -92,8 +100,12 @@ namespace TJ
         private void DisableAllStatusIcons()
         {
             chargeGO.SetActive(false);
+            _isSprinting = false;
+            _chargeBonusActive = false;
+            if (chargeFill != null) chargeFill.gameObject.SetActive(false);
             terrifiedGO.SetActive(false);
             exhaustedGO.SetActive(false);
+            _isWeary = false;
             weaponStrengthGO.SetActive(false);
             armorSunderedGO.SetActive(false);
             SetSpellStatus(null, 0);
@@ -118,20 +130,34 @@ namespace TJ
             DisableAllStatusIcons();
             DisablePrestigeIcons();
         }
-        public void SetCharge(bool isCharge)
+        // The charge icon shows while the squad sprints in, and stays up with a ring while the bonus lasts.
+        public void SetCharge(bool isSprinting)
         {
-            if(IsExhausted) return;
-            chargeGO.SetActive(isCharge);
+            _isSprinting = isSprinting;
+            chargeGO.SetActive(_isSprinting || _chargeBonusActive);
+        }
+        public void SetChargeBonus(bool isActive, float remaining01)
+        {
+            _chargeBonusActive = isActive;
+            if (chargeFill != null)
+            {
+                if (chargeFill.gameObject.activeSelf != isActive) chargeFill.gameObject.SetActive(isActive);
+                if (isActive) chargeFill.fillAmount = Mathf.Clamp01(remaining01);
+            }
+            chargeGO.SetActive(_isSprinting || _chargeBonusActive);
         }
         public void SetTerrified(bool isTerrified)
         {
             terrifiedGO.SetActive(isTerrified);
         }
-        public void SetExhausted(bool isExhausted)
+        public void SetWeary(bool isWeary, float remaining01)
         {
-            _isExhausted = isExhausted;
-            exhaustedGO.SetActive(isExhausted);
-            chargeGO.SetActive(false);
+            if (_isWeary != isWeary)
+            {
+                _isWeary = isWeary;
+                exhaustedGO.SetActive(isWeary);
+            }
+            if (isWeary && wearyFill != null) wearyFill.fillAmount = Mathf.Clamp01(remaining01);
         }
         public void SetWeaponStrengthActive(bool isActive)
         {

@@ -12,6 +12,7 @@ using Memori.Metaprogression;
 using Memori.Localization;
 using TabletopTavern.Analytics;
 using TJ.Achievements;
+using TJ.Prestige;
 
 #if UNITY_EDITOR
 using UnityEditor;
@@ -383,6 +384,7 @@ namespace TJ
             saveData.BattlesFought = 0;
             saveData.activeMapLayer = -1;
             saveData.nodePath.Clear();
+            saveData.plannedNodes?.Clear();
             saveData.nodesRevealed = false;
             SaveCampaign();
             SaveCampaignSnapshot();
@@ -759,6 +761,16 @@ namespace TJ
                 expanded[i] = new SquadToLoad { UnitIndex = -1, UniqueID = Guid.NewGuid().ToString() };
             saveData.playerArmy = expanded;
         }
+        private static void LogDisband(SquadToLoad squad)
+        {
+            NodeLog.Try("disband", () => NodeLog.Add("disbanded",
+                new Dictionary<string, object> { { "u", squad.UnitName.ToString() }, { "pr", squad.UnitPrestige } }));
+        }
+        private static void LogSale(string kind, string id, int gold)
+        {
+            NodeLog.Try("sell", () => NodeLog.Add("sold",
+                new Dictionary<string, object> { { "k", kind }, { "id", id }, { "gold", gold } }));
+        }
         public void DisbandMultipleSquads(List<string> _uniqueIDs)
         {
             if (saveData == null) return;
@@ -768,6 +780,7 @@ namespace TJ
                 if (idx >= 0)
                 {
                     Debug.Log($"[Unit] Disbanding {saveData.playerArmy[idx].UnitName} (prestige {saveData.playerArmy[idx].UnitPrestige}) at slot {idx}");
+                    LogDisband(saveData.playerArmy[idx]);
                     saveData.playerArmy[idx].UnitIndex = -1;
                 }
             }
@@ -782,6 +795,7 @@ namespace TJ
                 return;
             }
             Debug.Log($"[Unit] Disbanding {saveData.playerArmy[unitIndex].UnitName} (prestige {saveData.playerArmy[unitIndex].UnitPrestige}) at slot {unitIndex}");
+            LogDisband(saveData.playerArmy[unitIndex]);
             saveData.playerArmy[unitIndex].UnitIndex = -1;
 
             // ReorderUnits() consolidates the deployed (<10) and reserve (>=10) sections independently,
@@ -1052,20 +1066,47 @@ namespace TJ
             AchievementRules.InheritMark(saveData.RunStats.conscriptedSquadIds, _survivor.UniqueID, _removedIDs);
             if (_survivor.UnitPrestige >= 2) CheckOneOfUs(_survivor.UniqueID);
         }
+        // A trait the run's hero already gives this unit, or one its spell cannot use, would be a wasted pick.
         public List<UnitAttribute> GetEligiblePrestigeTraitsForUnit(UnitName _unitName) =>
-            TabletopTavernConstants.GetEligiblePrestigeTraits(TabletopTavernData.Instance.GetSquadStats(_unitName));
+            TabletopTavernData.Instance.GetUsablePrestigeTraits(_unitName)
+                .Where(trait => !HeroBonusManager.HeroAlwaysGrants(_unitName, saveData.heroID, trait))
+                .ToList();
 
-        public List<UnitAttribute> GetPrestigeTraitOptions(UnitName _unitName, int _count = 3)
+        /// <summary>The traits offered to this squad: the saved deal when it still fits, otherwise a new one that is saved.</summary>
+        public List<UnitAttribute> GetPrestigeTraitOffer(SquadToLoad _squad)
         {
-            List<UnitAttribute> pool = GetEligiblePrestigeTraitsForUnit(_unitName);
-            List<UnitAttribute> options = new();
-            while (options.Count < _count && pool.Count > 0)
-            {
-                int index = UnityEngine.Random.Range(0, pool.Count);
-                options.Add(pool[index]);
-                pool.RemoveAt(index);
-            }
-            return options;
+            List<UnitAttribute> pool = GetEligiblePrestigeTraitsForUnit(_squad.UnitName);
+            if (saveData.prestigeOfferSquadId == _squad.UniqueID && PrestigeTraitOffer.IsValid(saveData.prestigeOffer, pool))
+                return new List<UnitAttribute>(saveData.prestigeOffer);
+            List<UnitAttribute> offer = DealPrestigeTraitOffer(_squad, pool, null);
+            SaveCampaign();
+            return offer;
+        }
+
+        public int FateshineElixirsHeld => saveData.consumables.Count(consumable => consumable == ConsumableEnum.FateshineElixir);
+
+        public bool CanRerollPrestigeTraits(SquadToLoad _squad) =>
+            PrestigeTraitOffer.CanReroll(GetEligiblePrestigeTraitsForUnit(_squad.UnitName).Count);
+
+        /// <summary>Spends one Fateshine Elixir from the belt and deals the squad new traits. Returns null when it cannot.</summary>
+        public List<UnitAttribute> RerollPrestigeTraitOffer(SquadToLoad _squad, IReadOnlyCollection<UnitAttribute> _shown)
+        {
+            List<UnitAttribute> pool = GetEligiblePrestigeTraitsForUnit(_squad.UnitName);
+            if (!PrestigeTraitOffer.CanReroll(pool.Count) || FateshineElixirsHeld == 0 || saveData.IsConsumableBlocked(ConsumableEnum.FateshineElixir))
+                return null;
+            MarkConsumableUsed();
+            List<UnitAttribute> offer = DealPrestigeTraitOffer(_squad, pool, _shown);
+            RemoveConsumable(ConsumableEnum.FateshineElixir);
+            return offer;
+        }
+
+        // Stores the deal without saving; the caller's save writes it with the rest of the change.
+        private List<UnitAttribute> DealPrestigeTraitOffer(SquadToLoad _squad, List<UnitAttribute> _pool, IReadOnlyCollection<UnitAttribute> _exclude)
+        {
+            List<UnitAttribute> offer = PrestigeTraitOffer.Deal(_pool, _exclude, count => UnityEngine.Random.Range(0, count));
+            saveData.prestigeOfferSquadId = _squad.UniqueID;
+            saveData.prestigeOffer = new List<UnitAttribute>(offer);
+            return offer;
         }
 
         public bool TryGetNextPendingPrestigeTraitChoice(out SquadToLoad pending)
@@ -1090,6 +1131,8 @@ namespace TJ
                 saveData.playerArmy[i].PrestigeTrait = _chosenTrait;
                 break;
             }
+            saveData.prestigeOfferSquadId = null;
+            saveData.prestigeOffer?.Clear();
             OnArmyStructureChanged?.Invoke();
         }
             public void PrestigeSpecificUnit(SquadToLoad _squadToPrestige)
@@ -1467,6 +1510,7 @@ namespace TJ
         public void SellGear(GearID _gearName, int _sellValue)
         {
             Debug.Log($"Sold gear {_gearName}");
+            LogSale("gear", _gearName.ToString(), _sellValue);
             saveData.Gear.Remove(_gearName);
             saveData.brokenGear?.Remove(_gearName);
             if (!saveData.SoldGear.Contains(_gearName)) {
@@ -1641,6 +1685,7 @@ namespace TJ
         }
         public void SellConsumable(Consumable consumable, int sellValue)
         {
+            LogSale("cons", consumable.ConsumableEnum.ToString(), sellValue);
             string localizedString = LocalizationManager.Instance.GetText($"{consumable.ConsumableEnum}Name");
             CampaignManager.Instance.GoldManager.ModifyGold(sellValue, localizedString);
             RemoveConsumable(consumable.ConsumableEnum);

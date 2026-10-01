@@ -31,6 +31,8 @@ public class MageCastTile : MonoBehaviour
     private int charges = -1;
     private float range;
     private float cooldown;
+    private float potency = 1f;
+    private float radiusScale = 1f;
 
     public void Load(MageTileInfo info, int hotkeyNumber, Action onSelect, Action<bool> onHover)
     {
@@ -42,6 +44,9 @@ public class MageCastTile : MonoBehaviour
         maxCharges = Mathf.Max(1, info.MaxCharges);
         range = info.Range;
         cooldown = info.Cooldown;
+        SquadAttributes caster = BattleManager.Instance.SquadManager.GetBattleSquadAttributes(unitName, SquadId);
+        potency = TabletopTavernConstants.SpellPotency(caster);
+        radiusScale = TabletopTavernConstants.SpellRadiusScale(caster);
         charges = -1;
 
         button.LoadSpellUI(spell, onSelect, hotkeyNumber,
@@ -81,6 +86,8 @@ public class MageCastTile : MonoBehaviour
             MaxCharges = maxCharges,
             Range = range,
             Cooldown = cooldown,
+            Potency = potency,
+            RadiusScale = radiusScale,
             CasterLine = string.Format(loc.GetText("MageTileCaster"), loc.GetText(unitName.ToString()), cardNumber),
         };
     }

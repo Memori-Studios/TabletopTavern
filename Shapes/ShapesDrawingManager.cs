@@ -27,6 +27,11 @@ public class ShapesDrawingManager : ImmediateModeShapeDrawer
     // Degrees per second, clockwise seen from above. Unscaled so it keeps turning while paused.
     [SerializeField] private float _pentagramRotationSpeed = 10f;
 
+    [Header("Friendly Square")]
+    // Replaces the pentagram for single-target spells cast on your own squads, so a ward never reads as an attack.
+    [SerializeField] [ColorUsage(true, true)] private Color _squareColor = new Color(0.45f, 0.28f, 0.12f, 1f);
+    [SerializeField] private float _squareIntensity = 3f;
+
     [Header("Area Band")]
     // The same soft band the AOE Spell prefab's Area Disc draws: a radial gradient from clear at the
     // inner edge to _bandColor at the ring, over the outer _bandFraction of the radius, Lighten blend.
@@ -91,7 +96,11 @@ public class ShapesDrawingManager : ImmediateModeShapeDrawer
     private readonly Vector2[] _starPoints = new Vector2[5];
     // Five points visited 0,2,4,1,3: a closed polyline through them is the star. Mesh-backed, so disposed once.
     private PolylinePath _pentagramPath;
+    private PolylinePath _squarePath;
     private bool _showStar;
+    private bool _showSquare;
+    // Corners in _starPoints that the current marker uses: 5 for the star, 4 for the square.
+    private int _markerPointCount = 5;
     private static readonly int[] StarOrder = { 0, 2, 4, 1, 3 };
     // Latched while a valid target is under the cursor, so a fade-out happens in place instead of following the mouse.
     private Vector3 _ringPosition;
@@ -102,6 +111,7 @@ public class ShapesDrawingManager : ImmediateModeShapeDrawer
     private void OnDestroy()
     {
         if(_pentagramPath != null) { _pentagramPath.Dispose(); _pentagramPath = null; }
+        if(_squarePath != null) { _squarePath.Dispose(); _squarePath = null; }
         DisposeWisps(ref _ringWisps);
         DisposeWisps(ref _starWisps);
     }
@@ -115,7 +125,9 @@ public class ShapesDrawingManager : ImmediateModeShapeDrawer
             _castPoint = _spellManager.SpellCursorOrigin;
             _ringPosition = _castPoint + Vector3.up * _groundOffset;
             _ringRadius = _spellManager.SelectedSpellRadius;
-            _showStar = _spellManager.SelectedSpellShowsStar;
+            bool marker = _spellManager.SelectedSpellShowsStar;
+            _showSquare = marker && _spellManager.ArmedSpellTargetsFriends;
+            _showStar = marker && !_showSquare;
         }
         UpdateOverlay(ref _magicCircle, _magicCirclePrefab, _useMagicCircle && show, _ringRadius / Mathf.Max(_magicCircleNativeRadius, 0.001f));
         UpdateOverlay(ref _magicZone, _magicZonePrefab, _useMagicZone && show, _ringRadius / Mathf.Max(_magicZoneNativeRadius, 0.001f));
@@ -144,6 +156,8 @@ public class ShapesDrawingManager : ImmediateModeShapeDrawer
     public override void DrawShapes( Camera cam )
     {
         if(_ringAlpha <= 0f && _leashAlpha <= 0f) return;
+        // Every camera calls this; the tavern base camera and the minimap would each draw their own copy.
+        if(cam.cameraType != CameraType.SceneView && cam != BattleManager.Instance.BattleCamera) return;
 
         // Before the transparent pass: the squad flags do not write depth, so they must draw after this to sit on top.
         using( Draw.Command( cam, UnityEngine.Rendering.Universal.RenderPassEvent.AfterRenderingSkybox ) ){
@@ -164,9 +178,10 @@ public class ShapesDrawingManager : ImmediateModeShapeDrawer
                 _spellRingThickness * MarkerScale,
                 ringColor
             );
-            Color starColor = _pentagramColor * _pentagramIntensity;
+            Color starColor = _showSquare ? _squareColor * _squareIntensity : _pentagramColor * _pentagramIntensity;
             starColor.a = _ringAlpha;
             if(_showStar) DrawPentagram(starColor);
+            if(_showSquare) DrawSquare(starColor);
             DrawWisps(ringColor, starColor);
         }
     }
@@ -283,6 +298,7 @@ public class ShapesDrawingManager : ImmediateModeShapeDrawer
             for(int i = 0; i < 5; i++) _pentagramPath.AddPoint(Vector3.zero);
         }
         float r = _ringRadius * _pentagramRadiusFraction;
+        _markerPointCount = 5;
         for(int i = 0; i < 5; i++) {
             // Point 0 at the top; the ring's 90-degree X rotation lays local XY onto the ground.
             float angle = (90f + 72f * StarOrder[i]) * Mathf.Deg2Rad;
@@ -293,6 +309,26 @@ public class ShapesDrawingManager : ImmediateModeShapeDrawer
             Draw.Matrix = Matrix4x4.TRS(_ringPosition, StarRotation(), Vector3.one);
             Draw.PolylineGeometry = PolylineGeometry.Flat2D;
             Draw.Polyline(_pentagramPath, true, _pentagramThickness * MarkerScale, PolylineJoins.Miter, color);
+        }
+    }
+    // Same size, spin and line as the star, with its four corners on the same circle.
+    private void DrawSquare(Color color)
+    {
+        if(_squarePath == null) {
+            _squarePath = new PolylinePath();
+            for(int i = 0; i < 4; i++) _squarePath.AddPoint(Vector3.zero);
+        }
+        float r = _ringRadius * _pentagramRadiusFraction;
+        _markerPointCount = 4;
+        for(int i = 0; i < 4; i++) {
+            float angle = (45f + 90f * i) * Mathf.Deg2Rad;
+            _starPoints[i] = new Vector2(Mathf.Cos(angle) * r, Mathf.Sin(angle) * r);
+            _squarePath.SetPoint(i, (Vector3)_starPoints[i]);
+        }
+        using(Draw.MatrixScope) {
+            Draw.Matrix = Matrix4x4.TRS(_ringPosition, StarRotation(), Vector3.one);
+            Draw.PolylineGeometry = PolylineGeometry.Flat2D;
+            Draw.Polyline(_squarePath, true, _pentagramThickness * MarkerScale, PolylineJoins.Miter, color);
         }
     }
     // Local Z points down into the ground after the X tilt, so a positive spin about it is clockwise from above.
@@ -342,7 +378,7 @@ public class ShapesDrawingManager : ImmediateModeShapeDrawer
 
         for(int k = 0; k < _wispStrands; k++) {
             FillRingWisp(_ringWisps[k], k, t, push);
-            if(_showStar) FillStarWisp(_starWisps[k], k, t, push);
+            if(_showStar || _showSquare) FillStarWisp(_starWisps[k], k, t, push);
         }
         Draw.PolylineGeometry = PolylineGeometry.Flat2D;
         using(Draw.MatrixScope) {
@@ -350,7 +386,7 @@ public class ShapesDrawingManager : ImmediateModeShapeDrawer
             for(int k = 0; k < _wispStrands; k++)
                 Draw.Polyline(_ringWisps[k], true, _wispThickness * MarkerScale, PolylineJoins.Simple, ringColor);
         }
-        if(!_showStar) return;
+        if(!_showStar && !_showSquare) return;
         using(Draw.MatrixScope) {
             Draw.Matrix = Matrix4x4.TRS(_ringPosition, StarRotation(), Vector3.one);
             for(int k = 0; k < _wispStrands; k++)
@@ -371,16 +407,17 @@ public class ShapesDrawingManager : ImmediateModeShapeDrawer
             path.SetPoint(i, new Vector3(c * r, sn * r, 0f));
         }
     }
-    // Walks the five star edges; the push fades to zero at each vertex so the tips stay sharp.
+    // Walks the marker's edges; the push fades to zero at each vertex so the tips stay sharp.
     private void FillStarWisp(PolylinePath path, int strand, float t, float push)
     {
         int n = path.Count;
+        int corners = _markerPointCount;
         float invR = _ringRadius > 0f ? 1f / _ringRadius : 0f;
         for(int i = 0; i < n; i++) {
-            float u = 5f * i / n;
-            int e = Mathf.Min((int)u, 4);
+            float u = (float)corners * i / n;
+            int e = Mathf.Min((int)u, corners - 1);
             float tl = u - e;
-            Vector2 a = _starPoints[e], b = _starPoints[(e + 1) % 5];
+            Vector2 a = _starPoints[e], b = _starPoints[(e + 1) % corners];
             Vector2 p = Vector2.Lerp(a, b, tl);
             Vector2 dir = (b - a).normalized;
             Vector2 normal = new Vector2(-dir.y, dir.x);

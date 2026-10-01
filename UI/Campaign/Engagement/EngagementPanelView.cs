@@ -105,6 +105,8 @@ namespace TJ.Engagement
         [SerializeField] private TMP_Text endBattleOutcome;
         [SerializeField] private float coverAlpha = 0.62f;
         [SerializeField] private float coverInSeconds = 0.22f;
+        [Tooltip("Off since 2026-09-30: the battle's own Victory/Defeat card already shows the result, so the map no longer repeats it.")]
+        [SerializeField] private bool showBattleBanner;
         [SerializeField] private float bannerHoldSeconds = 1f;
         [SerializeField] private float bannerLingerSeconds = 3f;
         [SerializeField] private float bannerFadeSeconds = 0.4f;
@@ -225,6 +227,25 @@ namespace TJ.Engagement
         private IEnumerator ResultPopup(string title, string outcome, Action onGone)
         {
             resultCover.gameObject.SetActive(true);
+            if (!showBattleBanner)
+            {
+                // No banner: the card greys briefly, swaps to the result under the cover, and the cover lifts.
+                for (float t = 0f; t < coverInSeconds; t += Time.unscaledDeltaTime)
+                {
+                    SetCover(1f - Mathf.Pow(1f - t / coverInSeconds, 3f));
+                    yield return null;
+                }
+                SetCover(1f);
+                onGone();
+                for (float t = 0f; t < revealSeconds; t += Time.unscaledDeltaTime)
+                {
+                    SetCover(1f - t / revealSeconds);
+                    yield return null;
+                }
+                resultCover.gameObject.SetActive(false);
+                popup = null;
+                yield break;
+            }
             // Enabling the banner restarts its In clip; the texts are set after so nothing on enable overwrites them.
             endBattlePopup.gameObject.SetActive(true);
             endBattlePopup.SetBool(ActiveParameter, true);

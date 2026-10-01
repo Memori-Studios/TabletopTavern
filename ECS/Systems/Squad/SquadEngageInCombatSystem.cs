@@ -120,28 +120,46 @@ partial struct SquadEngageInCombatSystem : ISystem
             float knockbackForce = 0f;
 
             bool isCharging = FormationEngagedInCombat.ValueRO.WasCharging;
+            float chargeMultiplier = 1f;
 
-            //remove charge charge
             if (isCharging)
             {
-                // An empowered charge that still holds its bonus lands now; the squad flag plays the cue.
+                // 1 = the charger is dead ahead of the target, -1 = dead behind it.
+                float3 toCharger = SquadMovementComponent.ValueRO.SquadCenter - targetSquadMovement.SquadCenter;
+                toCharger.y = 0f;
+                float facingDot = math.dot(math.forward(targetSquadMovement.SquadRotation), math.normalizesafe(toCharger));
+                float flankDot = squad.ValueRO.SquadId > 0
+                    ? TabletopTavernConstants.CHARGE_FLANK_DOT_PLAYER
+                    : TabletopTavernConstants.CHARGE_FLANK_DOT_ENEMY;
+                bool flankCharge = facingDot < flankDot;
+                bool blocked = !flankCharge && entityManager.HasComponent<AntiLargeTag>(squad.ValueRO.TargetSquadEntity);
+
+                float rallyBonus = 0f;
                 if (entityManager.HasComponent<EmpoweredChargeTag>(squad.ValueRO.SelfEntity))
                 {
+                    rallyBonus = entityManager.GetComponentData<EmpoweredChargeTag>(squad.ValueRO.SelfEntity).BonusImpact;
                     entityCommandBuffer.RemoveComponent<EmpoweredChargeTag>(squad.ValueRO.SelfEntity);
-                    if (entityManager.HasComponent<ChargeBonus>(squad.ValueRO.SelfEntity))
-                        entityCommandBuffer.AddComponent<EmpoweredChargeLandedTag>(squad.ValueRO.SelfEntity);
+                    // The squad flag plays the cue.
+                    if (!blocked) entityCommandBuffer.AddComponent<EmpoweredChargeLandedTag>(squad.ValueRO.SelfEntity);
                 }
-                // Debug.Log($"SquadEngageInCombatSystem: squad {squad.ValueRO.SquadId}  Charging: {isCharging}");
-                if (entityManager.HasComponent<SquadStateComponent>(squad.ValueRO.SelfEntity))
+
+                if (blocked)
                 {
-                    SquadStateComponent squadState = entityManager.GetComponentData<SquadStateComponent>(squad.ValueRO.SelfEntity);
-                    squadState.ChargesRemaining = math.max(0, squadState.ChargesRemaining - 1);
-                    entityManager.SetComponentData(squad.ValueRO.SelfEntity, squadState);
-                    if (squadState.ChargesRemaining == 0)
-                    {
-                        entityCommandBuffer.AddComponent<ExhaustedTag>(squad.ValueRO.SelfEntity);
-                    }
+                    allowKnockback = false;
                 }
+                else
+                {
+                    chargeMultiplier = flankCharge ? TabletopTavernConstants.CHARGE_FLANK_MULT : 1f;
+                    entityCommandBuffer.AddComponent(squad.ValueRO.SelfEntity, new ChargeBonus());
+                    entityCommandBuffer.AddComponent(squad.ValueRO.SelfEntity, new ApplyChargeBonusTag { Multiplier = chargeMultiplier, FlatBonus = rallyBonus });
+                }
+
+                entityCommandBuffer.AddComponent(squad.ValueRO.SelfEntity, new WearyTag { Remaining = TabletopTavernConstants.CHARGE_WEARY_TIME });
+                entityCommandBuffer.AddComponent(squad.ValueRO.SelfEntity, new OnFormationsCollide
+                {
+                    Position = (SquadMovementComponent.ValueRO.SquadCenter + targetSquadMovement.SquadCenter) / 2f,
+                    Kind = blocked ? ChargeImpactKind.Blocked : flankCharge ? ChargeImpactKind.FlankCharge : ChargeImpactKind.Charge,
+                });
             }
 
 
@@ -156,9 +174,11 @@ partial struct SquadEngageInCombatSystem : ISystem
             for (int i = 0; i < entityBuffer.Length; i++)
             {
                 Entity entity = entityBuffer[i].Entity;
+                bool unitKnockback = allowKnockback;
                 if (bothSmall)
                 {
-                    allowKnockback = _random.NextFloat(0f, 1f) < 0.15f;
+                    // Infantry into infantry only shoves now and then, and never without a charge or into a brace.
+                    unitKnockback = allowKnockback && _random.NextFloat(0f, 1f) < 0.15f;
                     knockbackForce = _random.NextFloat(1f, 3f);
                 }
                 else
@@ -166,7 +186,7 @@ partial struct SquadEngageInCombatSystem : ISystem
                     knockbackForce = _random.NextFloat(6f, 8f);
                 }
 
-                if (allowKnockback)
+                if (unitKnockback)
                 {
                     ApplyKnockbackOnContact ApplyKnockbackOnContact = entityManager.GetComponentData<ApplyKnockbackOnContact>(entity);
                     ApplyKnockbackOnContact.LifeTime = 2;
@@ -179,9 +199,9 @@ partial struct SquadEngageInCombatSystem : ISystem
                         KnockbackSquadTeam = squad.ValueRO.Team,
                         KnockbackRange = knockbackRange,
                         KnockbackForce = knockbackForce,
-                        KnockbackInitialDamage = entityManager.HasComponent<SquadChargeImpactDamage>(squad.ValueRO.SelfEntity)
+                        KnockbackInitialDamage = (int)(chargeMultiplier * (entityManager.HasComponent<SquadChargeImpactDamage>(squad.ValueRO.SelfEntity)
                             ? entityManager.GetComponentData<SquadChargeImpactDamage>(squad.ValueRO.SelfEntity).Value
-                            : squadStats.ChargeImactDamage,
+                            : squadStats.ChargeImactDamage)),
                     });
                     // Debug.Log($"SquadEngageInCombatSystem: squad {squad.ValueRO.SquadId} is engaging in combat with a smaller squad {squad.ValueRO.TargetSquadEntity.Index} and applying knockback to unit {entity}");
                 }

@@ -82,5 +82,7 @@ namespace TabletopTavern.Analytics
         public int TrainedPrestige;
         // The trait picked when Train reached max prestige, null otherwise.
         public string TrainedTrait;
+        // What the node offered and what the player took, from NodeLog. Null when nothing was logged.
+        public Dictionary<string, object> Detail;
     }
 }

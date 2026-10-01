@@ -63,8 +63,8 @@ namespace TJ.Engagement
             public const float MoraleBreak = TabletopTavernConstants.MORALE_BREAK_THRESHOLD;
             // The army-wide morale penalty latches when a side falls to this share of its health.
             public const float ArmyLossesShare = 0.25f;
-            // Seconds of movement before contact needed for the charge bonus (TIME_REQUIRED_FOR_CHARGE_BONUS).
-            public const float ChargeBuildup = 2f;
+            // Seconds of sprint before contact needed for the charge bonus.
+            public const float ChargeBuildup = TabletopTavernConstants.CHARGE_SPRINT_TIME;
             // Seconds the charge bonus lasts after contact (TIME_TO_REMOVE_CHARGE_BONUS).
             public const float ChargeWindow = 6f;
             // Shield block chances (UnitSetUpSystem.GetShieldBlockChance).
@@ -187,7 +187,7 @@ namespace TJ.Engagement
             q.FormationWidth = DataTypes.GetFormationWidthFromUnitCount(math.max(1, q.maxUnits));
             q.TargetIndex = -1;
             q.ContactIndex = -1;
-            q.ChargeWindow = 0; q.MoveSeconds = 0; q.HitCarry = 0; q.ShotCarry = 0; q.ThrownModels = 0;
+            q.ChargeWindow = 0; q.MoveSeconds = 0; q.SprintSeconds = 0; q.WearyTimer = 0; q.HitCarry = 0; q.ShotCarry = 0; q.ThrownModels = 0;
             q.RetreatingAlliesTimer = 0; q.FireAtWill = false; q.ArmyLosses = false; q.DefensiveStance = false;
             q.SimReady = true;
         }
@@ -315,6 +315,7 @@ namespace TJ.Engagement
                 own[i].TargetIndex = -1;
                 own[i].ContactIndex = -1;
                 own[i].MoveSeconds = 0;
+                own[i].SprintSeconds = 0;
 
                 int pick = -1; float best = float.MaxValue;
                 for (int j = 0; j < foes.Length; j++)
@@ -365,12 +366,16 @@ namespace TJ.Engagement
                 float d = Distance(ref q, ref target);
 
                 bool shooter = IsShooter(ref q) && !OutOfAmmo(ref q);
-                if (shooter && (rangedHolds || d <= q.squadStats.BaseRange)) { q.MoveSeconds = 0; continue; }
+                if (shooter && (rangedHolds || d <= q.squadStats.BaseRange)) { q.MoveSeconds = 0; q.SprintSeconds = 0; continue; }
                 if (!shooter && !meleeAdvances) continue;
 
                 float speed = q.squadStats.Speed / 10f;
                 if (cavalryMarches && q.squadStats.unitSize == UnitSize.Cavalry && marchSpeed < speed && NearestFoe(ref q, foes) > Model.CavalryReleaseDistance)
                     speed = marchSpeed;
+                // The sprint is the charge (ChargeSprintSystem): a rested melee squad speeds up over the last stretch.
+                bool sprinting = !shooter && q.WearyTimer <= 0f && d - Model.ContactDistance <= TabletopTavernConstants.CHARGE_SPRINT_RANGE;
+                if (sprinting) { speed *= TabletopTavernConstants.CHARGE_SPRINT_SPEED_MULT; q.SprintSeconds += Model.Dt; }
+                else q.SprintSeconds = 0;
                 float step = math.min(d, speed * Model.Dt);
                 if (d > 0.001f)
                 {
@@ -412,22 +417,27 @@ namespace TJ.Engagement
                 if (Distance(ref q, ref target) > Model.ContactDistance) continue;
 
                 q.ContactIndex = target.SquadIndex;
-                q.ChargeWindow = q.MoveSeconds >= Model.ChargeBuildup ? Model.ChargeWindow : 0f;
-                // A charge into a braced anti-large line is stripped on contact (SquadChargeBonusSystem).
+                bool charged = q.SprintSeconds >= Model.ChargeBuildup;
+                q.ChargeWindow = charged ? Model.ChargeWindow : 0f;
+                // Anti-large stops a charge from the front, and this model has no flanks (SquadEngageInCombatSystem).
                 if (target.squadStats.SquadAttributes.AntiLarge) q.ChargeWindow = 0f;
+                if (charged) q.WearyTimer = TabletopTavernConstants.CHARGE_WEARY_TIME;
                 q.MoveSeconds = 0;
+                q.SprintSeconds = 0;
 
                 int targetsOwnTarget = IndexOf(own, target.TargetIndex);
                 bool targetBusy = targetsOwnTarget != -1 && target.ContactIndex == own[targetsOwnTarget].SquadIndex;
                 if (!targetBusy)
                 {
                     // A defender that was itself charging this squad meets it head on and keeps its charge.
-                    bool counterCharge = target.TargetIndex == q.SquadIndex && target.MoveSeconds >= Model.ChargeBuildup
-                        && !q.squadStats.SquadAttributes.AntiLarge;
+                    bool targetCharged = target.TargetIndex == q.SquadIndex && target.SprintSeconds >= Model.ChargeBuildup;
+                    bool counterCharge = targetCharged && !q.squadStats.SquadAttributes.AntiLarge;
                     target.TargetIndex = q.SquadIndex;
                     target.ContactIndex = q.SquadIndex;
                     target.ChargeWindow = counterCharge ? Model.ChargeWindow : 0f;
+                    if (targetCharged) target.WearyTimer = TabletopTavernConstants.CHARGE_WEARY_TIME;
                     target.MoveSeconds = 0;
+                    target.SprintSeconds = 0;
                 }
             }
         }
@@ -501,6 +511,7 @@ namespace TJ.Engagement
             damage = ApplyPhysicalModifiers(damage, ref shooter.squadStats, ref target, false);
             damage = (int)(damage * TabletopTavernConstants.RANGED_TOTAL_DAMAGE_MODIFIER * damageBonus);
             if (target.squadStats.SquadAttributes.ThickScales) damage = (int)(damage * 0.75f);
+            if (target.squadStats.SquadAttributes.ProjectileWard) damage = (int)(damage * TabletopTavernConstants.PROJECTILE_WARD_DAMAGE_MULTIPLIER);
             float block = target.shieldBlockChance;
             if (block > 0f && UnityEngine.Random.value < block) return 0;
             if (shooter.squadStats.SquadAttributes.FlamingAmmo) target.OnFireTimer = 5f;
@@ -823,6 +834,7 @@ namespace TJ.Engagement
                 q.RingIndex = (q.RingIndex + 1) % 5;
                 q.TickLoss = 0; q.TickDealt = 0;
                 q.ChargeWindow = math.max(0f, q.ChargeWindow - Model.Dt);
+                q.WearyTimer = math.max(0f, q.WearyTimer - Model.Dt);
                 q.FlankedTimer = math.max(0f, q.FlankedTimer - Model.Dt);
                 q.RetreatingAlliesTimer = math.max(0f, q.RetreatingAlliesTimer - Model.Dt);
                 q.OnFireTimer = math.max(0f, q.OnFireTimer - Model.Dt);

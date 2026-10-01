@@ -77,10 +77,10 @@ namespace TJ.Engagement.EditorTools
         static readonly Color Coin = Hex("E3BB71");
         static readonly Color Blue = Hex("9ED8FF");
         static readonly Color Negative = Hex("E3695E");
-        static readonly Color TakenTitle = Hex("7E8A8F");
-        static readonly Color TakenWord = Hex("9FB0B8");
+        static readonly Color TakenTitle = Hex("8C9AA2");
+        static readonly Color TakenWord = Hex("8C9AA2");
         static readonly Color WellEdge = Hex("605635", 0.9f);
-        static readonly Color PredictionGrey = Hex("A9B9C6");
+        static readonly Color PredictionGrey = Hex("8C9AA2");
         // The map's own Autoresolve and Fight Battle recipes, read from Map.unity.
         static readonly Color[] AutoResolveHue = { Hex("152733"), Hex("4492C5"), Hex("4492C5"), Hex("45AFF7"), Hex("2EABFF"), Hex("87CFFF"), Hex("8ACACC", 0.8f) };
         static readonly Color[] FightHue = { Hex("300F10"), Hex("C81616"), Hex("C81616"), Hex("FA0505"), Hex("FF0000"), Hex("FF5C5C"), Hex("CC8B8A", 0.8f) };
@@ -811,6 +811,7 @@ namespace TJ.Engagement.EditorTools
             BuildBeforeBattle(root, so);
             BuildResult(root, so);
             BuildResultPopup(root, so);
+            Dress(root);
 
             Ref(so, "skirmishIcon", skirmishIcon);
             Ref(so, "hordeIcon", hordeIcon);
@@ -840,6 +841,36 @@ namespace TJ.Engagement.EditorTools
         }
 
         // The result pop-up: a cover greys the whole card, and the old end-of-battle banner names the outcome over it.
+        #region Synty dressing
+        // ui-design.md, Art richness: the shared crest on the panel's top edge and the shared divider in each column split.
+        // No focal glow here: Fight Battle and Autoresolve are equal choices. Runs after Build and finds its targets by name.
+        const string CrestPath = "Assets/Data/Prefabs/UI/Reuseable/Ornaments/Panel Crest.prefab";
+        const string DividerPath = "Assets/Data/Prefabs/UI/Reuseable/Ornaments/Column Divider.prefab";
+
+        static void Dress(RectTransform panel)
+        {
+            GameObject crest = AssetDatabase.LoadAssetAtPath<GameObject>(CrestPath);
+            GameObject divider = AssetDatabase.LoadAssetAtPath<GameObject>(DividerPath);
+            if (crest == null || divider == null) { Debug.LogError("Synty dressing assets missing."); return; }
+
+            PrefabUtility.InstantiatePrefab(crest, panel);
+
+            // Column splits are one-unit-wide "Divider" cells; the shared divider replaces their plain "Line".
+            var cells = new List<Transform>();
+            foreach (RectTransform t in panel.GetComponentsInChildren<RectTransform>(true))
+            {
+                if (t.name != "Divider" || t.Find("Line") == null) continue;
+                LayoutElement cell = t.GetComponent<LayoutElement>();
+                if (cell != null && cell.preferredWidth > 0f && cell.preferredWidth <= 2f) cells.Add(t);
+            }
+            foreach (Transform cell in cells)
+            {
+                Object.DestroyImmediate(cell.Find("Line").gameObject);
+                PrefabUtility.InstantiatePrefab(divider, cell);
+            }
+        }
+        #endregion
+
         static void BuildResultPopup(RectTransform root, SerializedObject so)
         {
             // Its own canvas sorts above the squad cards (2, their counts 101) and below Settings (105), so the cover greys the cards too.

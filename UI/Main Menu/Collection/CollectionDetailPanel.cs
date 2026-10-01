@@ -179,7 +179,8 @@ namespace TJ.MainMenu
 
         #region Units
 
-        public void ShowUnit(UnitName unit, Race race, bool found)
+        /// <param name="compareTo">The kept unit while another is hovered; each stat then shows its difference from it.</param>
+        public void ShowUnit(UnitName unit, Race race, bool found, UnitName? compareTo = null)
         {
             Show(unitView);
             SquadStats stats = TabletopTavernData.Instance.GetSquadStats(unit);
@@ -198,7 +199,7 @@ namespace TJ.MainMenu
             unitStripValues[1].text = (stats.baseUnitCount * stats.HitPointsPerUnit).ToString("N0");
             unitStripValues[2].text = SaveDataHandler.GetUnitNameHistoricalKillCount(unit).ToString("N0");
 
-            BuildStats(unit);
+            BuildStats(unit, compareTo);
 
             TJ.Spells.SpellData spell = null;
             if (TabletopTavernConstants.Casts(stats.unitType) && TabletopTavernData.Instance.SquadAssetsDictionary.TryGetValue(unit, out SquadAssets assets))
@@ -257,9 +258,14 @@ namespace TJ.MainMenu
             return (RectTransform)row.transform;
         }
 
-        private void BuildStats(UnitName unit)
+        private void BuildStats(UnitName unit, UnitName? compareTo)
         {
             List<UnitStatValue> values = TabletopTavernData.Instance.GetUnitStatsForDisplay(unit);
+            List<UnitStatValue> baseline = compareTo.HasValue && compareTo.Value != unit
+                ? TabletopTavernData.Instance.GetUnitStatsForDisplay(compareTo.Value)
+                : null;
+            // A caster's Range is its spell's reach, so it takes the spell card's name for it.
+            bool casts = TabletopTavernConstants.Casts(TabletopTavernData.Instance.GetUnitTypeFromUnitName(unit));
             EnsureStatMax();
             while (_statRows.Count < values.Count)
             {
@@ -273,8 +279,12 @@ namespace TJ.MainMenu
                 if (!used) continue;
                 UnitStat stat = values[i].unitStat;
                 float max = _statMax.TryGetValue(stat, out float highest) && highest > 0f ? highest : 1f;
+                string key = stat == UnitStat.Range && casts ? "SpellStatCastRange" : stat.ToString();
                 _statRows[i].Set(SpriteData.GetSprite(stat.ToString()), (Color)ColorData.GetUnitStatColor(stat),
-                    T(stat.ToString()), values[i].Value, values[i].Value / max, KeywordText.Render(T(stat + "Desc"), false));
+                    T(key), values[i].Value, values[i].Value / max, KeywordText.Render(T(key + "Desc"), false));
+                // A stat the kept unit lacks (Range on a melee unit) gets no difference.
+                int match = baseline != null ? baseline.FindIndex(v => v.unitStat == stat) : -1;
+                if (match >= 0) _statRows[i].SetDelta(values[i].Value - baseline[match].Value);
             }
         }
 

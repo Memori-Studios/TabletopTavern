@@ -63,7 +63,8 @@ namespace TJ.Settings.EditorTools
         static void LoadAssets()
         {
             displayDrop = Load<TMP_FontAsset>("Assets/ImportedPackages/InterfaceFantasyWarriorHUD/Fonts/Texturina/Texturina_18pt-SemiBold SDF Drop.asset");
-            body = Load<TMP_FontAsset>("Assets/Synty/InterfaceFantasyMenus/Fonts/Alegreya Sans/AlegreyaSans-Medium SDF.asset");
+            // Texturina is the UI font everywhere (ui-design.md, Type); Alegreya Sans was the codex body font until 2026-09-30.
+            body = Load<TMP_FontAsset>("Assets/ImportedPackages/InterfaceFantasyWarriorHUD/Fonts/Texturina/Texturina_18pt-SemiBold SDF.asset");
             var sheet = new Dictionary<string, Sprite>();
             foreach (Object asset in AssetDatabase.LoadAllAssetsAtPath(SheetPath))
                 if (asset is Sprite sprite) sheet[sprite.name] = sprite;

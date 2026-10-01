@@ -582,6 +582,57 @@ namespace Memori.SaveData
             return report;
         }
 
+        /// <summary>One squad of the saved roster at the end of a battle, for the end screen.</summary>
+        public struct EndBattleSquad
+        {
+            public int SquadId;
+            public bool IsPlayer;
+            public UnitName Unit;
+            public int Kills;
+            public int Lost;
+            public int Damage;
+            public int UnitsLeft;
+        }
+
+        /// <summary>Kills, losses and damage for every squad of both saved rosters; summons are left out. Works in custom battles, which save nothing.</summary>
+        public List<EndBattleSquad> BuildEndBattleResults()
+        {
+            CaptureDamageTotals();
+            var results = new List<EndBattleSquad>();
+            AddEndBattleSquads(results, BattleManager.Instance.BattleSaveManager.GetArmyFromSaveData(true).Item1, true);
+            AddEndBattleSquads(results, BattleManager.Instance.BattleSaveManager.GetArmyFromSaveData(false).Item1, false);
+            return results;
+        }
+
+        private void AddEndBattleSquads(List<EndBattleSquad> results, SquadToLoad[] army, bool isPlayer)
+        {
+            foreach (SquadToLoad squad in army)
+            {
+                if (!uniqueIDToSquadId.TryGetValue(squad.UniqueID, out int squadId)) continue;
+                if (!squadIdToInitialUnitCount.TryGetValue(squadId, out int unitsStart)) continue;
+                // Same sources as the post-battle save: a withdrawn squad keeps the count it left with, a squad missing from the live counts keeps its start.
+                int unitsLeft = squadIdToUnitCount.TryGetValue(squadId, out int units) ? units : unitsStart;
+                if (isPlayer)
+                    foreach (SquadToLoad withdrawn in withdrawnSquads)
+                    {
+                        if (withdrawn.UniqueID != squad.UniqueID) continue;
+                        int hitPoints = TabletopTavernData.Instance.GetHitPointsPerUnit(squad.UnitName);
+                        if (hitPoints > 0) unitsLeft = withdrawn.SquadCurrentHealth / hitPoints;
+                        break;
+                    }
+                results.Add(new EndBattleSquad
+                {
+                    SquadId = squadId,
+                    IsPlayer = isPlayer,
+                    Unit = squad.UnitName,
+                    Kills = squadIdKillCounter.TryGetValue(squadId, out int kills) ? kills : 0,
+                    Lost = Mathf.Max(0, unitsStart - unitsLeft),
+                    Damage = GetSquadDamageDealt(squadId),
+                    UnitsLeft = unitsLeft,
+                });
+            }
+        }
+
         private void ApplyLiveUnitCounts(SquadToLoad[] army)
         {
             for (int i = 0; i < army.Length; i++)

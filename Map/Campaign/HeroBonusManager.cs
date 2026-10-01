@@ -174,6 +174,21 @@ namespace TJ
             }
             return false;
         }
+        // Grants that hold in every battle; an EnemyRace rule depends on the fight, so it does not count.
+        public static bool HeroAlwaysGrants(UnitName _requestingUnit, int activeHeroID, UnitAttribute attribute)
+        {
+            if (activeHeroID == -1) return false;
+
+            EnsureRulesLoaded();
+            SquadStats stats = TabletopTavernData.Instance.GetSquadStats(_requestingUnit);
+            foreach (var rule in _attributeRules)
+            {
+                if (rule.HeroID != activeHeroID || rule.GrantedAttribute != attribute) continue;
+                if (rule.Condition.FilterKind == BonusFilterKind.EnemyRace) continue;
+                if (rule.Condition.Matches(_requestingUnit, stats, Race.Special)) return true;
+            }
+            return false;
+        }
         // Model count a player squad is recruited with. The loader only admits Flat BaseUnitCount rules
         // with no EnemyRace condition, so this reads the same at recruit time and at battle setup.
         public static int GetPlayerBaseUnitCount(UnitName _requestingUnit, int activeHeroID)

@@ -12,6 +12,8 @@ namespace TJ
         private const int ENEMY_PRESTIGE_SEED_OFFSET = 104729; // decorrelate from the deck-shuffle RNG in CreateArmyFromUnitsByTier
         // Elite Guard draws its squad on its own stream, so the rest of the army is the same as without the card.
         private const int ELITE_GUARD_SEED_OFFSET = 7727;
+        // The spell stopgap squad draws on its own stream too, so the rest of the army is unchanged.
+        private const int SPELLS_EXTRA_SQUAD_SEED_OFFSET = 3571;
 
         // DifficultyMod 10 / DifficultyMod 14: gives enemy squads a chance to spawn already prestiged, scaling with Act and difficulty
         private static SquadToLoad[] ApplyEnemyPrestige(SquadToLoad[] _squads, int _actNumber, int _seed, bool _enhanced, bool _doubleChance = false)
@@ -46,8 +48,7 @@ namespace TJ
 
                 if (level == 2)
                 {
-                    SquadStats squadStats = TabletopTavernData.Instance.GetSquadStats(_squads[index].UnitName);
-                    List<UnitAttribute> eligible = TabletopTavernConstants.GetEligiblePrestigeTraits(squadStats);
+                    List<UnitAttribute> eligible = TabletopTavernData.Instance.GetUsablePrestigeTraits(_squads[index].UnitName);
                     if (eligible.Count > 0)
                         _squads[index].PrestigeTrait = eligible[random.Next(eligible.Count)];
                 }
@@ -85,6 +86,25 @@ namespace TJ
 
             System.Random random = new(_seed + ELITE_GUARD_SEED_OFFSET);
             List<SquadToLoad> squads = new(_army) { new SquadToLoad(deck[random.Next(deck.Count)]) };
+            return squads.ToArray();
+        }
+        /// <summary>Spell stopgap: one more Common in act 1, Uncommon in act 2, Rare from act 3, never past the deployment cap.</summary>
+        private static SquadToLoad[] AddSpellsExtraSquad(SquadToLoad[] _army, int _boardNumber, List<UnitTier> _unitsPool, int _seed)
+        {
+            if (_army.Length >= TabletopTavernConstants.ENDLESS_ENEMY_SQUAD_CAP) return _army;
+            int tier = Mathf.Clamp(_boardNumber, 1, 3);
+            List<UnitName> deck = new();
+            foreach (UnitTier u in _unitsPool)
+                if (u.tier == tier) deck.Add(u.unitName);
+            if (deck.Count == 0) return _army;
+
+            System.Random random = new(_seed + SPELLS_EXTRA_SQUAD_SEED_OFFSET);
+            List<SquadToLoad> squads = new(_army);
+            // After the last squad of its tier, so the Gruntkin act 1 trim of the last squad drops the same squad as before.
+            int insertAt = 0;
+            for (int i = 0; i < squads.Count; i++)
+                if (TabletopTavernData.Instance.GetUnitTierFromUnitName(squads[i].UnitName) <= tier) insertAt = i + 1;
+            squads.Insert(insertAt, new SquadToLoad(deck[random.Next(deck.Count)]));
             return squads.ToArray();
         }
         private static SquadToLoad[] CreateArmyFromUnitsByTier(TierCount[] _tierCounts, List<UnitTier> _unitsPool, int _seed)
@@ -125,11 +145,12 @@ namespace TJ
             }
             return squads.ToArray();
         }
-        public static SquadToLoad[] GenerateEnemyArmy(int _boardNumber, int _battlesFought, int _seed, bool _finalBattle, List<UnitTier> unitsPool, bool knightDifficulty, bool enemyPrestigeEligible, bool enemyPrestigeEnhanced, bool eliteGuard = false, bool doublePrestigeChance = false)
+        public static SquadToLoad[] GenerateEnemyArmy(int _boardNumber, int _battlesFought, int _seed, bool _finalBattle, List<UnitTier> unitsPool, bool knightDifficulty, bool enemyPrestigeEligible, bool enemyPrestigeEnhanced, bool eliteGuard = false, bool doublePrestigeChance = false, bool spellsExtraSquad = false)
         {
             TierCount[] tierCounts = ArmyGenerationRuleData.ResolveEnemyArmyTierCounts(_boardNumber, _finalBattle, knightDifficulty, _battlesFought);
 
             SquadToLoad[] army = CreateArmyFromUnitsByTier(tierCounts, unitsPool, _seed);
+            if (spellsExtraSquad) army = AddSpellsExtraSquad(army, _boardNumber, unitsPool, _seed);
             if (eliteGuard) army = AddEliteSquad(army, unitsPool, _seed);
             if (enemyPrestigeEligible) army = ApplyEnemyPrestige(army, _boardNumber, _seed, enemyPrestigeEnhanced, doublePrestigeChance);
             return army;

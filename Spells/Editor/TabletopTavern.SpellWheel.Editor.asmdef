@@ -1,0 +1,20 @@
+{
+    "name": "TabletopTavern.SpellWheel.Editor",
+    "rootNamespace": "",
+    "references": [
+        "TabletopTavern.Core",
+        "Unity.TextMeshPro",
+        "UnityEngine.UI"
+    ],
+    "includePlatforms": [
+        "Editor"
+    ],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": false,
+    "precompiledReferences": [],
+    "autoReferenced": false,
+    "defineConstraints": [],
+    "versionDefines": [],
+    "noEngineReferences": false
+}

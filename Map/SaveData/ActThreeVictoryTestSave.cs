@@ -1,4 +1,4 @@
-#if UNITY_EDITOR
+#if UNITY_EDITOR || TESTING
 using System;
 using System.Collections.Generic;
 using System.IO;
@@ -11,6 +11,7 @@ namespace TJ
 {
     // Tabletop Tavern > Boot Into Act III Victory (Hard): every Play starts on the map with the Act III
     // final just won on Hard, from a fresh save in Library/DevSaves, so the real save folder is never touched.
+    // TESTING builds reach the same run from a main menu button (MainMenu.AddActThreeVictoryButton).
     public static class ActThreeVictoryTestSave
     {
         #region Settings
@@ -24,8 +25,12 @@ namespace TJ
         private const int FINAL_NODE_INDEX = (MAP_LAYERS - 1) * NODES_PER_LAYER;
         private const int BATTLES_FOUGHT_IN_ACT = 7;
         private const int GOLD = 60;
+        private const int GEAR_COUNT = 3;
+        // Lowest share of max health a squad keeps after the final.
+        private const float MIN_HEALTH_LEFT = 0.65f;
         #endregion
 
+#if UNITY_EDITOR
         public static string Folder => Path.GetFullPath(Path.Combine(Application.dataPath, "..", "Library", "DevSaves", "ActThreeVictory"));
 
         #region Folder
@@ -52,8 +57,10 @@ namespace TJ
                 File.Copy(source, Path.Combine(toFolder, fileName), true);
         }
         #endregion
+#endif
 
         #region Build
+#if UNITY_EDITOR
         // After the first scene's Awake, so TabletopTavernData and HeroData are loaded, and before any Start.
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
         private static void Build()
@@ -65,13 +72,7 @@ namespace TJ
                 return;
             }
 
-            PlayerSaveData player = SaveDataHandler.LoadPlayerSaveData();
-            player.customBattle = false;
-            SaveDataHandler.SavePlayerSaveData(player);
-
-            CampaignSaveData run = CreateRun(player.lastHeroID);
-            SaveDataHandler.SaveCampaign(run);
-            SaveDataHandler.SaveCampaignSnapshot(run);
+            CampaignSaveData run = WriteRun();
 
             // Only a normal boot passes through the main menu; an open Map or TavernBattle scene boots straight in.
             if (SceneHandler.Instance.EditorOverride == SceneHandler.EditorOverrides.None)
@@ -79,6 +80,20 @@ namespace TJ
 
             Race enemyRace = TabletopTavernData.Instance.GetRaceFromUnitName(run.enemyArmy[0].UnitName);
             Debug.LogWarning($"[ActThreeVictoryTestSave] Act III final won on {DIFFICULTY}: hero {run.heroID}, beat {enemyRace}. Saves in {Folder}");
+        }
+#endif
+
+        // Replaces the current run in SaveDataHandler.SaveRoot with the Act III final just won.
+        public static CampaignSaveData WriteRun()
+        {
+            PlayerSaveData player = SaveDataHandler.LoadPlayerSaveData();
+            player.customBattle = false;
+            SaveDataHandler.SavePlayerSaveData(player);
+
+            CampaignSaveData run = CreateRun(player.lastHeroID);
+            SaveDataHandler.SaveCampaign(run);
+            SaveDataHandler.SaveCampaignSnapshot(run);
+            return run;
         }
 
         private static CampaignSaveData CreateRun(int lastHeroID)
@@ -88,9 +103,9 @@ namespace TJ
             Race heroRace = HeroData.GetRaceFromHero(heroID);
             System.Random random = new(SEED);
 
-            // An act 3 army of the hero's faction, built the way the game builds one, battered by the final.
+            // An act 3 army of the hero's faction plus one elite (tier 4) squad, built the way the game builds one, battered by the final.
             SquadToLoad[] recruits = ArmyCreator.GenerateEnemyArmy(3, BATTLES_FOUGHT_IN_ACT, SEED,
-                false, data.GetSquadsWithTiersFromRace(heroRace), false, true, false);
+                false, data.GetSquadsWithTiersFromRace(heroRace), false, true, false, eliteGuard: true);
             SquadToLoad[] playerArmy = new SquadToLoad[13];
             for (int i = 0; i < playerArmy.Length; i++) playerArmy[i].UnitIndex = -1;
             var kills = new List<SquadKillsStored>();
@@ -100,7 +115,7 @@ namespace TJ
                 SquadToLoad squad = recruits[i];
                 squad.UnitIndex = i;
                 HeroBonusManager.ApplyHeroBaseUnitCount(ref squad, heroID);
-                float healthLeft = 0.45f + (float)random.NextDouble() * 0.55f;
+                float healthLeft = MIN_HEALTH_LEFT + (float)random.NextDouble() * (1f - MIN_HEALTH_LEFT);
                 squad.SquadCurrentHealth = Mathf.Max(squad.HitPointsPerUnit, (int)(squad.SquadMaxHealth * healthLeft));
                 playerArmy[i] = squad;
                 kills.Add(new SquadKillsStored { SquadGUID = squad.UniqueID, Kills = random.Next(5, 60) });
@@ -112,7 +127,8 @@ namespace TJ
             SquadToLoad[] enemyArmy = ArmyCreator.GenerateEnemyArmy(3,
                 BATTLES_FOUGHT_IN_ACT + DifficultyRules.BattlesFoughtBonus(DIFFICULTY, 3), SEED + 1, true,
                 data.GetSquadsWithTiersFromRace(enemyRace), DifficultyRules.HarderFinalBattle(DIFFICULTY),
-                DifficultyRules.EnemyPrestigeEligible(DIFFICULTY), DifficultyRules.EnemyPrestigeEnhanced(DIFFICULTY));
+                DifficultyRules.EnemyPrestigeEligible(DIFFICULTY), DifficultyRules.EnemyPrestigeEnhanced(DIFFICULTY),
+                spellsExtraSquad: DifficultyRules.SpellsExtraSquad(DIFFICULTY));
             for (int i = 0; i < enemyArmy.Length; i++)
             {
                 enemyArmy[i].UnitIndex = i;
@@ -121,6 +137,8 @@ namespace TJ
 
             CampaignSaveData run = new(SEED, heroID, GOLD, playerArmy, DIFFICULTY, GearID.None, Guid.NewGuid());
             run.bookNumber = 3;
+            // Unseeded, so each new test run gets a different set of gear.
+            run.Gear = GearData.GetRandomGear(GEAR_COUNT, new List<GearID>(), Environment.TickCount, run.bookNumber);
             run.BattlesFought = BATTLES_FOUGHT_IN_ACT;
             // One node per layer up to the final, which OverrideSelectedNodeBeforeBattle had already recorded.
             run.nodePath = new List<int> { 0 };

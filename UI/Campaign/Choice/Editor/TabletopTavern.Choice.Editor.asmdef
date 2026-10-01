@@ -3,6 +3,7 @@
     "rootNamespace": "",
     "references": [
         "TabletopTavern.Core",
+        "Memori.Tooltip",
         "Unity.TextMeshPro",
         "UnityEngine.UI",
         "Unity.Localization",

@@ -1,4 +1,6 @@
 using System.Collections.Generic;
+using Memori.Audio;
+using Memori.UI;
 using TJ.Map;
 using TMPro;
 using UnityEngine;
@@ -122,6 +124,18 @@ namespace TJ.Campfire
             scoutConsumableLine.text = consumableLine;
             scoutConsumableLine.color = slotsFull ? warningColour : lineColour;
             scoutConsumableIcon.color = slotsFull ? warningColour : lineIconColour;
+        }
+
+        private Coroutine choiceStagger;
+
+        // The choice columns arrive one after another, each with the option sound, like the Games columns.
+        public void StaggerChoices()
+        {
+            var columns = new List<RectTransform>();
+            foreach (Transform child in choosingBody.transform)
+                if (child.gameObject.activeSelf && child is RectTransform rect && child.GetComponentInChildren<Button>(true) != null) columns.Add(rect);
+            if (choiceStagger != null) StopCoroutine(choiceStagger);
+            choiceStagger = StartCoroutine(UIJuice.Stagger(columns, 0.1f, 0.22f, 0f, _ => IAudioRequester.Instance.PlaySFX(SFXData.EventOptionLoad)));
         }
 
         public void SetChoicesInteractable(bool interactable)

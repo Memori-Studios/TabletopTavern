@@ -7,6 +7,7 @@ using UnityEngine.Rendering;
 using UnityEngine.Rendering.Universal;
 using Memori.Notifications;
 using Memori.Localization;
+using TJ.Settings;
 
 namespace TJ
 {
@@ -109,7 +110,7 @@ public class GraphicsPanel : MonoBehaviour
             QualitySettings.SetQualityLevel(graphicsQualityDropdown.value);
             ApplyVSyncAndFpsLimit(vsyncToggle.isOn, fpsLimitDropdown.value);
             Screen.SetResolution(resolutionWidth, resolutionHeight, fullScreenMode, refreshRateObj);
-            Cursor.lockState = fullscreenToggle.isOn ? CursorLockMode.Confined : CursorLockMode.None;
+            CursorLockToggle.Apply();
 
             ApplyShadowQuality(shadowQualityDropdown.value);
             ApplyAmbientOcclusion(ambientOcclusionToggle.isOn);
@@ -279,7 +280,7 @@ public class GraphicsPanel : MonoBehaviour
         QualitySettings.SetQualityLevel(graphicsQualityDropdown.value);
         ApplyVSyncAndFpsLimit(vsyncToggle.isOn, fpsLimitDropdown.value);
         Screen.SetResolution(resolutionWidth, resolutionHeight, fullScreenMode, refreshRateObj);
-        Cursor.lockState = fullscreenToggle.isOn ? CursorLockMode.Confined : CursorLockMode.None;
+        CursorLockToggle.Apply();
         StartCoroutine(ForceCanvasRebuildNextFrame());
 
         ApplyShadowQuality(shadowQualityDropdown.value);
@@ -322,7 +323,7 @@ public class GraphicsPanel : MonoBehaviour
 
         var res = resolutionDropdown.options[resolutionDropdown.value].text.Split('x');
         Screen.SetResolution(int.Parse(res[0]), int.Parse(res[1]), fullScreenMode, refreshRateObj);
-        Cursor.lockState = fullscreenToggle.isOn ? CursorLockMode.Confined : CursorLockMode.None;
+        CursorLockToggle.Apply();
         StartCoroutine(ForceCanvasRebuildNextFrame());
 
         ApplyMsaa(antiAliasingDropdown.value);

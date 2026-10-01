@@ -405,6 +405,7 @@ public class SquadManager : MonoBehaviour
                 TabletopTavernConstants.SetAttribute(ref squadStats.SquadAttributes, attributeBonus.UnitAttribute);
             }
         }
+        if (squadStats.SquadAttributes.SwiftStride) speed *= TabletopTavernConstants.SWIFT_STRIDE_SPEED_MULTIPLIER;
         int maxHealth = hitPointsPerUnit * initialSquadSize;
         int currentHealth = _entities.Count * hitPointsPerUnit;
         ecb.AddComponent(squadEntity, new SquadChargeImpactDamage { Value = chargeImpactDamage });
@@ -1139,6 +1140,7 @@ public class SquadManager : MonoBehaviour
             if (!entityManager.HasComponent<ShieldedStanceSquadComponent>(squadEntity.SelfEntity)) continue;
 
             ShieldedStanceSquadComponent shieldedStance = entityManager.GetComponentData<ShieldedStanceSquadComponent>(squadEntity.SelfEntity);
+            if (shieldedStance.Stance == ShieldedStance.None) continue;
             shieldedStance.Stance = ShieldedStance.Balanced;
             shieldedStance.SwitchRequested = true;
             
@@ -1383,6 +1385,18 @@ public class SquadManager : MonoBehaviour
     {
         if(squadPrestigeTraitDict.ContainsKey(_squadId)) return squadPrestigeTraitDict[_squadId];
         return UnitAttribute.None;
+    }
+    /// <summary>Innate attributes plus the squad's prestige trait and its team hero's grants, the same merge RegisterSquad makes.</summary>
+    public SquadAttributes GetBattleSquadAttributes(UnitName _unitName, int _squadId)
+    {
+        SquadAttributes attributes = TabletopTavernData.Instance.GetSquadStats(_unitName).SquadAttributes;
+        UnitAttribute trait = GetSquadPrestigeTrait(_squadId);
+        if (trait != UnitAttribute.None) TabletopTavernConstants.SetAttribute(ref attributes, trait);
+        BattleHeroContext hero = HeroFor(_squadId > 0 ? Team.Player : Team.Enemy);
+        if (hero.HasHero)
+            foreach (var attributeBonus in HeroBonusManager.GetHeroAttributeBonus(_unitName, hero.HeroID, hero.EnemyRace))
+                TabletopTavernConstants.SetAttribute(ref attributes, attributeBonus.UnitAttribute);
+        return attributes;
     }
     public void ToggleAllRanges()
     {

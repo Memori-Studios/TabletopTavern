@@ -120,6 +120,7 @@ namespace TJ.Map
         [SerializeField] private MapLabel unknownLabel;
         [SerializeField] private MapLabel tavernLabel;
         [SerializeField] private MapLabel campfireLabel;
+        [SerializeField] private TMP_Text routeHintText;
         // public MapLabel SkirmishLabel => skirmishLabel;
         // public MapLabel EventLabel => eventLabel;
         // public MapLabel ShopLabel => shopLabel;
@@ -167,8 +168,10 @@ namespace TJ.Map
             campaignSaveManager.OnConsumablesChanged += ReloadConsumables;
             campaignSaveManager.OnOrdealsChanged -= OrdealsChanged;
             campaignSaveManager.OnOrdealsChanged += OrdealsChanged;
-            InputHandler.Instance.SecondaryActionPressed += CloseAllPopUps;
+            InputHandler.Instance.SecondaryActionPressed += SecondaryAction;
             InputHandler.Instance.OnToggleFreeCameraMode += ToggleFreeCameraMode;
+            if (routeHintText != null)
+                routeHintText.text = string.Format(LocalizationManager.Instance.GetText("MapRouteHint"), SecondaryKey());
 
             ReloadGear();
             ReloadConsumables();
@@ -356,7 +359,15 @@ namespace TJ.Map
 
             if (_hovered)
             {
-                squadBattleInfo.SetUpCampaign(squad, team);
+                // With a card selected, the panel keeps showing it and the hovered squad hangs off its right.
+                SquadDisplayCardMenu selected = selectedCards.Count > 0 ? selectedCards[0] : null;
+                if (selected != null && selected.transform != _squadCardTransform)
+                {
+                    squadBattleInfo.SetUpCampaign(selected.GetSquadToLoad(), selected.CardTeam);
+                    squadBattleInfo.ShowComparison(panel => panel.SetUpCampaign(squad, team));
+                }
+                else
+                    squadBattleInfo.SetUpCampaign(squad, team);
                 hoveredSquadIndex = squad.UnitIndex;
             }
             else if (selectedCards.Count > 0)
@@ -792,6 +803,12 @@ namespace TJ.Map
                 gearDisplay.CloseGearSellTag();
             HideDisbandSquadConfirmation();
         }
+        // A right-click that marks a map node is not a dismiss, and would play the close sound over the mark's own.
+        private void SecondaryAction()
+        {
+            if (mapSceneUIManager.MapSceneManager.CanMarkHoveredNode) return;
+            CloseAllPopUps();
+        }
         public void CloseAllPopUps()
         {
             CloseNonSquadPopUps();
@@ -823,6 +840,10 @@ namespace TJ.Map
 
         private static string FreeCameraKey() => InputControlPath.ToHumanReadableString(
             InputHandler.Instance.GameControls.Battle.ToggleFreeCameraMode.bindings[0].effectivePath,
+            InputControlPath.HumanReadableStringOptions.OmitDevice);
+
+        private static string SecondaryKey() => InputControlPath.ToHumanReadableString(
+            InputHandler.Instance.GameControls.Battle.Secondary.bindings[0].effectivePath,
             InputControlPath.HumanReadableStringOptions.OmitDevice);
 
         public void ShowFreeCameraTip()
@@ -870,7 +891,7 @@ namespace TJ.Map
         public void OnDestroy()
         {
             if (InputHandler.HasInstance) {
-                InputHandler.Instance.SecondaryActionPressed -= CloseAllPopUps;
+                InputHandler.Instance.SecondaryActionPressed -= SecondaryAction;
                 InputHandler.Instance.OnToggleFreeCameraMode -= ToggleFreeCameraMode;
             }
             // The free camera callout sits on the persistent Tutorial Canvas and would follow the player into battle.

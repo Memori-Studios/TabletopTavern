@@ -1,11 +1,14 @@
+using System;
 using System.Collections;
 using System.Collections.Generic;
 using Memori.SaveData;
+using Memori.Tooltip;
 using TJ.Ordeals;
 using TJ.Recruit;
 using TMPro;
 using UnityEngine;
 using UnityEngine.EventSystems;
+using UnityEngine.InputSystem;
 using UnityEngine.UI;
 
 namespace TJ
@@ -29,6 +32,17 @@ namespace TJ
         [SerializeField] private float cardStagger = 0.07f;
         [SerializeField] private float titleDrop = 24f;
         [SerializeField] private float titleSeconds = 0.25f;
+        [Tooltip("Cards ignore clicks until this long after the last one lands.")]
+        [SerializeField] private float armDelay = 0.35f;
+
+        #region Intro beat
+        [SerializeField] private float introHold = 1.2f;
+        [Tooltip("What is left of the hold after a click shortens it.")]
+        [SerializeField] private float introShortened = 0.3f;
+        [SerializeField] private float introScale = 1.25f;
+        [SerializeField] private float introMoveSeconds = 0.35f;
+        [SerializeField] private float dealStagger = 0.18f;
+        #endregion
 
         #region Ordeal header
         [SerializeField] private GameObject infoRow;
@@ -56,6 +70,26 @@ namespace TJ
         [SerializeField] private VerticalLayoutGroup stackLayout;
         #endregion
 
+        #region Reroll
+        [Tooltip("The Prestige panel's Fateshine reroll row. The other panels leave it empty.")]
+        [SerializeField] private GameObject rerollRow;
+        [SerializeField] private RectTransform rerollPop;
+        [SerializeField] private CanvasGroup rerollGroup;
+        [SerializeField] private Image rerollIcon;
+        [Tooltip("Alpha of the whole button when the player has nothing to reroll with, on top of the button's own disabled fade.")]
+        [SerializeField] private float rerollDimmedAlpha = 0.55f;
+        [SerializeField] private Color rerollDimmedIconColour = new(0.45f, 0.45f, 0.45f, 1f);
+        [SerializeField] private Button rerollButton;
+        [SerializeField] private TMP_Text rerollLabel;
+        [SerializeField] private MemoriTooltipTrigger rerollTooltip;
+        [SerializeField] private TMP_Text rerollHint;
+        [SerializeField] private int rerollPulses = 3;
+        [SerializeField] private float rerollPulseSeconds = 0.8f;
+        [SerializeField] private float rerollPulseScale = 1.06f;
+        #endregion
+
+        public event Action RerollClicked;
+
         private readonly List<ChoiceCardView> cards = new();
         private readonly List<OrdealIcon> heldIcons = new();
         private RecruitCard recruitCard;
@@ -63,7 +97,16 @@ namespace TJ
         private ChoiceCardView hoveredCard;
         private Vector2 titleHome;
         private bool titleHomeSet;
-        private Coroutine titleRoutine;
+        private Coroutine openRoutine;
+        private CanvasGroup infoGroup;
+        private bool armed;
+        private bool focusOnArm;
+        private Coroutine pulseRoutine;
+
+        private void Awake()
+        {
+            if (rerollButton != null) rerollButton.onClick.AddListener(ClickReroll);
+        }
 
         public IReadOnlyList<ChoiceCardView> Cards => cards;
         public ChoiceCardView WideCard => wideCard;
@@ -125,8 +168,8 @@ namespace TJ
             if (wideCard != null) Destroy(wideCard.gameObject);
             wideCard = Instantiate(wideCardPrefab, wideSlot);
             wideCard.SetSize(wideCardSize);
-            // The wide card grows and shrinks with the group but stays still at rest.
-            JoinGroup(wideCard, cards.Count, false);
+            // The wide card neither grows nor lifts on hover, and stays still at rest.
+            JoinGroup(wideCard, cards.Count, false, false);
             return wideCard;
         }
 
@@ -146,20 +189,75 @@ namespace TJ
 
         public void Clear()
         {
-            foreach (ChoiceCardView card in cards)
-                if (card != null) Destroy(card.gameObject);
-            cards.Clear();
+            ClearCards();
             if (recruitCard != null) Destroy(recruitCard.gameObject);
             recruitCard = null;
             if (wideCard != null) Destroy(wideCard.gameObject);
             wideCard = null;
+            ShowReroll(false, false, false, null, null, null, false);
+        }
+
+        /// <summary>Removes the row of cards and keeps the squad card, for a new deal on the same panel.</summary>
+        public void ClearCards()
+        {
+            foreach (ChoiceCardView card in cards)
+                if (card != null) Destroy(card.gameObject);
+            cards.Clear();
             hoveredCard = null;
         }
 
-        /// <summary>Left and right move between the cards; down goes to the wide card and up comes back.</summary>
+        #region Reroll
+        /// <summary>
+        /// The reroll row under the cards. Dimmed greys the whole button out, for when there is nothing to reroll with.
+        /// A null hint hides the hint line; pulse draws the eye to the button a few times.
+        /// </summary>
+        public void ShowReroll(bool shown, bool usable, bool dimmed, string label, string hint, TooltipContent tooltip, bool pulse)
+        {
+            if (rerollRow == null) return;
+            if (pulseRoutine != null) StopCoroutine(pulseRoutine);
+            pulseRoutine = null;
+            rerollPop.localScale = Vector3.one;
+            rerollRow.SetActive(shown);
+            if (!shown) return;
+
+            rerollButton.interactable = usable;
+            rerollGroup.alpha = dimmed ? rerollDimmedAlpha : 1f;
+            rerollIcon.color = dimmed ? rerollDimmedIconColour : Color.white;
+            rerollLabel.text = label;
+            rerollHint.gameObject.SetActive(!string.IsNullOrEmpty(hint));
+            rerollHint.text = hint;
+            if (tooltip != null) rerollTooltip.SetUpToolTip(tooltip);
+            if (pulse && isActiveAndEnabled) pulseRoutine = StartCoroutine(Pulse());
+        }
+
+        // Only while the cards take clicks, so a reroll never lands mid-deal.
+        private void ClickReroll()
+        {
+            if (!armed) return;
+            RerollClicked?.Invoke();
+        }
+
+        private IEnumerator Pulse()
+        {
+            for (int i = 0; i < rerollPulses; i++)
+            {
+                for (float t = 0f; t < rerollPulseSeconds; t += Time.unscaledDeltaTime)
+                {
+                    float k = Mathf.Sin(t / rerollPulseSeconds * Mathf.PI);
+                    rerollPop.localScale = Vector3.one * Mathf.Lerp(1f, rerollPulseScale, k);
+                    yield return null;
+                }
+            }
+            rerollPop.localScale = Vector3.one;
+            pulseRoutine = null;
+        }
+        #endregion
+
+        /// <summary>Left and right move between the cards; down goes to the wide card or the reroll button, and up comes back.</summary>
         public void WireNavigation()
         {
             Button wide = wideCard != null ? wideCard.Button : null;
+            if (wide == null && rerollRow != null) wide = rerollButton;
             for (int i = 0; i < cards.Count; i++)
             {
                 Navigation navigation = new()
@@ -180,10 +278,10 @@ namespace TJ
         }
 
         #region Group hover
-        private void JoinGroup(ChoiceCardView card, int index, bool breathe = true)
+        private void JoinGroup(ChoiceCardView card, int index, bool breathe = true, bool moveOnHover = true)
         {
             if (!groupHover) return;
-            card.UseGroupHover(index, breathe);
+            card.UseGroupHover(index, breathe, moveOnHover);
             card.HoverChanged += OnCardHoverChanged;
             card.MotionStarted += _ => SetHovered(hoveredCard);
         }
@@ -199,7 +297,8 @@ namespace TJ
         {
             hoveredCard = hovered;
             foreach (ChoiceCardView card in cards) ApplyHover(card, hovered);
-            if (wideCard != null) ApplyHover(wideCard, hovered);
+            // The wide card never shrinks as a neighbour; hovering a gear card leaves it at its rest size.
+            if (wideCard != null) ApplyHover(wideCard, hovered == wideCard ? wideCard : null);
         }
 
         private static void ApplyHover(ChoiceCardView card, ChoiceCardView hovered)
@@ -211,26 +310,55 @@ namespace TJ
         }
         #endregion
 
-        public void PlayOpen()
+        #region Open
+        /// <summary>
+        /// Drops the title in and raises the cards. With intro set, the title first holds large in the centre, then moves
+        /// up and the cards pop in. Either way the cards take clicks only once they have all landed.
+        /// </summary>
+        public void PlayOpen(bool intro = false)
         {
-            for (int i = 0; i < cards.Count; i++) cards[i].PlayEnter(i * cardStagger);
-            if (wideCard != null) wideCard.PlayEnter(cards.Count * cardStagger);
+            armed = false;
+            focusOnArm = false;
             if (!titleHomeSet)
             {
                 titleHome = titleBlock.anchoredPosition;
                 titleHomeSet = true;
             }
-            if (titleRoutine != null) StopCoroutine(titleRoutine);
-            titleRoutine = isActiveAndEnabled ? StartCoroutine(DropTitle()) : null;
-            if (titleRoutine == null)
+            if (openRoutine != null) StopCoroutine(openRoutine);
+            openRoutine = null;
+            titleBlock.localScale = Vector3.one;
+            SetInfoAlpha(1f);
+
+            if (!isActiveAndEnabled)
             {
                 titleGroup.alpha = 1f;
                 titleBlock.anchoredPosition = titleHome;
+                EnterCards(cardStagger, false);
+                ArmCards();
+                return;
             }
+            openRoutine = StartCoroutine(intro ? IntroThenDeal() : Open());
         }
 
-        private IEnumerator DropTitle()
+        /// <summary>Deals the current cards in with the title left where it is. They take clicks once they have landed.</summary>
+        public void PlayDeal()
         {
+            armed = false;
+            if (openRoutine != null) StopCoroutine(openRoutine);
+            openRoutine = null;
+            if (!isActiveAndEnabled)
+            {
+                EnterCards(dealStagger, false);
+                ArmCards();
+                return;
+            }
+            EnterCards(dealStagger, true);
+            openRoutine = StartCoroutine(ArmWhenLanded());
+        }
+
+        private IEnumerator Open()
+        {
+            EnterCards(cardStagger, false);
             for (float t = 0f; t < titleSeconds; t += Time.unscaledDeltaTime)
             {
                 float k = 1f - Mathf.Pow(1f - t / titleSeconds, 3f);
@@ -240,11 +368,124 @@ namespace TJ
             }
             titleGroup.alpha = 1f;
             titleBlock.anchoredPosition = titleHome;
-            titleRoutine = null;
+            yield return ArmWhenLanded();
         }
 
-        /// <summary>Selects the first card for keyboard and controller players, so they can pick without the mouse.</summary>
+        // The title holds alone in the centre before any card exists, so a click left over from skipping the act intro lands on nothing.
+        private IEnumerator IntroThenDeal()
+        {
+            foreach (ChoiceCardView card in AllCards()) card.Conceal();
+            titleGroup.alpha = 0f;
+            titleBlock.anchoredPosition = titleHome;
+            SetInfoAlpha(0f);
+            // One frame for the stack layout to place the new cards, and so the skip click's own frame is not read as a press.
+            yield return null;
+
+            Vector2 centred = CentredTitlePosition();
+            titleBlock.anchoredPosition = centred;
+            titleBlock.localScale = Vector3.one * introScale;
+            for (float t = 0f; t < introHold; t += Time.unscaledDeltaTime)
+            {
+                titleGroup.alpha = Mathf.Clamp01(t / titleSeconds);
+                if (PressedThisFrame()) t = Mathf.Max(t, introHold - introShortened);
+                yield return null;
+            }
+            titleGroup.alpha = 1f;
+
+            for (float t = 0f; t < introMoveSeconds; t += Time.unscaledDeltaTime)
+            {
+                float k = Mathf.SmoothStep(0f, 1f, t / introMoveSeconds);
+                titleBlock.anchoredPosition = Vector2.Lerp(centred, titleHome, k);
+                titleBlock.localScale = Vector3.one * Mathf.Lerp(introScale, 1f, k);
+                yield return null;
+            }
+            titleBlock.anchoredPosition = titleHome;
+            titleBlock.localScale = Vector3.one;
+
+            EnterCards(dealStagger, true);
+            for (float t = 0f; t < titleSeconds; t += Time.unscaledDeltaTime)
+            {
+                SetInfoAlpha(t / titleSeconds);
+                yield return null;
+            }
+            SetInfoAlpha(1f);
+            yield return ArmWhenLanded();
+        }
+
+        private void EnterCards(float stagger, bool deal)
+        {
+            for (int i = 0; i < cards.Count; i++) cards[i].PlayEnter(i * stagger, deal);
+            if (wideCard != null) wideCard.PlayEnter(cards.Count * stagger, deal);
+        }
+
+        private IEnumerator ArmWhenLanded()
+        {
+            while (!AllLanded()) yield return null;
+            for (float t = 0f; t < armDelay; t += Time.unscaledDeltaTime) yield return null;
+            ArmCards();
+            openRoutine = null;
+        }
+
+        private void ArmCards()
+        {
+            armed = true;
+            foreach (ChoiceCardView card in AllCards()) card.Arm();
+            if (focusOnArm) FocusNow();
+        }
+
+        private bool AllLanded()
+        {
+            foreach (ChoiceCardView card in AllCards())
+                if (!card.Landed) return false;
+            return true;
+        }
+
+        private IEnumerable<ChoiceCardView> AllCards()
+        {
+            foreach (ChoiceCardView card in cards)
+                if (card != null) yield return card;
+            if (wideCard != null) yield return wideCard;
+        }
+
+        // The title content's position that puts its centre on the panel's centre, measured with the cards already in the stack.
+        private Vector2 CentredTitlePosition()
+        {
+            Canvas.ForceUpdateCanvases();
+            var root = (RectTransform)transform;
+            Vector3 worldDelta = root.TransformPoint(root.rect.center) - titleBlock.TransformPoint(titleBlock.rect.center);
+            return titleHome + (Vector2)titleBlock.parent.InverseTransformVector(worldDelta);
+        }
+
+        private void SetInfoAlpha(float alpha)
+        {
+            if (infoRow == null) return;
+            if (infoGroup == null)
+            {
+                infoGroup = infoRow.GetComponent<CanvasGroup>();
+                if (infoGroup == null) infoGroup = infoRow.AddComponent<CanvasGroup>();
+            }
+            infoGroup.alpha = Mathf.Clamp01(alpha);
+        }
+
+        private static bool PressedThisFrame()
+        {
+            Mouse mouse = Mouse.current;
+            Keyboard keyboard = Keyboard.current;
+            Gamepad gamepad = Gamepad.current;
+            return (mouse != null && mouse.leftButton.wasPressedThisFrame)
+                || (keyboard != null && (keyboard.spaceKey.wasPressedThisFrame || keyboard.enterKey.wasPressedThisFrame))
+                || (gamepad != null && gamepad.buttonSouth.wasPressedThisFrame);
+        }
+        #endregion
+
+        /// <summary>Selects the first card for keyboard and controller players, so they can pick without the mouse. Waits until the cards are armed.</summary>
         public void FocusFirstCard()
+        {
+            if (armed) FocusNow();
+            else focusOnArm = true;
+        }
+
+        private void FocusNow()
         {
             if (cards.Count == 0 || ChoiceCardView.PointerUsedLast()) return;
             EventSystem eventSystem = EventSystem.current;

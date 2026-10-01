@@ -34,6 +34,9 @@ public class ShopConsumable : MonoBehaviour
     // The price the shop passed in: the base cost minus any Renown discount, before difficulty and gear.
     int basePrice;
     bool soldOut;
+    public ConsumableEnum ConsumableType => consumableType;
+    public int Price => consumablePrice;
+    public bool SoldOut => soldOut;
 
     public void SetUp(ConsumableEnum _consumableType, int _consumablePrice, ShopPanel _shopPanel)
     {
@@ -125,6 +128,9 @@ public class ShopConsumable : MonoBehaviour
         CampaignManager.Instance.CampaignSaveManager.RegisterShopPurchase();
         string localizedString = LocalizationManager.Instance.GetText($"{consumableType}Name");
         CampaignManager.Instance.GoldManager.ModifyGold(-consumablePrice, localizedString);
+        int paid = consumablePrice;
+        TabletopTavern.Analytics.NodeLog.Try("shop buy", () => TabletopTavern.Analytics.NodeLog.Add("buys",
+            new Dictionary<string, object> { { "k", "cons" }, { "id", consumableType.ToString() }, { "price", paid } }));
         shopPanel.ConsumablePurchased();
         
         CampaignManager.Instance.CampaignSaveManager.AquireConsumable(consumableType);

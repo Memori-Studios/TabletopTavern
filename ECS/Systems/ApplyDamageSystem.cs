@@ -128,7 +128,9 @@ namespace TJ
 
                             // Only apply healing if coming from the same team (Neutral source heals everyone)
                             if (damageElement.TeamOfSource != Team.Neutral && entityTeam.Value != damageElement.TeamOfSource) continue;
-                            healingHitPoints += damageElement.AttackStrength;
+                            healingHitPoints += damageElement.HealIsPercentOfMax
+                                ? (int)math.round(maxHealth.Value * damageElement.AttackStrength / 100f)
+                                : damageElement.AttackStrength;
                             break;
 
                         default:
@@ -238,7 +240,8 @@ namespace TJ
                 {
                     BloodBufferElement.Add(new BloodBufferElement
                     {
-                        Position = SystemAPI.GetComponent<LocalTransform>(damageReceivingEntity).Position
+                        Position = SystemAPI.GetComponent<LocalTransform>(damageReceivingEntity).Position,
+                        UnitName = unitTakingDamage.unitName
                     });
                 }
 

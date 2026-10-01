@@ -123,7 +123,56 @@ namespace TJ.MainMenu
             #if !DEMO
                 demoSubscript.enabled = false;
             #endif
+
+            #if TESTING
+                AddActThreeVictoryButton();
+            #endif
         }
+#if TESTING
+        #region Playtest boot
+        // A copy of Custom Battle placed under it, so the main menu scene needs no edit for playtest builds.
+        private void AddActThreeVictoryButton()
+        {
+            Button button = Instantiate(customBattleButton, customBattleButton.transform.parent);
+            button.name = "Test Endless Mode Button";
+            button.transform.SetSiblingIndex(customBattleButton.transform.GetSiblingIndex() + 1);
+            button.onClick = new Button.ButtonClickedEvent();
+            button.onClick.AddListener(StartActThreeVictory);
+            TMP_Text label = button.GetComponentInChildren<TMP_Text>();
+            label.text = "Test Endless Mode";
+            label.color = new Color32(0xFF, 0xF3, 0xD2, 0xFF);
+
+            // The Button Base hue recipe (ui-buttons.md) worked from yellow (0.95, 0.80, 0.30).
+            TintLayer(button.transform, "SPR_Background", new Color(0.22f, 0.20f, 0.105f, 1f));
+            TintLayer(button.transform, "Gradient", new Color(0.95f, 0.80f, 0.30f, 10f / 255f));
+            TintLayer(button.transform, "Highlight Image", new Color(1f, 0.88f, 0.45f, 20f / 255f));
+            TintLayer(button.transform, "Texture", new Color(0.73f, 0.66f, 0.42f, 0.08f));
+            TintLayer(button.transform, "Selection Highlight", new Color(1f, 0.85f, 0.30f, 1f));
+        }
+
+        private static void TintLayer(Transform button, string layer, Color color)
+        {
+            Transform child = button.Find("Background/UI Assets/" + layer);
+            if (child == null)
+            {
+                Debug.LogWarning($"[MainMenu] Test Endless Mode button has no {layer} layer to tint.");
+                return;
+            }
+            child.GetComponent<Image>().color = color;
+        }
+
+        private void StartActThreeVictory()
+        {
+            if (_isPanelTransitioning) return;
+#if UNITY_EDITOR
+            // In the Editor the run goes to the dev folder, never the real save folder.
+            SaveDataHandler.SetSaveRoot(ActThreeVictoryTestSave.PrepareFolder());
+#endif
+            ActThreeVictoryTestSave.WriteRun();
+            LoadMapScene();
+        }
+        #endregion
+#endif
         private async void Load()
         {
             bool isNewPlayer = !SaveDataHandler.PlayerSaveDataExists();

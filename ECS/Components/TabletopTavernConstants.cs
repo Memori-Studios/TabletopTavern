@@ -36,8 +36,22 @@ public static class TabletopTavernConstants
     public const int MELEE_HIT_CHANCE_PER_POINT = 2;
     public const int MELEE_HIT_CHANCE_MIN = 10;
     public const int MELEE_HIT_CHANCE_MAX = 90;
-    public const int TIME_REQUIRED_FOR_CHARGE_BONUS = 2;
+    #region Charge
+    // An attacking melee squad sprints once the gap to its target is this small.
+    public const float CHARGE_SPRINT_RANGE = 30f;
+    public const float CHARGE_SPRINT_SPEED_MULT = 1.3f;
+    // Seconds of sprint before contact that make the contact a charge.
+    public const float CHARGE_SPRINT_TIME = 1f;
     public const int TIME_TO_REMOVE_CHARGE_BONUS = 6;
+    // Charge bonus and impact damage multiplier for a charge into the side or rear.
+    public const float CHARGE_FLANK_MULT = 1.5f;
+    // Seconds after a charge lands before the squad can sprint again.
+    public const float CHARGE_WEARY_TIME = 15f;
+    // 1 is dead ahead of the target, 0 square on its side, -1 dead behind. A player charge counts from the side on;
+    // an enemy charge only from the rear, the same lean SquadNavObject gives the flank marker.
+    public const float CHARGE_FLANK_DOT_PLAYER = 0.25f;
+    public const float CHARGE_FLANK_DOT_ENEMY = -0.7f;
+    #endregion
     public const float TERROR_RADIUS = 20f;
     public const int OVERIDE_TARGET_SQUADENTITY_DISTANCE = 20;
     // Melee pursuit watchdog: abandon an uncatchable (kiting) target that isn't being closed on.
@@ -242,6 +256,19 @@ public static class TabletopTavernConstants
     // +50% without needing a second scaling rule.
     public const int DEEP_QUIVERS_AMMO_BONUS = 500;
 
+    #region Mage trait magnitudes
+    public const float POTENT_MAGIC_MULTIPLIER = 1.25f;        // +25% spell damage, healing, mark and stat change
+    public const float WIDE_WEAVE_RADIUS_MULTIPLIER = 1.25f;   // +25% spell radius
+    public const float FAR_CAST_RANGE_MULTIPLIER = 2f;         // double cast range
+    public const float QUICKCAST_COOLDOWN = 1f;                // seconds between casts
+    public const float SWIFT_STRIDE_SPEED_MULTIPLIER = 1.25f;  // +25% move speed
+    public const float PROJECTILE_WARD_DAMAGE_MULTIPLIER = 0.5f;
+    public const float SPELL_WARD_DAMAGE_MULTIPLIER = 0.5f;
+
+    public static float SpellPotency(SquadAttributes attributes) => attributes.PotentMagic ? POTENT_MAGIC_MULTIPLIER : 1f;
+    public static float SpellRadiusScale(SquadAttributes attributes) => attributes.WideWeave ? WIDE_WEAVE_RADIUS_MULTIPLIER : 1f;
+    #endregion
+
     // Random trait pool granted once when a unit reaches max prestige (level 2 / "Prestige 3")
     public static readonly UnitAttribute[] PRESTIGE_TRAIT_POOL = {
         UnitAttribute.ArmorPiercing, UnitAttribute.AntiInfantry, UnitAttribute.AntiLarge,
@@ -249,8 +276,14 @@ public static class TabletopTavernConstants
         UnitAttribute.Emblazing, UnitAttribute.FlamingAmmo,
         UnitAttribute.BackStabbers, UnitAttribute.MonsterSlayer, UnitAttribute.BloodFrenzy,
         UnitAttribute.ShotDiscipline, UnitAttribute.Overdraw, UnitAttribute.SteadyAim,
-        UnitAttribute.Demolisher, UnitAttribute.PowderReserves, UnitAttribute.DeepQuivers
+        UnitAttribute.Demolisher, UnitAttribute.PowderReserves, UnitAttribute.DeepQuivers,
+        UnitAttribute.PotentMagic, UnitAttribute.WideWeave, UnitAttribute.FarCast, UnitAttribute.Quickcast,
+        UnitAttribute.SwiftStride, UnitAttribute.ProjectileWard, UnitAttribute.SpellWard
     };
+
+    public static bool IsMageTrait(UnitAttribute trait) => trait is UnitAttribute.PotentMagic or UnitAttribute.WideWeave
+        or UnitAttribute.FarCast or UnitAttribute.Quickcast or UnitAttribute.SwiftStride
+        or UnitAttribute.ProjectileWard or UnitAttribute.SpellWard;
 
 
     public const int VILLAGE_RECRUIT_COST = 10;
@@ -415,6 +448,13 @@ public static class TabletopTavernConstants
         UnitAttribute.Demolisher => attributes.Demolisher,
         UnitAttribute.PowderReserves => attributes.PowderReserves,
         UnitAttribute.DeepQuivers => attributes.DeepQuivers,
+        UnitAttribute.PotentMagic => attributes.PotentMagic,
+        UnitAttribute.WideWeave => attributes.WideWeave,
+        UnitAttribute.FarCast => attributes.FarCast,
+        UnitAttribute.Quickcast => attributes.Quickcast,
+        UnitAttribute.SwiftStride => attributes.SwiftStride,
+        UnitAttribute.ProjectileWard => attributes.ProjectileWard,
+        UnitAttribute.SpellWard => attributes.SpellWard,
         _ => false,
     };
 
@@ -448,7 +488,23 @@ public static class TabletopTavernConstants
         {
             return trait is UnitAttribute.Stalwart      // terror immunity; a one-model squad breaks easily
                          or UnitAttribute.Terrifying    // aura works regardless of what the mage itself does
-                         or UnitAttribute.MonsterSlayer;
+                   || IsMageTrait(trait);
+        }
+        if (IsMageTrait(trait))
+        {
+#if SPELLS
+            // Three reach other units with the Spell Update; the rest only change a spell.
+            return trait switch
+            {
+                UnitAttribute.SpellWard => squadStats.unitType != UnitType.Structure,
+                UnitAttribute.ProjectileWard => FightsInMelee(squadStats.unitType),
+                UnitAttribute.SwiftStride => squadStats.unitSize == UnitSize.Infantry
+                    && (FightsInMelee(squadStats.unitType) || FightsAtRange(squadStats.unitType)),
+                _ => false,
+            };
+#else
+            return false;
+#endif
         }
 
         return trait switch
@@ -468,6 +524,8 @@ public static class TabletopTavernConstants
             // prestige ammo bonus by the same rule.
             UnitAttribute.DeepQuivers => squadStats.unitType == UnitType.Ranged,
             UnitAttribute.Demolisher or UnitAttribute.PowderReserves => isArtillery,
+            // Artillery never fights in melee or gets a flank shot: Rage and Blood Frenzy raise melee Weapon Strength only.
+            UnitAttribute.Rage or UnitAttribute.BloodFrenzy or UnitAttribute.BackStabbers => !isArtillery,
             _ => true,
         };
     }
@@ -512,6 +570,13 @@ public static class TabletopTavernConstants
             case UnitAttribute.Demolisher: attributes.Demolisher = true; break;
             case UnitAttribute.PowderReserves: attributes.PowderReserves = true; break;
             case UnitAttribute.DeepQuivers: attributes.DeepQuivers = true; break;
+            case UnitAttribute.PotentMagic: attributes.PotentMagic = true; break;
+            case UnitAttribute.WideWeave: attributes.WideWeave = true; break;
+            case UnitAttribute.FarCast: attributes.FarCast = true; break;
+            case UnitAttribute.Quickcast: attributes.Quickcast = true; break;
+            case UnitAttribute.SwiftStride: attributes.SwiftStride = true; break;
+            case UnitAttribute.ProjectileWard: attributes.ProjectileWard = true; break;
+            case UnitAttribute.SpellWard: attributes.SpellWard = true; break;
             default:
                 Debug.LogWarning($"[TabletopTavernConstants] SetAttribute: '{trait}' has no SquadAttributes backing field, ignoring.");
                 break;

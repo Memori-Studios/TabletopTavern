@@ -64,7 +64,7 @@ namespace TJ.Ordeals
 
             memoriCanvasGroup.CGEnable();
             if (OpenFeedback != null) OpenFeedback.PlayFeedbacks();
-            view.PlayOpen();
+            view.PlayOpen(intro: true);
             IAudioRequester.Instance.PlaySFX(SFXData.OpenUI);
             view.FocusFirstCard();
         }

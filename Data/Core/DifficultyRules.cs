@@ -110,6 +110,16 @@ namespace TJ
             return bonus;
         }
 
+        // Not on any difficulty card: a stopgap for player spell casting, so SPELLS builds only, Medium and up.
+        public static bool SpellsExtraSquad(TT_Difficulty difficulty)
+        {
+#if SPELLS
+            return Rank(difficulty) >= 1;
+#else
+            return false;
+#endif
+        }
+
         // DifficultyMod 6 "The Final Battle of each Act is more difficult". Selects the
         // KnightDifficulty tier table for horde battles.
         public static bool HarderFinalBattle(TT_Difficulty difficulty) => Applies(6, difficulty);

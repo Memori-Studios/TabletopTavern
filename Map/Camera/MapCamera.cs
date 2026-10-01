@@ -48,6 +48,7 @@ namespace TJ.Map
         public bool SkipIntro => skipIntro;
 
         private bool isFreeCameraMode = false;
+        public bool IsFreeCameraMode => isFreeCameraMode;
         private Vector3 savedTargetPosition;
         private Quaternion savedTargetRotation;
         private float savedPitch, savedYaw;

@@ -11,6 +11,7 @@ using Memori.SaveData;
 using System;
 using MoreMountains.Feedbacks;
 using TJ.Recruit;
+using Memori.Tooltip;
 
 namespace TJ.Prestige
 {
@@ -23,6 +24,8 @@ namespace TJ.Prestige
         [SerializeField] private ChoicePanelView view;
         [SerializeField] private float pickedHoldSeconds = 0.6f;
         [SerializeField] private float fadeOutSeconds = 0.25f;
+        [Tooltip("How long the old cards take to pop away before a Fateshine reroll deals the new ones.")]
+        [SerializeField] private float rerollClearSeconds = 0.3f;
 
         [Header("Unit Prefab")]
         [SerializeField] private Transform prefabHolder;
@@ -38,6 +41,8 @@ namespace TJ.Prestige
         Action onResolved;
         RecruitCard recruitCard;
         bool picked;
+        bool rerolling;
+        List<UnitAttribute> shownTraits = new();
 
         Transform prefabObject;
         RaceBasePrefab baseObject;
@@ -48,17 +53,23 @@ namespace TJ.Prestige
         {
             memoriCanvasGroup = GetComponent<MemoriCanvasGroup>();
             memoriCanvasGroup.CGDisable();
+            view.RerollClicked += Reroll;
+        }
+        private void OnDestroy()
+        {
+            if (view != null) view.RerollClicked -= Reroll;
         }
         public void SetUp(CampaignSaveManager _campaignSaveManager, MapSceneUIManager _mapSceneUIManager)
         {
             campaignSaveManager = _campaignSaveManager;
             mapSceneUIManager = _mapSceneUIManager;
         }
-        public void LoadPrestigeTraitPanel(SquadToLoad squad, List<UnitAttribute> eligibleTraits, Action _onResolved)
+        public void LoadPrestigeTraitPanel(SquadToLoad squad, List<UnitAttribute> offer, Action _onResolved)
         {
             currentSquad = squad;
             onResolved = _onResolved;
             picked = false;
+            rerolling = false;
 
             view.Clear();
             string title = string.Format(LocalizationManager.Instance.GetText("prestigePickTitle"), MemoriUI.ConvertNumberToRomanNumeral(MAX_PRESTIGE + 1));
@@ -68,9 +79,21 @@ namespace TJ.Prestige
             recruitCard.SetUpDisplay(squad, troopCamera.targetTexture, SHOWN_PRESTIGE_BEFORE_PICK, UnitAttribute.None);
             LoadUnitPrefabAsync(squad.UnitName);
 
+            AddTraitCards(offer);
+
+            memoriCanvasGroup.CGEnable();
+            ShowReroll(true);
+            if (OpenFeedback != null) OpenFeedback.PlayFeedbacks();
+            view.PlayOpen();
+            IAudioRequester.Instance.PlaySFX(SFXData.OpenUI);
+            view.FocusFirstCard();
+        }
+        private void AddTraitCards(List<UnitAttribute> offer)
+        {
+            shownTraits = new List<UnitAttribute>(offer);
             string footer = LocalizationManager.Instance.GetText("choiceClickToLearn");
             string done = LocalizationManager.Instance.GetText("choiceLearned");
-            foreach (UnitAttribute trait in eligibleTraits)
+            foreach (UnitAttribute trait in offer)
             {
                 ChoiceCardView card = view.AddCard();
                 card.Load(PrestigeTraitIcons.Get(trait), LocalizationManager.Instance.GetText(trait.ToString()), null, Color.clear,
@@ -79,17 +102,57 @@ namespace TJ.Prestige
                 card.Chosen += chosen => SelectTrait(chosenTrait, chosen);
             }
             view.WireNavigation();
-
-            memoriCanvasGroup.CGEnable();
-            if (OpenFeedback != null) OpenFeedback.PlayFeedbacks();
-            view.PlayOpen();
-            IAudioRequester.Instance.PlaySFX(SFXData.OpenUI);
-            view.FocusFirstCard();
         }
+
+        #region Fateshine reroll
+        // Hidden when the pool cannot change; locked with a reason when an Ordeal blocks it; struck out and greyed with no elixir.
+        private void ShowReroll(bool pulse)
+        {
+            LocalizationManager text = LocalizationManager.Instance;
+            int held = campaignSaveManager.FateshineElixirsHeld;
+            OrdealId countering = OrdealRegistry.CounteringOrdeal(campaignSaveManager.SaveData.ordeals, ConsumableEnum.FateshineElixir);
+            bool usable = held > 0 && countering == OrdealId.None && !picked;
+            string label = held > 0 ? string.Format(text.GetText("prestigeRerollCount"), held) : $"<s>{text.GetText("prestigeReroll")}</s>";
+            string hint = usable ? text.GetText("prestigeRerollHint") : held == 0 ? text.GetText("prestigeRerollNeedsElixir") : null;
+            var tooltip = new TooltipContent
+            {
+                Title = text.GetText("FateshineElixirName"),
+                Body = text.GetText(held > 0 ? "prestigeRerollTooltip" : "prestigeRerollNeedsElixir"),
+                Footer = countering != OrdealId.None ? OrdealRegistry.InactiveNote(countering) : "",
+            };
+            view.ShowReroll(campaignSaveManager.CanRerollPrestigeTraits(currentSquad), usable, held == 0, label, hint, tooltip, pulse && usable);
+        }
+
+        private async void Reroll()
+        {
+            if (picked || rerolling) return;
+            List<UnitAttribute> offer = campaignSaveManager.RerollPrestigeTraitOffer(currentSquad, shownTraits);
+            if (offer == null) return;
+            rerolling = true;
+
+            IAudioRequester.Instance.PlaySFX(SFXData.Drink);
+            bool firstPop = true;
+            foreach (ChoiceCardView card in view.Cards)
+            {
+                card.PopAway(firstPop);
+                firstPop = false;
+            }
+            ShowReroll(false);
+
+            await Task.Delay(Mathf.RoundToInt(rerollClearSeconds * 1000f));
+            if (this == null) return;
+            view.ClearCards();
+            AddTraitCards(offer);
+            view.PlayDeal();
+            view.FocusFirstCard();
+            rerolling = false;
+        }
+        #endregion
         private async void SelectTrait(UnitAttribute trait, ChoiceCardView chosen)
         {
-            if (picked) return;
+            if (picked || rerolling) return;
             picked = true;
+            ShowReroll(false);
 
             bool firstPop = true;
             foreach (ChoiceCardView card in view.Cards)
@@ -151,8 +214,8 @@ namespace TJ.Prestige
             Race race = TabletopTavernData.Instance.GetRaceFromUnitName(unitName);
             bool bigBase = TabletopTavernData.Instance.GetUnitSizeFromUnitName(unitName) != UnitSize.Infantry;
 
+            // Keeps the recruit prefab's own offset, as the town's recruit cards do.
             prefabObject = Instantiate(prefab, prefabHolder).GetComponent<Transform>();
-            prefabObject.localPosition = Vector3.zero;
             baseObject = Instantiate(TabletopTavernData.Instance.GetRaceData(race).RaceBasePrefab, prefabHolder);
             baseObject.transform.localPosition = Vector3.zero;
             baseObject.SetUp(true, null);

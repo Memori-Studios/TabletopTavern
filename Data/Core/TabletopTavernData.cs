@@ -230,6 +230,14 @@ namespace TJ
         {
             return SquadStatsDictionary[unitName];
         }
+        // The prestige pool minus any trait a mage's spell cannot use; player picks and enemy rolls both draw from this.
+        public List<UnitAttribute> GetUsablePrestigeTraits(UnitName unitName)
+        {
+            List<UnitAttribute> traits = TabletopTavernConstants.GetEligiblePrestigeTraits(GetSquadStats(unitName));
+            SquadAssetsDictionary.TryGetValue(unitName, out SquadAssets assets);
+            if (assets.mageSpell != null) traits.RemoveAll(trait => !assets.mageSpell.IsImprovedBy(trait));
+            return traits;
+        }
         public UnitType GetUnitTypeFromUnitName(UnitName _unitName)
         {
             SquadStats squadStats = GetSquadStats(_unitName);
@@ -660,6 +668,9 @@ namespace TJ
             if (squadStats.SquadAttributes.Demolisher) unitAttributes.Add(UnitAttribute.Demolisher);
             if (squadStats.SquadAttributes.PowderReserves) unitAttributes.Add(UnitAttribute.PowderReserves);
             if (squadStats.SquadAttributes.DeepQuivers) unitAttributes.Add(UnitAttribute.DeepQuivers);
+            foreach (UnitAttribute mageTrait in TabletopTavernConstants.PRESTIGE_TRAIT_POOL)
+                if (TabletopTavernConstants.IsMageTrait(mageTrait) && TabletopTavernConstants.GetAttribute(squadStats.SquadAttributes, mageTrait))
+                    unitAttributes.Add(mageTrait);
             return unitAttributes;
         }
 
@@ -676,7 +687,8 @@ namespace TJ
             unitStats.Add(new UnitStatValue(UnitStat.Speed, squadStats.Speed));
             unitStats.Add(new UnitStatValue(UnitStat.Leadership, squadStats.Leadership));
 
-            unitStats.Add(new UnitStatValue(UnitStat.ChargeBonus, squadStats.ChargeBonus));
+            // Under 10 the charge is a token (4 on nearly all infantry) and the row is noise.
+            if (squadStats.ChargeBonus >= 10) unitStats.Add(new UnitStatValue(UnitStat.ChargeBonus, squadStats.ChargeBonus));
             if (squadStats.ChargeImactDamage > 0) unitStats.Add(new UnitStatValue(UnitStat.ChargeImpactDamage, squadStats.ChargeImactDamage));
             
             if (TabletopTavernConstants.Casts(squadStats.unitType))

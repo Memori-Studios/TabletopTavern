@@ -109,7 +109,7 @@ partial struct MeleeSquadChargeSystem : ISystem
               
                 entityCommandBuffer.AddComponent(squad.ValueRO.SelfEntity, new FormationEngagedInCombat{
                     EngagementEntity = squad.ValueRO.TargetSquadEntity,
-                    WasCharging = entityManager.HasComponent<ChargeBonus>(squad.ValueRO.SelfEntity)
+                    WasCharging = ChargeSquad.ChargeTime >= TabletopTavernConstants.CHARGE_SPRINT_TIME
                 });
 
                 //target entity
@@ -123,15 +123,13 @@ partial struct MeleeSquadChargeSystem : ISystem
 
                     entityCommandBuffer.AddComponent(squad.ValueRO.TargetSquadEntity, new FormationEngagedInCombat{
                         EngagementEntity = squad.ValueRO.SelfEntity,
-                        WasCharging = entityManager.HasComponent<ChargeBonus>(squad.ValueRO.TargetSquadEntity)
+                        // A counter-charge only counts when the target was sprinting at this squad.
+                        WasCharging = entityManager.HasComponent<ChargeSquad>(squad.ValueRO.TargetSquadEntity)
+                            && entityManager.GetComponentData<ChargeSquad>(squad.ValueRO.TargetSquadEntity).ChargeTime >= TabletopTavernConstants.CHARGE_SPRINT_TIME
+                            && entityManager.GetComponentData<SquadEntity>(squad.ValueRO.TargetSquadEntity).TargetSquadEntity == squad.ValueRO.SelfEntity
                     });
                 }
 
-                //create OnFormationsCollide entity that a charge occured
-                float3 avgPosition = (squadMovement.ValueRO.SquadCenter + targetSquadMovement.SquadCenter) / 2f;
-                entityCommandBuffer.AddComponent(squad.ValueRO.SelfEntity, new OnFormationsCollide{
-                    Position = avgPosition
-                });
             }
             else
             {

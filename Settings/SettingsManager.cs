@@ -96,7 +96,9 @@ namespace TJ
         // Live read, not cached: CurrentGameState flips the instant a transition starts, so this never goes stale.
         bool InBattle => SceneHandler.Instance.CurrentGameState == GameStateEnum.Battle;
 
-        public bool SettingsPanelOpen => settingsCanvasGroup.alpha == 1;
+        // A flag, not the alpha: the panel fades in and out, and it counts as open from the first frame.
+        private bool settingsOpen;
+        public bool SettingsPanelOpen => settingsOpen;
         private void Start()
         {
             settingsCanvasGroup.CGDisable();
@@ -253,7 +255,7 @@ namespace TJ
                 return;
             }
 
-            if(settingsCanvasGroup.alpha == 1) {
+            if(settingsOpen) {
                 CloseSettingsPanel();
             } else {
                 OpenSettingsPanel();
@@ -264,7 +266,9 @@ namespace TJ
             SwitchSettingsFocus(gameSettingsCanvasGroup);
             bool inMainMenu = SceneHandler.Instance.CurrentGameState == GameStateEnum.MainMenu;
             closeLabel.text = LocalizationManager.Instance.GetText(inMainMenu ? "Close" : "resumeGameButton");
+            settingsOpen = true;
             settingsCanvasGroup.CGEnable();
+            FadeSettings(UIJuice.Open(settingsCanvasGroup.GetComponent<CanvasGroup>()));
             IAudioRequester.Instance.PlaySFX(SFXData.OpenUI);
             IAudioRequester.Instance.SetAmbienceDuck(AmbienceDuckSource.Settings, true);
             if(InBattle) {
@@ -276,8 +280,16 @@ namespace TJ
         public void CloseSettingsPanel()
         {
             abandonRunConfirmationCanvasGroup.CGDisable();
-            settingsCanvasGroup.CGDisable();
-            activeCanvasGroup.gameObject.SetActive(false);
+            settingsOpen = false;
+            // Clicks stop at once; the picture fades out, then the page is switched off as before.
+            settingsCanvasGroup.interactable = false;
+            settingsCanvasGroup.blocksRaycasts = false;
+            MemoriCanvasGroup closingPage = activeCanvasGroup;
+            FadeSettings(CloseThen(settingsCanvasGroup.GetComponent<CanvasGroup>(), () =>
+            {
+                settingsCanvasGroup.CGDisable();
+                closingPage.gameObject.SetActive(false);
+            }));
             IAudioRequester.Instance.PlaySFX(SFXData.CloseUI);
             IAudioRequester.Instance.SetAmbienceDuck(AmbienceDuckSource.Settings, false);
             if (InBattle)
@@ -374,12 +386,34 @@ namespace TJ
                 activeCanvasGroup.CGDisable();
                 activeCanvasGroup.gameObject.SetActive(false);
             }
+            bool changed = activeCanvasGroup != _canvasGroup;
             _canvasGroup.gameObject.SetActive(true);
             _canvasGroup.CGEnable();
+            if (changed)
+            {
+                if (pageFade != null) StopCoroutine(pageFade);
+                pageFade = StartCoroutine(UIJuice.Open(_canvasGroup.GetComponent<CanvasGroup>(), _canvasGroup.transform as RectTransform, UIJuice.SwapTime, 12f));
+            }
 
             activeCanvasGroup = _canvasGroup;
             RefreshRail();
         }
+
+        #region Settings fades
+        private Coroutine settingsFade, pageFade;
+
+        private void FadeSettings(IEnumerator routine)
+        {
+            if (settingsFade != null) StopCoroutine(settingsFade);
+            settingsFade = StartCoroutine(routine);
+        }
+
+        private IEnumerator CloseThen(CanvasGroup group, Action done)
+        {
+            yield return UIJuice.Close(group);
+            done();
+        }
+        #endregion
         private void RefreshRail()
         {
             foreach (RailEntry entry in railEntries)
@@ -437,7 +471,7 @@ namespace TJ
         private void OnApplicationFocus(bool hasFocus)
         {
             if (hasFocus)
-                Cursor.lockState = Screen.fullScreen ? CursorLockMode.Confined : CursorLockMode.None;
+                CursorLockToggle.Apply();
         }
 
         public void OnDestroy()

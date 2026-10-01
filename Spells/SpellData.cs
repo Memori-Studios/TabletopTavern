@@ -6,9 +6,7 @@ using Memori.Localization;
 namespace TJ.Spells
 {
     // Append only - ordinals are serialized into SpellData .asset files.
-    // RallyTheBanners is Edric's signature, held by 'Iron Legion Spell 1 - IL.asset'. It briefly
-    // declared LesserMoraleSpell, colliding with the real Lesser Morale Spell asset, which then
-    // stood in as Edric's signature until this one was authored as a charge-empowerment aura.
+    // RallyTheBanners is an always-available spell; Edric's signature is IronRain.
     public enum Spell { None, LesserMoraleSpell, LesserDamageSpell, LesserWindSpell, LesserWeaponStrengthSpell, LightningStrike, NaturesWrath, Heal, Fireball, SkeletalSummon, HuntersMark, Sunder,
         IaijutsuFlash, ArtilleryBombardment, Cyclone, Dread, Smokescreen, Rampage, Shieldwall, Starstep, HealingGrove, SnareTrap, Taunt, VenomousBite, SnareWeb, RallyTheBanners,
         // Cast by a mage UNIT rather than the player. Deliberately absent from SpellRegistry: that
@@ -25,7 +23,9 @@ namespace TJ.Spells
         // purpose - a unit spell carries Mana 0 because units do not spend mana, and tuning one would
         // otherwise silently rebalance the other. Unlike the mage spells above, these two DO belong in
         // SpellRegistry and in SpellLoadout.AlwaysAvailableSpells.
-        LesserMending, LesserEmbers }
+        LesserMending, LesserEmbers,
+        // Edric's signature.
+        IronRain }
     // World: raycast ground point, stays fixed. Squad: follows the target squad's live
     // position through warmup and damage resolution.
     public enum SpellTargetingType { World, Squad }
@@ -63,6 +63,8 @@ namespace TJ.Spells
         // TickInterval so the effect lands once per interval instead of every frame. HealsInsteadOfDamage
         // routes it through DamageType.Healing (heals the TargetTeam) instead of the default Magical damage.
         public bool HealsInsteadOfDamage;
+        // With HealsInsteadOfDamage, SpellModifierValue is a percent of each model's max health per tick, not flat health.
+        public bool HealsPercentOfMaxHealth;
         public float TickInterval;
         // Execute-style strike (Iaijutsu Flash): the hit lands on exactly one unit, the one nearest the
         // strike point, rather than on every unit inside SpellRadius. Author the full per-hit damage in
@@ -144,12 +146,29 @@ namespace TJ.Spells
         // back to the campaign save. Author these as SpellTargetingType.World.
         public UnitName SummonedUnitName;
 
+        // Aim circles only; single-target squad spells share one marker size so it never reads as an area.
+        public const float SINGLE_TARGET_MARKER_RADIUS = 5f;
+        public float TargetingRadius => SpellTargetingType == SpellTargetingType.Squad && SpellType == SpellType.SingleTarget
+            ? SINGLE_TARGET_MARKER_RADIUS
+            : SpellRadius;
+
+        // A brace has no number for Potent Magic to raise, and a mark or brace lands on one squad, so Wide Weave has no area to grow.
+        public bool IsImprovedBy(UnitAttribute trait) => trait switch
+        {
+            UnitAttribute.PotentMagic => !BracesTarget,
+            UnitAttribute.WideWeave => !BracesTarget && !MarksTarget,
+            _ => true,
+        };
+
+        /// <summary>SpellModifierValue as a caster with this potency lands it.</summary>
+        public float ScaledModifierValue(float potency) => SpellModifierValue * potency;
+
         /// <summary>The formatted description, keyword tags still raw: draw it through KeywordText.</summary>
-        public string GetLocalizedSpellDescription()
+        public string GetLocalizedSpellDescription(float potency = 1f)
         {
             string localizedSpellDescription = LocalizationManager.Instance.GetText(Spell.ToString() + "_Desc");
             if(string.IsNullOrEmpty(localizedSpellDescription)) return Spell.ToString();
-            return string.Format(localizedSpellDescription, SpellType, SpellModifierValue, SpellDuration);
+            return string.Format(localizedSpellDescription, SpellType, Mathf.RoundToInt(ScaledModifierValue(potency)), SpellDuration);
         }
     }
 }

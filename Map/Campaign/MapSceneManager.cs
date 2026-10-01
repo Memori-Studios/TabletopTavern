@@ -46,6 +46,9 @@ namespace TJ.Map
             mapSceneAudioListener = mapScecneCamera.GetComponent<AudioListener>();
             SceneHandler.Instance.OnGameStateChanged += OnGameStateChanged;
             InputHandler.Instance.PrimaryActionPerformed += LeftClick;
+            InputHandler.Instance.SecondaryActionPressed += RightClick;
+            Memori.Utilities.ColorVision.Changed += ApplyRoutePlan;
+            RouteMarkColors.Changed += ApplyRoutePlan;
         }
         private void OnGameStateChanged(GameStateEnum gameStateEnum)
         {
@@ -174,12 +177,14 @@ namespace TJ.Map
                 // Debug.Log($"Map scene loaded from editor override");
                 SnapshotLoad();
             }
-             
+
+            MapRoutePlan.Prune(RouteMarks(), LayerOfNode, ReachedLayer());
+            ApplyRoutePlan();
             SetMapInput(true);
         }
         public void Update()
         {
-            if(!AllowMapInput) return;
+            if(!CanHoverNodes) return;
 
             if(SettingsManager.Instance.SettingsPanelOpen) return;
 
@@ -236,6 +241,64 @@ namespace TJ.Map
                 SelectNode(hoveredNode);
             }
         }
+        #region Route Marks
+        // The free camera turns map input off, but it is where the player looks over the act, so marking stays on there.
+        private bool CanHoverNodes => AllowMapInput || mapCamera.IsFreeCameraMode;
+        /// <summary>Whether a right-click now would mark or clear the hovered node.</summary>
+        public bool CanMarkHoveredNode =>
+            CanHoverNodes && hoveredNode != null && mapLayers.Count > 0 && hoveredNode.Value.layer > ReachedLayer()
+            && !UnityEngine.EventSystems.EventSystem.current.IsPointerOverGameObject();
+
+        public void RightClick()
+        {
+            if (!CanMarkHoveredNode) return;
+
+            List<int> marks = RouteMarks();
+            bool marked = MapRoutePlan.Toggle(marks, hoveredNode.Value.index, LayerOfNode);
+            ApplyRoutePlan();
+            IAudioRequester.Instance.PlaySFX(marked ? SFXData.SelectCard : SFXData.TinyClick);
+            CampaignManager.Instance.CampaignSaveManager.SaveCampaign();
+            CampaignManager.Instance.CampaignSaveManager.SaveCampaignSnapshot();
+        }
+        private List<int> RouteMarks()
+        {
+            CampaignSaveData save = CampaignManager.Instance.CampaignSaveManager.SaveData;
+            return save.plannedNodes ??= new List<int>();
+        }
+        // The layer the player stands on or is entering; only nodes past it can be marked.
+        private int ReachedLayer() => selectedNode != null ? selectedNode.Value.layer : activeChapterIndex;
+        private int CurrentNodeIndex()
+        {
+            if (selectedNode != null) return selectedNode.Value.index;
+            List<int> nodePath = CampaignManager.Instance.CampaignSaveManager.SaveData.nodePath;
+            return nodePath.Count > 0 ? nodePath[^1] : -1;
+        }
+        private int LayerOfNode(int nodeIndex)
+        {
+            foreach (MapLayer mapLayer in mapLayers)
+                foreach (MapNodeData mapNode in mapLayer.LayerNodes)
+                    if (mapNode.index == nodeIndex) return mapNode.layer;
+            return -1;
+        }
+        // Runs after every repaint of the paths, which would otherwise leave the plan's colour off or stale.
+        private void ApplyRoutePlan()
+        {
+            if (mapLayers.Count == 0 || CampaignManager.InstanceIfExists == null) return;
+
+            List<int> marks = RouteMarks();
+            int currentNodeIndex = CurrentNodeIndex();
+            foreach (MapLayer mapLayer in mapLayers) {
+                foreach (MapNodeData mapNode in mapLayer.LayerNodes) {
+                    if (mapNode.mapNodeGameObject == null) continue;
+                    mapNode.mapNodeGameObject.SetRouteMark(marks.Contains(mapNode.index));
+                    for (int i = 0; i < mapNode.connectedNodeIndexes.Count; i++) {
+                        bool planned = MapRoutePlan.IsPlannedLine(marks, mapNode.index, mapNode.index == currentNodeIndex, mapNode.connectedNodeIndexes[i]);
+                        mapNode.mapNodeGameObject.SetPlannedLine(i, planned);
+                    }
+                }
+            }
+        }
+        #endregion
         public void SetMapLayers(List<MapLayer> _mapLayers)
         {
             mapLayers = _mapLayers;
@@ -416,7 +479,9 @@ namespace TJ.Map
             CampaignManager.Instance.CampaignSaveManager.CheckForFourFactions();
             activeChapterIndex = CampaignManager.Instance.CampaignSaveManager.SaveData.activeMapLayer;
             int bookNumber = CampaignManager.Instance.CampaignSaveManager.SaveData.bookNumber;
-            AnalyticsNodeReport nodeReport = GameEventTracker.TryBuild("nodeCompleted", () => BuildNodeReport(squadsLost));
+            // Taken before the build, so a failed build cannot leave this node's detail for the next one.
+            Dictionary<string, object> nodeDetail = NodeLog.Take();
+            AnalyticsNodeReport nodeReport = GameEventTracker.TryBuild("nodeCompleted", () => BuildNodeReport(squadsLost, nodeDetail));
 
             //interest tutorial step trigger on layer 3 book 1
             if(activeChapterIndex == 3 && bookNumber == 1)
@@ -471,6 +536,7 @@ namespace TJ.Map
             ReportNodeCompleted(nodeReport, CampaignManager.Instance.CampaignSaveManager.SaveData.goldAmount - goldBeforeInterest);
 
             SelectNextLayer();
+            ApplyRoutePlan();
             SetMapInput(true);
             mapSceneUIManager.HUDPanel.ShowFreeCameraTip();
             CampaignManager.Instance.CampaignSaveManager.SaveCampaign();
@@ -508,7 +574,7 @@ namespace TJ.Map
             return lost;
         }
         // Read after CompleteChapter, so activeMapLayer is the layer this node sat on.
-        private AnalyticsNodeReport BuildNodeReport(int squadsLost)
+        private AnalyticsNodeReport BuildNodeReport(int squadsLost, Dictionary<string, object> detail)
         {
             CampaignSaveData save = CampaignManager.Instance.CampaignSaveManager.SaveData;
             var report = new AnalyticsNodeReport
@@ -518,7 +584,11 @@ namespace TJ.Map
                 NodeType = selectedNode.Value.type.ToString(),
                 GoldAfter = save.goldAmount,
                 SquadsLost = squadsLost,
+                Detail = detail,
             };
+            // spoilsTaken outlives its battle, so it only belongs to a node whose rewards were offered here.
+            if (detail != null && detail.ContainsKey("rw") && save.spoilsTaken != null)
+                detail["spoils"] = new List<string>(save.spoilsTaken);
             foreach (SquadToLoad squad in save.playerArmy)
             {
                 if (squad.UnitIndex == -1 || squad.isEmptySquad) continue;
@@ -599,6 +669,7 @@ namespace TJ.Map
             Debug.Log($"Selecting node {_selectedNode.Value.index}");
             GameEventTracker.TryRun("node visit", () => RecordNodeVisit(_selectedNode));
             selectedNode = _selectedNode;
+            MapRoutePlan.Prune(RouteMarks(), LayerOfNode, ReachedLayer());
             hoppingArrived = false;
             SetMapInput(false);
 
@@ -658,6 +729,7 @@ namespace TJ.Map
             selectedNode.NodeClicked();
             DeselectOtherNodesOnLayer();
             UpdateNodePath();
+            ApplyRoutePlan();
             mapSceneUIManager.LoadPanelFromNode(selectedNode);
         }
         public void CameraFocusOnNode(MapNode _node)
@@ -678,6 +750,10 @@ namespace TJ.Map
                 SceneHandler.Instance.OnGameStateChanged -= OnGameStateChanged;
             if(InputHandler.HasInstance)
                 InputHandler.Instance.PrimaryActionPerformed -= LeftClick;
+            if(InputHandler.HasInstance)
+                InputHandler.Instance.SecondaryActionPressed -= RightClick;
+            Memori.Utilities.ColorVision.Changed -= ApplyRoutePlan;
+            RouteMarkColors.Changed -= ApplyRoutePlan;
         }
         private void HandleIntro()
         {
@@ -778,6 +854,7 @@ namespace TJ.Map
                 if (CampaignManager.Instance.CampaignSaveManager.SaveData.nodesRevealed)
                     RevealNodesVisually(-1, mapLayers.Count);
                 SelectNextLayer();
+                ApplyRoutePlan();
             }
             SetMapInput(true);
         }

@@ -31,6 +31,13 @@ namespace TJ.Prestige
             UnitAttribute.Overdraw => "Range",
             UnitAttribute.PowderReserves => "Ammunition",
             UnitAttribute.DeepQuivers => "Ammunition",
+            UnitAttribute.PotentMagic => "AttackDamage",
+            UnitAttribute.WideWeave => "SpellStatArea",
+            UnitAttribute.FarCast => "Range",
+            UnitAttribute.Quickcast => "SpellStatCooldown",
+            UnitAttribute.SwiftStride => "Speed",
+            UnitAttribute.ProjectileWard => "Armor",
+            UnitAttribute.SpellWard => "Mana",
             _ => FALLBACK,
         };
     }

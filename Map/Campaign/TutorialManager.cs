@@ -41,6 +41,7 @@ public class TutorialManager : Memori.Utilities.Singleton<TutorialManager>
     private Vector4 _tooltipTextMargin;
     private Coroutine _cameraTutorial;
     private Coroutine _placeTooltip;
+    private Coroutine _loadText;
     // Reused every frame the callout follows its target, so placement allocates nothing.
     private readonly System.Collections.Generic.List<UnityEngine.UI.Graphic> _tooltipGraphics = new();
     private readonly Vector3[] _frameCorners = new Vector3[4];
@@ -98,11 +99,13 @@ public class TutorialManager : Memori.Utilities.Singleton<TutorialManager>
         tutorialPanelAnimator.SetBool("Active", true);
 
         activeStepNumber = 0;
-        StartCoroutine(DelayedLoadText());
+        if (_loadText != null) StopCoroutine(_loadText);
+        _loadText = StartCoroutine(DelayedLoadText());
     }
     public IEnumerator DelayedLoadText()
     {
-        yield return new WaitForSeconds(0.5f);
+        yield return new WaitForSecondsRealtime(0.5f);
+        _loadText = null;
         LoadStep();
     }
     public void LoadStep()
@@ -224,6 +227,9 @@ public class TutorialManager : Memori.Utilities.Singleton<TutorialManager>
     }
     public void TurnOff()
     {
+        // A pending LoadStep would turn the Continue button back on after the panel has closed.
+        if (_loadText != null) StopCoroutine(_loadText);
+        _loadText = null;
         _stepPanelOpen = false;
         tutorialPanelAnimator.SetBool("Active", false);
         tutorialTooltipAnimator.SetBool("Active", false);

@@ -424,6 +424,18 @@ namespace TJ
             pitch = Mathf.Atan2(cameraTarget.position.y - worldPosition.y, 40f) * Mathf.Rad2Deg;
             cameraTarget.eulerAngles = new Vector3(pitch, yaw, 0f);
         }
+        public void LookAtGroundPosition(Vector3 worldPosition)
+        {
+            // Height and rotation stay; the camera backs off along its view so the point lands mid-screen.
+            float lookPitch = cameraTarget.eulerAngles.x;
+            if (lookPitch > 180f) lookPitch -= 360f;
+            float backOff = lookPitch > 1f
+                ? Mathf.Min((cameraTarget.position.y - worldPosition.y) / Mathf.Tan(lookPitch * Mathf.Deg2Rad), minMaxDepth.y)
+                : 0f;
+            Vector3 forward = Quaternion.Euler(0f, cameraTarget.eulerAngles.y, 0f) * Vector3.forward;
+            Vector3 position = worldPosition - forward * backOff;
+            cameraTarget.position = new Vector3(position.x, cameraTarget.position.y, position.z);
+        }
         private void HandleMinimapCameraIndicator()
         {
             //lock the y value to 0

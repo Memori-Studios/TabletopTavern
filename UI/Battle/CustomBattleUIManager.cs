@@ -327,10 +327,11 @@ namespace TJ
         {
             if (spellTestModeToggle == null) return;
 
-#if !SPELLS
+#if !SPELLS || !TESTING
             spellTestModeToggle.transform.parent.gameObject.SetActive(false);
             return;
 #endif
+            spellTestModeToggle.transform.parent.gameObject.SetActive(true);
             spellTestModeToggle.SetIsOnWithoutNotify(Spells.SpellTestMode.Enabled);
             spellTestModeToggle.onValueChanged.RemoveAllListeners();
             spellTestModeToggle.onValueChanged.AddListener(on => BattleManager.Instance.SpellManager.SetTestMode(on));

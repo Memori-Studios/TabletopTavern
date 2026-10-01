@@ -60,12 +60,15 @@ namespace TJ.Town.EditorTools
         static readonly Color Sub = Hex("B4AA94");
         static readonly Color Flavour = Hex("A99F8A");
         static readonly Color Cap = Hex("8C9AA2");
-        static readonly Color Detail = Hex("A9B9C6");
+        static readonly Color Detail = Hex("8C9AA2");
         static readonly Color Positive = Hex("7BD66F");
         static readonly Color Negative = Hex("E3695E");
         static readonly Color Coin = Hex("E3BB71");
-        static readonly Color Taken = Hex("9FB0B8");
-        static readonly Color TakenTitle = Hex("7E8A8F");
+        // The panel's tallest state in 1080 units, and its bottom edge: 273 of army panel plus a gap.
+        const float FitHeight = 785f;
+        const float FitBottom = 285f;
+        static readonly Color Taken = Hex("8C9AA2");
+        static readonly Color TakenTitle = Hex("8C9AA2");
         static readonly Color FightFill = new(0.18660378f, 0.056990035f, 0.061990038f);
         static readonly Color FightHue = new(0.7830189f, 0.08495018f, 0.08495018f);
         static readonly Color FightHover = new(0.9787736f, 0.018929051f, 0.018929051f);
@@ -418,7 +421,7 @@ namespace TJ.Town.EditorTools
             Fixed(icon.gameObject, 16f, 16f);
             TMP_Text value = Text("Value", row, displayDrop, 16f, Cream, "Value");
             value.enableAutoSizing = true;
-            value.fontSizeMin = 12f;
+            value.fontSizeMin = 9f;
             value.fontSizeMax = 16f;
             Flexible(value.gameObject, 1f).preferredWidth = 0f;
         }
@@ -500,10 +503,12 @@ namespace TJ.Town.EditorTools
         {
             rootGo.layer = 5;
             var root = (RectTransform)rootGo.transform;
-            root.anchorMin = root.anchorMax = new Vector2(0.5f, 0.5f);
-            root.pivot = new Vector2(0.5f, 0.5f);
+            // Pinned above the army panel and shrunk on a shorter canvas: at UI Scale 125% and on the Steam Deck the
+            // header was cut off and Enter and Fight sat behind the army bar.
+            root.anchorMin = root.anchorMax = new Vector2(0.5f, 0f);
+            root.pivot = new Vector2(0.5f, 0f);
             root.sizeDelta = new Vector2(PanelWidth, 620f);
-            root.anchoredPosition = new Vector2(0f, PanelCentreY);
+            root.anchoredPosition = new Vector2(0f, FitBottom);
             VerticalLayoutGroup rootLayout = GetOrAdd<VerticalLayoutGroup>(rootGo);
             rootLayout.padding = new RectOffset((int)PanelPadding, (int)PanelPadding, (int)PanelPadding, (int)PanelPadding);
             rootLayout.spacing = 0f;
@@ -514,6 +519,12 @@ namespace TJ.Town.EditorTools
             ContentSizeFitter fitter = GetOrAdd<ContentSizeFitter>(rootGo);
             fitter.horizontalFit = ContentSizeFitter.FitMode.Unconstrained;
             fitter.verticalFit = ContentSizeFitter.FitMode.PreferredSize;
+            UIFitToCanvas fit = GetOrAdd<UIFitToCanvas>(rootGo);
+            var fitSo = new SerializedObject(fit);
+            fitSo.FindProperty("designSize").vector2Value = new Vector2(PanelWidth, FitHeight);
+            fitSo.FindProperty("reservedSize").vector2Value = new Vector2(0f, FitBottom + 10f);
+            fitSo.FindProperty("minScale").floatValue = 0.6f;
+            fitSo.ApplyModifiedPropertiesWithoutUndo();
             TownPanelView view = GetOrAdd<TownPanelView>(rootGo);
             var so = new SerializedObject(view);
 
@@ -545,11 +556,65 @@ namespace TJ.Town.EditorTools
 
             BuildHeader(root, so);
             BuildColumns(root, so);
+            Dress(root, "Mount", new Vector2(130f, 130f));
 
             Refs(so, "weatherIcons", new Object[] { clearIcon, rainIcon, fogIcon, snowIcon });
             so.FindProperty("factionBandAlpha").floatValue = BandAlpha;
             so.ApplyModifiedPropertiesWithoutUndo();
         }
+
+        #region Synty dressing
+        // ui-design.md, Art richness: the shared crest on the panel's top edge, the shared divider in each column split,
+        // and one pulsing glow behind the focal element. Runs after Build and finds its targets by name.
+        const string CrestPath = "Assets/Data/Prefabs/UI/Reuseable/Ornaments/Panel Crest.prefab";
+        const string DividerPath = "Assets/Data/Prefabs/UI/Reuseable/Ornaments/Column Divider.prefab";
+        const string SyntyGlow = "Assets/Synty/InterfaceFantasyMenus/Sprites/FX/SPR_FantasyMenus_FX_Glow_01.png";
+
+        static void Dress(RectTransform panel, string focalName, Vector2 glowSize)
+        {
+            GameObject crest = AssetDatabase.LoadAssetAtPath<GameObject>(CrestPath);
+            GameObject divider = AssetDatabase.LoadAssetAtPath<GameObject>(DividerPath);
+            Sprite glow = AssetDatabase.LoadAssetAtPath<Sprite>(SyntyGlow);
+            if (crest == null || divider == null || glow == null) { Debug.LogError("Synty dressing assets missing."); return; }
+
+            PrefabUtility.InstantiatePrefab(crest, panel);
+
+            // Column splits are one-unit-wide "Divider" cells; the shared divider replaces their plain "Line".
+            var cells = new List<Transform>();
+            foreach (RectTransform t in panel.GetComponentsInChildren<RectTransform>(true))
+            {
+                if (t.name != "Divider" || t.Find("Line") == null) continue;
+                LayoutElement cell = t.GetComponent<LayoutElement>();
+                if (cell != null && cell.preferredWidth > 0f && cell.preferredWidth <= 2f) cells.Add(t);
+            }
+            foreach (Transform cell in cells)
+            {
+                Object.DestroyImmediate(cell.Find("Line").gameObject);
+                PrefabUtility.InstantiatePrefab(divider, cell);
+            }
+
+            Transform focal = null;
+            foreach (Transform t in panel.GetComponentsInChildren<Transform>(true))
+            {
+                if (t.name != focalName) continue;
+                if (focalName == "Mount" && (t.parent == null || t.parent.name != "Header")) continue;
+                focal = t;
+                break;
+            }
+            if (focal == null) { Debug.LogWarning("Synty dressing: no focal '" + focalName + "' under " + panel.name); return; }
+            Image glowImage = Img(Rect("Focal Glow", focal), glow, new Color(0.914f, 0.753f, 0.416f, 0.32f));
+            Ignore(glowImage.gameObject);
+            glowImage.transform.SetAsFirstSibling();
+            RectTransform gr = glowImage.rectTransform;
+            gr.anchorMin = gr.anchorMax = new Vector2(0.5f, 0.5f);
+            gr.pivot = new Vector2(0.5f, 0.5f);
+            gr.sizeDelta = glowSize;
+            gr.anchoredPosition = Vector2.zero;
+            System.Type idle = System.Type.GetType("Memori.UI.UIIdleGlow, Memori.UI");
+            if (idle != null) glowImage.gameObject.AddComponent(idle);
+            else Debug.LogError("Synty dressing: Memori.UI.UIIdleGlow not found.");
+        }
+        #endregion
 
         static void BuildHeader(RectTransform root, SerializedObject so)
         {

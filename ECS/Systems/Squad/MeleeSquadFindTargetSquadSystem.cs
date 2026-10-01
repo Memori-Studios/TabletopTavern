@@ -144,8 +144,8 @@ partial struct SquadFindTargetSquadSystem : ISystem
                     float closestDistance = float.MaxValue;
                     if (entityManager.IsComponentEnabled<WaitingForCommand>(squad.ValueRO.SelfEntity)) continue;
 
-                    //check if monster
-                    bool monster = entityManager.HasComponent<MonsterousSquadTag>(squad.ValueRO.SelfEntity);
+                    // Cavalry and monsters both lose a head-on charge into spears, so both look elsewhere first.
+                    bool monster = entityManager.HasComponent<LargeTag>(squad.ValueRO.SelfEntity);
                     bool priorityTargetFound = false;
 
                     if(monster) 

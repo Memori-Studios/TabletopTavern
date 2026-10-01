@@ -23,7 +23,11 @@ namespace TJ
         UnitStat unitStat;
         MemoriTooltipTrigger memoriTooltipTrigger;
         GearManager gearManager;
-        public void LoadUnitStatUI(UnitStatValue _unitStatValue, int _prestige, UnitName _unitName, bool applyGearBonuses, UnitAttribute _prestigeTrait = UnitAttribute.None)
+        public UnitStat Stat => unitStat;
+        /// <summary>The value the row shows, base plus every bonus.</summary>
+        public float Total => amount + totalBonus;
+        // _liveSquad is the squad this row's panel shows; battlefield bonuses are read off it.
+        public void LoadUnitStatUI(UnitStatValue _unitStatValue, int _prestige, UnitName _unitName, bool applyGearBonuses, UnitAttribute _prestigeTrait = UnitAttribute.None, Entity _liveSquad = default)
         {
             amount = _unitStatValue.Value;
             unitStat = _unitStatValue.unitStat;
@@ -51,15 +55,17 @@ namespace TJ
             }
             memoriTooltipTrigger = GetComponent<MemoriTooltipTrigger>();
 
+            UnitType unitType = TabletopTavernData.Instance.GetUnitTypeFromUnitName(_unitName);
+            // A caster's Range is its spell's reach, so it takes the spell card's name for it.
+            string statKey = unitStat == UnitStat.Range && TabletopTavernConstants.Casts(unitType) ? "SpellStatCastRange" : unitStat.ToString();
+
             statImage.sprite = SpriteData.GetSprite(unitStat.ToString());
             statImage.color = ColorData.GetUnitStatColor(unitStat);
-            statNameText.text = LocalizationManager.Instance.GetText(unitStat.ToString());
+            statNameText.text = LocalizationManager.Instance.GetText(statKey);
 
             totalBonus = 0;
-            string description = KeywordText.Render(LocalizationManager.Instance.GetText(unitStat.ToString()+"Desc"), false);
+            string description = KeywordText.Render(LocalizationManager.Instance.GetText(statKey+"Desc"), false);
             description += $"\n\n<color {ColorData.Green}>{baseValueLocalized}: {amount}</color>";
-            
-            UnitType unitType = TabletopTavernData.Instance.GetUnitTypeFromUnitName(_unitName);
 
             if(_prestige > 0)
             {
@@ -145,7 +151,7 @@ namespace TJ
             if (_prestigeTrait != UnitAttribute.None)
                 TabletopTavernConstants.SetAttribute(ref traitAttributes, _prestigeTrait);
 
-            // Overdraw and Powder Reserves scale a displayed stat instead of adding a flat amount,
+            // Overdraw, Powder Reserves, Far Cast and Swift Stride scale a displayed stat instead of adding a flat amount,
             // so their contribution is derived here rather than coming from a bonus list. Shot
             // Discipline and Demolisher have no stat row of their own and are conveyed by their
             // attribute chip; Steady Aim shows up as the absence of a penalty line below.
@@ -170,6 +176,16 @@ namespace TJ
                 {
                     traitBonus = TabletopTavernConstants.DEEP_QUIVERS_AMMO_BONUS;
                     sourceTrait = UnitAttribute.DeepQuivers;
+                }
+                else if (traitAttributes.FarCast && unitStat == UnitStat.Range && TabletopTavernConstants.Casts(unitType))
+                {
+                    traitBonus = (int)(amount * (TabletopTavernConstants.FAR_CAST_RANGE_MULTIPLIER - 1f));
+                    sourceTrait = UnitAttribute.FarCast;
+                }
+                else if (traitAttributes.SwiftStride && unitStat == UnitStat.Speed)
+                {
+                    traitBonus = (int)(amount * (TabletopTavernConstants.SWIFT_STRIDE_SPEED_MULTIPLIER - 1f));
+                    sourceTrait = UnitAttribute.SwiftStride;
                 }
 
                 if (traitBonus > 0)
@@ -233,12 +249,11 @@ namespace TJ
             if(battleManager != null)
             {
                 EntityManager entityManager = World.DefaultGameObjectInjectionWorld.EntityManager;
-                SquadEntity squadEntity = battleManager.UIManager.SquadBattleInfo.SquadEntity;
-                if(entityManager.Exists(squadEntity.SelfEntity))
+                if(entityManager.Exists(_liveSquad))
                 {
-                    if(entityManager.HasComponent<BattlefieldBonusBufferElement>(squadEntity.SelfEntity))
+                    if(entityManager.HasComponent<BattlefieldBonusBufferElement>(_liveSquad))
                     {
-                        DynamicBuffer<BattlefieldBonusBufferElement> battlefieldBonus = entityManager.GetBuffer<BattlefieldBonusBufferElement>(squadEntity.SelfEntity);
+                        DynamicBuffer<BattlefieldBonusBufferElement> battlefieldBonus = entityManager.GetBuffer<BattlefieldBonusBufferElement>(_liveSquad);
                         float speedMultiplier = 1f;
                         foreach(BattlefieldBonusBufferElement bonus in battlefieldBonus)
                         {
@@ -318,9 +333,9 @@ namespace TJ
                             totalBonus += Mathf.RoundToInt(amount * speedMultiplier) - Mathf.RoundToInt(amount);
                         }
                     }
-                    if((unitStat == UnitStat.MeleeAttack || unitStat == UnitStat.MeleeDefense) && entityManager.HasComponent<ShieldedStanceSquadComponent>(squadEntity.SelfEntity))
+                    if((unitStat == UnitStat.MeleeAttack || unitStat == UnitStat.MeleeDefense) && entityManager.HasComponent<ShieldedStanceSquadComponent>(_liveSquad))
                     {
-                        ShieldedStanceSquadComponent shieldedStanceSquadComponent = entityManager.GetComponentData<ShieldedStanceSquadComponent>(squadEntity.SelfEntity);
+                        ShieldedStanceSquadComponent shieldedStanceSquadComponent = entityManager.GetComponentData<ShieldedStanceSquadComponent>(_liveSquad);
                         if(shieldedStanceSquadComponent.Stance == ShieldedStance.Defensive)
                         {
                             if(unitStat == UnitStat.MeleeAttack)
@@ -337,9 +352,9 @@ namespace TJ
                             }
                         }
                     }
-                    if(unitStat == UnitStat.Accuracy && entityManager.HasComponent<RangedFireModeSquadComponent>(squadEntity.SelfEntity))
+                    if(unitStat == UnitStat.Accuracy && entityManager.HasComponent<RangedFireModeSquadComponent>(_liveSquad))
                     {
-                        RangedFireModeSquadComponent rangedFireModeSquadComponent = entityManager.GetComponentData<RangedFireModeSquadComponent>(squadEntity.SelfEntity);
+                        RangedFireModeSquadComponent rangedFireModeSquadComponent = entityManager.GetComponentData<RangedFireModeSquadComponent>(_liveSquad);
                         // Steady Aim units take no penalty in this mode (RangedUnitAttackSystem
                         // skips it), so the card must not show one either.
                         if(rangedFireModeSquadComponent.FireMode == RangedFireMode.FireAtWill && !traitAttributes.SteadyAim)
@@ -352,8 +367,8 @@ namespace TJ
                     if(unitStat == UnitStat.Ammunition)
                     {
                         // SquadRanOutOfAmmoSystem strips SquadAmmunition from a spent squad; without this the row snapped back to the full pool.
-                        int remainingAmmunition = entityManager.HasComponent<SquadAmmunition>(squadEntity.SelfEntity)
-                            ? entityManager.GetComponentData<SquadAmmunition>(squadEntity.SelfEntity).Value
+                        int remainingAmmunition = entityManager.HasComponent<SquadAmmunition>(_liveSquad)
+                            ? entityManager.GetComponentData<SquadAmmunition>(_liveSquad).Value
                             : 0;
                         int ammunitionLost = (int)(amount + totalBonus - remainingAmmunition);
                         if(ammunitionLost > 0)
@@ -363,7 +378,7 @@ namespace TJ
                             description += $"\n<color {ColorData.Error}>{ammunitionDepletedLocalised}: -{ammunitionLost} </color>";
                         }
                     }
-                    if (unitStat == UnitStat.Leadership && entityManager.HasComponent<DefendersResolveComponent>(squadEntity.SelfEntity))
+                    if (unitStat == UnitStat.Leadership && entityManager.HasComponent<DefendersResolveComponent>(_liveSquad))
                     {
                         int bonus = (int)TabletopTavernConstants.FORTIFIED_MORALE_BONUS;
                         totalBonus += bonus;
@@ -373,10 +388,7 @@ namespace TJ
                 }
             }
 
-            // The signed bonus marks a buff or debuff without relying on the colour.
-            statScoreText.text = totalBonus == 0
-                ? $"{amount + totalBonus}"
-                : $"{amount + totalBonus}<size=65%> {(totalBonus > 0 ? "+" : "")}{totalBonus}</size>";
+            statScoreText.text = $"{amount + totalBonus}";
             Color textColor = Color.black;
             textColor = totalBonus switch
             {
@@ -432,6 +444,27 @@ namespace TJ
                 _ => (Color)ColorData.HexToRgba(ColorData.Primary),
             };
         }
+        #region Compare delta
+        // Nested Stat Compare Chip, hidden until this row is on a compare panel.
+        [SerializeField] private StatDeltaChip deltaChip;
+
+        /// <summary>Shows how far this row is above or below the same stat on the compared squad.</summary>
+        public void ShowDelta(float delta)
+        {
+            if (deltaChip == null)
+            {
+                Debug.LogError($"UnitStatUI on {name} has no Stat Compare Chip wired.", this);
+                return;
+            }
+            int rounded = Mathf.RoundToInt(delta);
+            if (rounded == 0) deltaChip.Hide();
+            else deltaChip.Show(rounded);
+        }
+        public void HideDelta()
+        {
+            if (deltaChip != null) deltaChip.Hide();
+        }
+        #endregion
         private int2 GetSliderRanges()
         {
             switch(unitStat)

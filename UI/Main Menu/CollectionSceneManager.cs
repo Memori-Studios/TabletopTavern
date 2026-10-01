@@ -2,6 +2,8 @@ using UnityEngine;
 using Memori.Audio;
 using Memori.Input;
 using Memori.Scenes;
+using Memori.UI;
+using System.Threading.Tasks;
 
 namespace TJ.MainMenu
 {
@@ -49,6 +51,7 @@ namespace TJ.MainMenu
 
             IAudioRequester.Instance.PlaySFX(SFXData.CloseUI);
             collectionPanel.ClosePanel();
+            await Task.Delay(Mathf.RoundToInt(UIJuice.CloseTime * 1000f));
             await SceneHandler.Instance.CloseOverlayScene(SceneHandler.CollectionScenePath);
         }
 

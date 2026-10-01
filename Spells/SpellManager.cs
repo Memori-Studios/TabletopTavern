@@ -38,6 +38,9 @@ public class SpellManager : MonoBehaviour
     [Header("Caster rail")]
     // Optional until the scene is wired: every call is null-guarded so the hotbar works without it.
     [SerializeField] private MageCastRail mageCastRail;
+    [Header("Spell wheel")]
+    // Optional until the scene is wired: every call is null-guarded so the number keys work without it.
+    [SerializeField] private SpellWheelView spellWheel;
 
     [Header("Pre-Battle Browsing (custom battle only)")]
     // The pool the player can swap from is every registered spell (SpellRegistry.All). It used to be
@@ -69,6 +72,7 @@ public class SpellManager : MonoBehaviour
     // 0 = no mage spell armed; then selectedSpellIndex says whether a hotbar spell is.
     private int armedMageSquadId;
     private SpellData armedMageSpell;
+    private float armedMageRadiusScale = 1f;
     public bool MageSpellArmed => armedMageSquadId != 0;
     public int ArmedMageSquadId => armedMageSquadId;
     // Read each frame while a mage spell is armed, for the leash line and the approach hint.
@@ -132,7 +136,7 @@ public class SpellManager : MonoBehaviour
     private Vector3 spellCursorOrigin;
     public Vector3 SpellCursorOrigin => spellCursorOrigin;
     public bool ValidSpellCastPoint => validSpellCastPoint;
-    public float SelectedSpellRadius => ArmedSpell != null ? ArmedSpell.SpellRadius : 0f;
+    public float SelectedSpellRadius => ArmedSpell != null ? ArmedSpell.TargetingRadius * (MageSpellArmed ? armedMageRadiusScale : 1f) : 0f;
     // The targeting star only marks single-target spells; an area spell's cursor is the ring alone.
     public bool SelectedSpellShowsStar => ArmedSpell != null && ArmedSpell.SpellType == SpellType.SingleTarget;
     int spellsCast = 0;
@@ -168,6 +172,7 @@ public class SpellManager : MonoBehaviour
         // Polled rather than pushed: the armed slot is cleared from many paths, and this reads them all.
         RefreshManaPreview();
         RefreshTestMenuArmed();
+        UpdateWheel();
 
         for (int i = 0; i < slotStates.Length; i++) {
             SpellSlotState slot = slotStates[i];
@@ -553,6 +558,9 @@ public class SpellManager : MonoBehaviour
 
     private void GamePhaseChanged(GamePhase gamePhase)
     {
+        // The mage tiles stand on the army bar cards, where the end-of-battle badges go.
+        if(gamePhase == GamePhase.PostGame) RefreshMageRail();
+        if(gamePhase == GamePhase.PostGame) CloseWheel();
         if(gamePhase != GamePhase.Battle) return;
 
         // Battle has begun - lock the loadout and close the picker.
@@ -630,6 +638,8 @@ public class SpellManager : MonoBehaviour
     /// </summary>
     private void OnSpellMenuDigit(int digit)
     {
+        // A number is its own pick, so the wheel closes and the key's release picks nothing.
+        CloseWheel();
         if(slotStates == null || hotbarSlotCount < 0) return;
 
         if(digit <= hotbarSlotCount) {
@@ -997,6 +1007,8 @@ public class SpellManager : MonoBehaviour
         DeselectSpell();
         armedMageSquadId = squadId;
         armedMageSpell = spell;
+        SquadEntity armedSquad = BattleManager.Instance.SquadManager.GetSquadEntityFromId(squadId, true);
+        armedMageRadiusScale = TabletopTavernConstants.SpellRadiusScale(BattleManager.Instance.SquadManager.GetBattleSquadAttributes(armedSquad.UnitName, squadId));
         RefreshRingHighlight(squadId);
 
         if(BattleManager.Instance.CursorMode != CursorMode.CastSpell)
@@ -1072,7 +1084,8 @@ public class SpellManager : MonoBehaviour
 
         List<MageTileInfo> mages = new();
         EntityManager entityManager = World.DefaultGameObjectInjectionWorld.EntityManager;
-        foreach(int squadId in GetSelectedMageSquadIds())
+        bool battleOver = BattleManager.Instance.GamePhase == GamePhase.PostGame;
+        if(!battleOver) foreach(int squadId in GetSelectedMageSquadIds())
         {
             SquadEntity squad = BattleManager.Instance.SquadManager.GetSquadEntityFromId(squadId, true);
             SpellData spell = TabletopTavernData.Instance.SquadAssetsDictionary[squad.UnitName].mageSpell;
@@ -1121,9 +1134,19 @@ public class SpellManager : MonoBehaviour
             drawer.SetHighlighted(squadId == armedMageSquadId || squadId == hoveredTileSquadId);
     }
 
-    // While Y is held every spell tile lights its digit.
-    private void OnSpellMenuOpened() => SetSpellMenuOpen(true);
-    private void OnSpellMenuClosed() => SetSpellMenuOpen(false);
+    // While the spell menu key is held every spell tile lights its digit and the wheel opens at the cursor.
+    private void OnSpellMenuOpened()
+    {
+        SetSpellMenuOpen(true);
+        OpenWheel();
+    }
+    private void OnSpellMenuClosed()
+    {
+        SetSpellMenuOpen(false);
+        if(!wheelOpen) return;
+        // Focus loss and the Steam overlay let go of the key for the player, and that is never a pick.
+        ResolveWheel(InputHandler.Instance.SpellMenuReleaseForced ? WheelDirection.Centre : PointedDirection());
+    }
     private void SetSpellMenuOpen(bool open)
     {
         if(spellCastButtons != null)
@@ -1135,6 +1158,148 @@ public class SpellManager : MonoBehaviour
         if(mageCastRail != null) mageCastRail.SetMenuOpen(open);
     }
     #endregion
+    #region Spell wheel
+    // Hold the spell menu key and a wheel opens at the cursor: left, up and right arm the three
+    // hotbar slots, down cancels. Letting go picks the slice the cursor points at from the press point.
+    private bool wheelOpen;
+    private Vector2 wheelCentre;
+    private WheelDirection wheelDirection;
+    // The frame the cursor was moved onto the wheel's centre; its old position is still reported that frame.
+    private int wheelWarpFrame = -1;
+    // Set when a click picks from the wheel: the battlefield ignores the mouse until both buttons are up.
+    private bool swallowMouse;
+    public bool WheelOwnsMouse => wheelOpen || swallowMouse;
+    private int WheelSlotCount => Mathf.Min(SpellWheelView.SlotCount, hotbarSlotCount);
+    private static UnityEngine.InputSystem.Mouse WheelMouse => UnityEngine.InputSystem.Mouse.current;
+
+    private bool CanOpenWheel()
+    {
+        if(spellWheel == null || slotStates == null || hotbarSlotCount <= 0 || WheelMouse == null) return false;
+        GamePhase phase = BattleManager.Instance.GamePhase;
+        if(phase != GamePhase.Deployment && phase != GamePhase.Battle) return false;
+        if(SettingsManager.Instance.SettingsPanelOpen) return false;
+        // Never over a drag in progress: a box select, a formation drag, a reposition or a spawn.
+        CursorMode mode = BattleManager.Instance.CursorMode;
+        if(mode == CursorMode.MouseDown || mode == CursorMode.Reposition || mode == CursorMode.SpawnSquad) return false;
+        if(InputHandler.Instance.RepositioningSelectedUnits) return false;
+        if(WheelMouse.leftButton.isPressed || WheelMouse.rightButton.isPressed) return false;
+        for(int slot = 0; slot < WheelSlotCount; slot++)
+            if(slotStates[slot].SpellData != null) return true;
+        return false;
+    }
+
+    private void OpenWheel()
+    {
+        if(!CanOpenWheel()) return;
+        Vector2 press = WheelMouse.position.ReadValue();
+        wheelCentre = SpellWheelMath.ClampInside(press, spellWheel.RadiusPixels, new Vector2(Screen.width, Screen.height));
+        // Against a screen edge the wheel moves inward and the cursor goes with it, so every slice stays reachable.
+        if((wheelCentre - press).sqrMagnitude > 0.25f)
+        {
+            WheelMouse.WarpCursorPosition(wheelCentre);
+            wheelWarpFrame = Time.frameCount;
+        }
+        wheelOpen = true;
+        wheelDirection = WheelDirection.Centre;
+        for(int slot = 0; slot < SpellWheelView.SlotCount; slot++) RefreshWheelSlot(slot);
+        spellWheel.Show(wheelCentre);
+    }
+
+    private void RefreshWheelSlot(int slot)
+    {
+        SpellData spell = slot < WheelSlotCount ? slotStates[slot].SpellData : null;
+        bool locked = spell == null && slot < WheelSlotCount && !BattleManager.Instance.BattleSaveManager.IsCustomBattle
+            && SaveDataHandler.IsCampaignSlotLocked(slot);
+        spellWheel.SetSlot(slot, spell, CanAfford(spell), locked);
+        RefreshWheelCooldown(slot);
+    }
+
+    private void RefreshWheelCooldown(int slot)
+    {
+        if(slot >= WheelSlotCount) return;
+        SpellSlotState state = slotStates[slot];
+        float fraction = state.OnCooldown && state.CooldownDuration > 0f ? state.CooldownRemaining / state.CooldownDuration : 0f;
+        spellWheel.SetCooldown(slot, fraction, state.CooldownRemaining);
+    }
+
+    // Polled from Update: the cursor picks the slice, and a click picks at once.
+    private void UpdateWheel()
+    {
+        if(!wheelOpen)
+        {
+            if(swallowMouse && !AnyMouseButtonActive()) swallowMouse = false;
+            return;
+        }
+        if(SettingsManager.Instance.SettingsPanelOpen || WheelMouse == null)
+        {
+            CloseWheel();
+            return;
+        }
+        for(int slot = 0; slot < WheelSlotCount; slot++) RefreshWheelCooldown(slot);
+
+        WheelDirection direction = PointedDirection();
+        if(direction != WheelDirection.Centre) InputHandler.Instance.MarkSpellMenuUsed();
+        if(direction != wheelDirection)
+        {
+            wheelDirection = direction;
+            spellWheel.SetHighlight(direction, WheelLabel(direction));
+        }
+
+        if(WheelMouse.leftButton.wasPressedThisFrame) PickFromWheelByClick(wheelDirection);
+        else if(WheelMouse.rightButton.wasPressedThisFrame) PickFromWheelByClick(WheelDirection.Down);
+    }
+
+    private WheelDirection PointedDirection()
+    {
+        if(WheelMouse == null || Time.frameCount <= wheelWarpFrame + 1) return wheelDirection;
+        return SpellWheelMath.Pick(WheelMouse.position.ReadValue() - wheelCentre, spellWheel.HubRadiusPixels);
+    }
+
+    private void PickFromWheelByClick(WheelDirection direction)
+    {
+        swallowMouse = true;
+        ResolveWheel(direction);
+        InputHandler.Instance.ReleaseSpellMenuTap();
+    }
+
+    private void ResolveWheel(WheelDirection direction)
+    {
+        CloseWheel();
+        int slot = SpellWheelMath.SlotOf(direction);
+        if(slot >= 0 && slot < WheelSlotCount)
+        {
+            SelectSpell(slot);
+            return;
+        }
+        // Cancel disarms whatever is armed, exactly as a right-click does while aiming.
+        if(direction == WheelDirection.Down && BattleManager.Instance.CursorMode == CursorMode.CastSpell)
+            BattleManager.Instance.SetCursorMode(CursorMode.Free);
+    }
+
+    private void CloseWheel()
+    {
+        if(!wheelOpen) return;
+        wheelOpen = false;
+        wheelDirection = WheelDirection.Centre;
+        spellWheel.Hide();
+    }
+
+    private string WheelLabel(WheelDirection direction)
+    {
+        if(direction == WheelDirection.Down) return LocalizationManager.Instance.GetText("Cancel");
+        int slot = SpellWheelMath.SlotOf(direction);
+        if(slot < 0 || slot >= WheelSlotCount || slotStates[slot].SpellData == null) return null;
+        return LocalizationManager.Instance.GetText(slotStates[slot].SpellData.Spell.ToString());
+    }
+
+    private static bool AnyMouseButtonActive()
+    {
+        UnityEngine.InputSystem.Mouse mouse = WheelMouse;
+        if(mouse == null) return false;
+        return mouse.leftButton.isPressed || mouse.rightButton.isPressed
+            || mouse.leftButton.wasReleasedThisFrame || mouse.rightButton.wasReleasedThisFrame;
+    }
+    #endregion
     public IEnumerator GetMouseCursorPosition()
     {
         while(BattleManager.Instance.CursorMode == CursorMode.CastSpell)
@@ -1144,12 +1309,14 @@ public class SpellManager : MonoBehaviour
             // would fight it - right-click is "place" there.
             if(placementPhase != SpellPlacementPhase.None) { yield return null; continue; }
 
-            if(Input.GetMouseButtonDown(1)){
+            // A click on the spell wheel picks from it; it must not also cast or cancel the armed spell.
+            if(!WheelOwnsMouse && Input.GetMouseButtonDown(1)){
                 BattleManager.Instance.SetCursorMode(CursorMode.Free);
                 yield break;
             }
 
-            if(Input.GetMouseButtonDown(0)){
+            // A click on the minimap moves the camera; it must not also cast.
+            if(!WheelOwnsMouse && !MinimapClickToMove.PointerIsOver && Input.GetMouseButtonDown(0)){
                 AttemptCastSpell();
             }
 
@@ -1343,7 +1510,8 @@ public class SpellManager : MonoBehaviour
     /// budget is the squad's charges. Kept on SpellManager purely so every ActiveSpell in the game
     /// is still created in one place.
     /// </summary>
-    public void CastUnitSpell(SpellData spellData, Vector3 position, Team sourceTeam, int sourceSquadId, Entity targetSquadEntity)
+    public void CastUnitSpell(SpellData spellData, Vector3 position, Team sourceTeam, int sourceSquadId, Entity targetSquadEntity,
+                              float potency = 1f, float radiusScale = 1f)
     {
         if(spellData == null) {
             Debug.LogError($"SpellManager: squad {sourceSquadId} requested a cast with no SpellData assigned.");
@@ -1351,7 +1519,8 @@ public class SpellManager : MonoBehaviour
         }
         ActiveSpell spellInstance = SpawnActiveSpell(position);
         if(spellInstance == null) return;
-        spellInstance.Load(spellData, position, targetSquadEntity, sourceTeam, sourceSquadId);
+        spellInstance.Load(spellData, position, targetSquadEntity, sourceTeam, sourceSquadId,
+                           _potency: potency, _radiusScale: radiusScale);
         if(sourceTeam == Team.Player) RecordSpellCast(spellData);
     }
 

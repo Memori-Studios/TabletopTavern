@@ -3,9 +3,11 @@ using System.Collections.Generic;
 using System.IO;
 using Memori.Analytics;
 using Memori.SaveData;
+using Memori.Scenes;
 using TJ;
 using TJ.Spells;
 using UnityEngine;
+using UnityEngine.SceneManagement;
 
 namespace TabletopTavern.Analytics
 {
@@ -18,7 +20,7 @@ namespace TabletopTavern.Analytics
     //      analytics server; DEMO and any other build -> no backend, so nothing is captured.
     //
     //   2. The game's event vocabulary: runStarted, nodeCompleted, battleEnded, runEnded,
-    //      endlessEnded and bugReportSubmitted. Every in-run event carries runId, heroId, difficulty
+    //      endlessEnded, ordealPicked, bugReportSubmitted and exceptionSeen. Every in-run event carries runId, heroId, difficulty
     //      and act so the views can join and slice them.
     public static class GameEventTracker
     {
@@ -57,6 +59,7 @@ namespace TabletopTavern.Analytics
         {
             s_http = new HttpAnalyticsBackend(Endpoint, WriteKey, buildKind, queueFolder);
             AnalyticsService.SetBackend(s_http);
+            ExceptionTracker.Install();
         }
 
         // Call whenever the player makes or changes their privacy choice. It is saved for later launches.
@@ -75,6 +78,7 @@ namespace TabletopTavern.Analytics
 
         public static void RunStarted(CampaignSaveData run, AnalyticsRunSetup setup)
         {
+            NodeLog.Clear();
             TryRun("runStarted", () =>
             {
                 setup ??= new AnalyticsRunSetup();
@@ -157,6 +161,7 @@ namespace TabletopTavern.Analytics
                 p["trainedUnit"] = node.TrainedUnit;
                 p["trainedPrestige"] = node.TrainedUnit != null ? (object)node.TrainedPrestige : null;
                 p["trainedTrait"] = node.TrainedTrait;
+                p["detail"] = node.Detail;
                 AnalyticsService.Record("nodeCompleted", p);
             });
         }
@@ -213,29 +218,60 @@ namespace TabletopTavern.Analytics
         {
             TryRun("bugReportSubmitted", () =>
             {
-                CampaignSaveData run = SaveDataHandler.CampaignSaveExists() ? SaveDataHandler.Load() : null;
-                Dictionary<string, object> p = run != null
-                    ? RunProps(run, run.activeMapLayer + 1)
-                    : new Dictionary<string, object>
-                    {
-                        { "runId", null },
-                        { "heroId", null },
-                        { "difficulty", null },
-                        { "act", null },
-                        { "layer", null },
-                    };
+                Dictionary<string, object> p = SavedRunProps(SaveDataHandler.CampaignSaveExists());
                 p["delivered"] = delivered;
                 p["threadUrl"] = delivered ? threadUrl : null;
                 p["crashAttached"] = crashAttached;
                 p["gameState"] = gameState;
                 p["uptimeSec"] = (int)Time.realtimeSinceStartup;
+                p["recentSigs"] = ExceptionTracker.RecentSignatures;
                 AddQualityFlags(p);
                 AnalyticsService.Record("bugReportSubmitted", p);
+            });
+        }
+
+        /// <summary>
+        /// The first time this session hits an exception with a new signature. Run ids come along only while a
+        /// run is on screen, so a menu error is not pinned on a run the player left.
+        /// </summary>
+        public static void ExceptionSeen(ExceptionSighting sighting, string state)
+        {
+            if (sighting == null) return;
+            TryRun("exceptionSeen", () =>
+            {
+                bool inRun = (state == nameof(GameStateEnum.Map) || state == nameof(GameStateEnum.Battle)) && SaveDataHandler.CampaignSaveExists();
+                Dictionary<string, object> p = SavedRunProps(inRun);
+                p["sig"] = sighting.Signature;
+                p["type"] = sighting.Type;
+                p["where"] = sighting.Where;
+                p["frames"] = sighting.Frames;
+                p["msg"] = sighting.Message;
+                p["gameState"] = state;
+                p["scene"] = SceneManager.GetActiveScene().name;
+                p["sessionSec"] = sighting.SessionSec;
+                AddQualityFlags(p);
+                AnalyticsService.Record("exceptionSeen", p);
             });
         }
         #endregion
 
         #region Props
+        // The saved run's ids, or the same keys set to null, so the event's shape never changes.
+        private static Dictionary<string, object> SavedRunProps(bool useSave)
+        {
+            CampaignSaveData run = useSave ? SaveDataHandler.Load() : null;
+            return run != null
+                ? RunProps(run, run.activeMapLayer + 1)
+                : new Dictionary<string, object>
+                {
+                    { "runId", null },
+                    { "heroId", null },
+                    { "difficulty", null },
+                    { "act", null },
+                    { "layer", null },
+                };
+        }
+
         private static Dictionary<string, object> RunProps(CampaignSaveData run, int layer)
         {
             return new Dictionary<string, object>

@@ -18,7 +18,7 @@ namespace TJ.MainMenu
     /// Screen two of run setup: everything that fills a slot or spends the treasury, under one
     /// persistent purse.
     ///
-    /// Layout is source | loadout. The source column switches with its tabs, or by hovering a
+    /// Layout is source | loadout. The source column switches with its tabs, or by clicking a
     /// loadout block, so nothing is hidden behind a hover flyout the way the old Starting Gear /
     /// Modify Starting Army buttons were. Details show in tooltips and the unit hover panel.
     ///
@@ -53,8 +53,8 @@ namespace TJ.MainMenu
         [SerializeField] private TMP_Text armyHeadingText;
         [SerializeField] private TMP_Text armyHintText;
 
-        // One per loadout block, each authored with its own WarbandSection. Focus follows the
-        // pointer rather than needing a click.
+        // One per loadout block, each authored with its own WarbandSection. A click focuses the
+        // block; hover only shows its highlight faintly. Each highlight carries a CanvasGroup for that.
         [Header("Section Hover Areas")]
         [SerializeField] private WarbandSectionHoverArea[] sectionHoverAreas;
         [SerializeField] private GameObject armySectionHighlight;
@@ -91,8 +91,12 @@ namespace TJ.MainMenu
 
         private PlayPanel playPanel;
         private StartingArmyManager startingArmySection;
+        // A hovered block that is not focused shows its highlight at this fraction of full strength.
+        private const float HoverHighlightAlpha = 0.25f;
+
         private WarbandSection focusedSection = WarbandSection.Army;
         private bool focusApplied;
+        private WarbandSection? hoveredSection;
 
         private readonly List<SpellBrowseSlot> grimoireTiles = new();
         private readonly List<MemoriTooltipTrigger> grimoireTooltips = new();
@@ -111,7 +115,7 @@ namespace TJ.MainMenu
             foreach (WarbandSectionHoverArea hoverArea in sectionHoverAreas)
             {
                 if (hoverArea == null) continue;
-                hoverArea.SetUp(SetFocus);
+                hoverArea.SetUp(SetFocus, OnSectionHovered);
             }
 
             backToCommanderButton.onClick.RemoveAllListeners();
@@ -147,6 +151,8 @@ namespace TJ.MainMenu
             RefreshPurse(startingArmySection.remainingTreasury.Value);
             // Re-applied even if Army was already focused, so every visit opens on the recruit list.
             focusApplied = false;
+            // A hover left over from the last visit would otherwise reopen with a faint highlight.
+            hoveredSection = null;
             SetFocus(WarbandSection.Army);
         }
 
@@ -192,9 +198,7 @@ namespace TJ.MainMenu
         #region Focus
         public void SetFocus(WarbandSection section)
         {
-            // Focus now follows the pointer, so this fires on every block the mouse crosses.
-            // Re-entering the block you are already on is a no-op, otherwise sweeping across the
-            // column would replay the hover sound and re-toggle the source roots each frame-ish.
+            // Clicking the block or tab already shown is a no-op, so it does not replay the sound or re-toggle the roots.
             // focusApplied forces the first call through, since Army is also the default value.
             if (focusApplied && focusedSection == section) return;
 
@@ -205,15 +209,43 @@ namespace TJ.MainMenu
             gearSourceRoot.SetActive(section == WarbandSection.Gear);
             spellSourceRoot.SetActive(section == WarbandSection.Spells);
 
-            armySectionHighlight.SetActive(section == WarbandSection.Army);
-            gearSectionHighlight.SetActive(section == WarbandSection.Gear);
-            spellSectionHighlight.SetActive(section == WarbandSection.Spells);
+            RefreshSectionHighlights();
 
             armyTab.SetActive(section == WarbandSection.Army);
             gearTab.SetActive(section == WarbandSection.Gear);
             spellTab.SetActive(section == WarbandSection.Spells);
 
             IAudioRequester.Instance.PlaySFX(SFXData.ButtonHover);
+        }
+
+        private void OnSectionHovered(WarbandSection section, bool hovered)
+        {
+            if (hovered)
+            {
+                hoveredSection = section;
+                // The focused block is already lit and clicking it does nothing, so it stays silent.
+                if (section != focusedSection) IAudioRequester.Instance.PlaySFX(SFXData.LightMouseOver);
+            }
+            else if (hoveredSection == section)
+            {
+                hoveredSection = null;
+            }
+
+            RefreshSectionHighlights();
+        }
+
+        private void RefreshSectionHighlights()
+        {
+            RefreshSectionHighlight(armySectionHighlight, WarbandSection.Army);
+            RefreshSectionHighlight(gearSectionHighlight, WarbandSection.Gear);
+            RefreshSectionHighlight(spellSectionHighlight, WarbandSection.Spells);
+        }
+
+        private void RefreshSectionHighlight(GameObject highlight, WarbandSection section)
+        {
+            bool focused = focusApplied && section == focusedSection;
+            highlight.SetActive(focused || section == hoveredSection);
+            highlight.GetComponent<CanvasGroup>().alpha = focused ? 1f : HoverHighlightAlpha;
         }
 
         private void WireTab(CollectionTab tab, WarbandSection section)

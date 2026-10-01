@@ -31,6 +31,7 @@ namespace TJ
         private EntityQuery _queryKills;
         private EntityQuery _sfxQuery;
         private EntityQuery _bloodQuery;
+        private BloodColors _bloodColors;
         private EntityQuery _dustCloudQuery;
         private EntityQuery _battlefieldBonusAppliedQuery;
         private EntityQuery _mageCastRequestQuery;
@@ -83,6 +84,8 @@ namespace TJ
             _queryKills = _entityManager.CreateEntityQuery(ComponentType.ReadOnly<SquadKillTag>());
             _sfxQuery = _entityManager.CreateEntityQuery(ComponentType.ReadOnly<SFXBufferElement>());
             _bloodQuery = _entityManager.CreateEntityQuery(ComponentType.ReadOnly<BloodBufferElement>());
+            _bloodColors = Resources.Load<BloodColors>("BloodColors");
+            if (_bloodColors == null) Debug.LogError("EntityWatcher: Resources/BloodColors is missing; every splat falls back to red.");
             _dustCloudQuery = _entityManager.CreateEntityQuery(ComponentType.ReadOnly<DustCloudBufferElement>());
             _battlefieldBonusAppliedQuery = _entityManager.CreateEntityQuery(ComponentType.ReadOnly<BattlefieldBonusAppliedBufferElement>());
             _mageCastRequestQuery = _entityManager.CreateEntityQuery(ComponentType.ReadOnly<MageCastRequestBufferElement>());
@@ -90,7 +93,7 @@ namespace TJ
             _queryOnFormationsCollide = _entityManager.CreateEntityQuery(ComponentType.ReadOnly<OnFormationsCollide>());
             _queryOnExplosionShake = _entityManager.CreateEntityQuery(ComponentType.ReadOnly<OnExplosionShake>());
             _queryGetTerrifiedSquads = _entityManager.CreateEntityQuery(ComponentType.ReadOnly<IsTerrified>());
-            _queryGetChargingSquads = _entityManager.CreateEntityQuery(ComponentType.ReadOnly<ChargeSquad>());
+            _queryGetChargingSquads = _entityManager.CreateEntityQuery(ComponentType.ReadOnly<SprintingTag>());
             _queryGetDestroyedSquads = _entityManager.CreateEntityQuery(ComponentType.ReadOnly<SquadDestroyed>());
             _querySquadCommandChanged = _entityManager.CreateEntityQuery(ComponentType.ReadOnly<SquadCommandChangedTag>(), ComponentType.ReadOnly<SquadEntity>());
             _querySetUpGarrisonGateSquad = _entityManager.CreateEntityQuery(ComponentType.ReadOnly<SetUpGarrisonGateSquad>());
@@ -688,7 +691,9 @@ namespace TJ
                 DynamicBuffer<BloodBufferElement> BloodBuffer = _bloodQuery.GetSingletonBuffer<BloodBufferElement>();
                 foreach (var element in BloodBuffer)
                 {
-                    BattleManager.Instance.MeshTextureUpdater.ApplySplatAtPoint(new Vector3(element.Position.x, 0, element.Position.z));
+                    Color bloodColor = _bloodColors == null ? BloodColors.FallbackColor
+                        : element.IsExplosion ? _bloodColors.DefaultColor : _bloodColors.GetColor(element.UnitName);
+                    BattleManager.Instance.MeshTextureUpdater.ApplySplatAtPoint(new Vector3(element.Position.x, 0, element.Position.z), bloodColor);
                     if(element.IsExplosion)
                     {
                         BattleManager.Instance.MeshTextureUpdater.ExplosionAtPoint(new Vector3(element.Position.x, 0, element.Position.z));
@@ -739,12 +744,15 @@ namespace TJ
                 foreach (var request in mageCastBuffer)
                 {
                     TJ.Spells.SpellData spellData = TabletopTavernData.Instance.SquadAssetsDictionary[request.UnitName].mageSpell;
+                    SquadAttributes casterAttributes = BattleManager.Instance.SquadManager.GetBattleSquadAttributes(request.UnitName, request.SquadId);
                     BattleManager.Instance.SpellManager.CastUnitSpell(
                         spellData,
                         new Vector3(request.Position.x, request.Position.y, request.Position.z),
                         request.TeamOfSource,
                         request.SquadId,
-                        request.TargetSquadEntity);
+                        request.TargetSquadEntity,
+                        TabletopTavernConstants.SpellPotency(casterAttributes),
+                        TabletopTavernConstants.SpellRadiusScale(casterAttributes));
                 }
                 mageCastBuffer.Clear();
             }
@@ -776,7 +784,8 @@ namespace TJ
             foreach (Entity entity in queryOnFormationsCollideEntities)
             {
                 OnFormationsCollide onFormationsCollide = _entityManager.GetComponentData<OnFormationsCollide>(entity);
-                BattleManager.Instance.CameraShaker.ChargeShake(onFormationsCollide.Position);
+                if (onFormationsCollide.Kind != ChargeImpactKind.Blocked)
+                    BattleManager.Instance.CameraShaker.ChargeShake(onFormationsCollide.Position);
                 ecb.RemoveComponent<OnFormationsCollide>(entity);
             }
             queryOnFormationsCollideEntities.Dispose();

@@ -45,6 +45,8 @@ namespace Memori.SaveData
         public GearID[] recruitableGear;
         public bool nodeGenerated;
         public bool nodesRevealed;
+        // Nodes the player marked as their planned route this act, one per layer. Null in older saves: none marked.
+        public List<int> plannedNodes = new();
         public bool battleCompleted;
         public bool playerWonBattle;
         public List<SquadKillsStored> SquadKillsStore;
@@ -78,6 +80,9 @@ namespace Memori.SaveData
         // Mana Draughts drunk since the last fought battle. GetSpellManaPool adds SPELL_MANA_POOL_DRAUGHT
         // per draught; SaveSquadsPostBattle clears it. Auto-resolve has no mana pool and leaves it alone.
         public int manaDraughtsArmed;
+        // The Prestige III traits dealt to this squad, kept so a reload shows the same three and only a Fateshine rerolls them.
+        public string prestigeOfferSquadId;
+        public List<UnitAttribute> prestigeOffer = new();
         public int signatureUnitPacksPurchased;
         public int townsSacked;
         public bool archerUsedInBattle;

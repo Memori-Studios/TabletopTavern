@@ -1,0 +1,23 @@
+{
+    "name": "TabletopTavern.EndBattle.Editor",
+    "rootNamespace": "",
+    "references": [
+        "TabletopTavern.Core",
+        "Memori.Utilities",
+        "Unity.TextMeshPro",
+        "UnityEngine.UI",
+        "Unity.Localization",
+        "Unity.Localization.Editor"
+    ],
+    "includePlatforms": [
+        "Editor"
+    ],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": false,
+    "precompiledReferences": [],
+    "autoReferenced": false,
+    "defineConstraints": [],
+    "versionDefines": [],
+    "noEngineReferences": false
+}

@@ -123,7 +123,7 @@ namespace TJ
                     _combatStatusText.text = localizedCombatStatusText;
                 }
             }
-            isChargingGO.SetActive(entityManager.HasComponent<ChargeBonus>(squadEntity.SelfEntity));
+            isChargingGO.SetActive(entityManager.HasComponent<SprintingTag>(squadEntity.SelfEntity) || entityManager.HasComponent<ChargeBonus>(squadEntity.SelfEntity));
             isTerrifiedGO.SetActive(entityManager.IsComponentEnabled<IsTerrified>(squadEntity.SelfEntity));
             inForestGO.SetActive(entityManager.HasComponent<InForestTag>(squadEntity.SelfEntity));
             inSwampGO.SetActive(entityManager.HasComponent<InSwampTag>(squadEntity.SelfEntity));
@@ -138,11 +138,7 @@ namespace TJ
             garrisonDefenderGO.SetActive(entityManager.HasComponent<GarrisonDefenderComponent>(squadEntity.SelfEntity));
             defendersResolveGO.SetActive(entityManager.HasComponent<DefendersResolveComponent>(squadEntity.SelfEntity));
             
-            bool isExhausted = entityManager.HasComponent<ExhaustedTag>(squadEntity.SelfEntity);
-            if(isExhausted) {
-                isChargingGO.SetActive(false);
-            }
-            exhaustedGO.SetActive(isExhausted && squadStats.unitName != UnitName.Gate);
+            exhaustedGO.SetActive(entityManager.HasComponent<WearyTag>(squadEntity.SelfEntity));
 
             DisplaySpellEffects();
 
@@ -270,7 +266,7 @@ namespace TJ
 
             if (spell.HealsInsteadOfDamage)
             {
-                Add("Health", "SpellStatHealingPerSecond", Signed(spell.SpellModifierValue), true);
+                Add("Health", "SpellStatHealingPerSecond", Signed(spell.SpellModifierValue, spell.HealsPercentOfMaxHealth ? "%" : ""), true);
                 return effectLines;
             }
             if (spell.MarksTarget)

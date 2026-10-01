@@ -87,9 +87,9 @@ namespace TJ
         // [SerializeField] private Button toggleDeploymentCanvasButton;
 
         [Header("End Battle")]
-        [SerializeField] private GameObject endBattlePanel;
-        [SerializeField] private Button continueAfterBattleButton, restartBattleButton;
-        [SerializeField] private TMP_Text battleOutcomeText, battleVictoryOrDefeatText, continueAfterBattleButtonText;
+        [SerializeField] private EndBattlePanelView endBattleView;
+        private TooltipContent endBattleStats;
+        private bool endBattleStatsOpen;
 
 
         [Header("Weather Effects")]
@@ -184,7 +184,7 @@ namespace TJ
             balanceOfPowerDisplay.ArmyLossesTriggered += ArmyLossesTriggered;
             SaveDataHandler.ArmyLossesSufferedThisBattle = false; // fresh per battle; consumed at battle end
 
-            endBattlePanel.SetActive(false);
+            endBattleView.Hide();
             UpdateBattleButtons(false);
 
             if(BattleManager.Instance.BattleSaveManager.IsCustomBattle)
@@ -467,20 +467,34 @@ namespace TJ
             cachedSquadHovered = _squad.SquadId;
 
             squadHoveredTooltip.Load(_squad);
-            LoadSquadBattleInfo(_squad);
+            if (!TryShowComparison(_squad))
+                LoadSquadBattleInfo(_squad);
 
             // await Task.Delay(500);
             if (cachedSquadHovered == 0) return;
 
             squadHoveredTooltip.Hover();
         }
-        private void LoadSquadBattleInfo(SquadEntity _squad)
+        private void LoadSquadBattleInfo(SquadEntity _squad) => LoadSquadBattleInfo(squadBattleInfo, _squad);
+        private void LoadSquadBattleInfo(SquadBattleInfo _panel, SquadEntity _squad)
         {
             int unitCount = BattleManager.Instance.SquadManager.GetSquadUnitCount(_squad.SquadId);
             int prestige = 0;
             if (_squad.SquadId != 0) prestige = GetUnitPrestige(_squad.SquadId);
 
-            squadBattleInfo.SetUpBattle(_squad, unitCount, prestige);
+            _panel.SetUpBattle(_squad, unitCount, prestige);
+        }
+        // With a squad selected, the panel keeps showing it and the hovered squad hangs off its right.
+        private bool TryShowComparison(SquadEntity _hovered)
+        {
+            List<int> selectedIds = BattleManager.Instance.UnitSelectionManager.SelectedSquadIds;
+            if (_hovered.SquadId == 0 || selectedIds.Count == 0 || selectedIds[0] == _hovered.SquadId) return false;
+            SquadEntity selected = BattleManager.Instance.SquadManager.GetSquad(selectedIds[0]);
+            if (selected.SquadId == 0) return false;
+
+            LoadSquadBattleInfo(selected);
+            squadBattleInfo.ShowComparison(panel => LoadSquadBattleInfo(panel, _hovered));
+            return true;
         }
         public void CreateAttackArrow(SquadEntity _SquadEntity)
         {
@@ -647,7 +661,8 @@ namespace TJ
             if (_selectedSquadIds.Count != 0)
             {
                 SquadEntity hoveredSquad = BattleManager.Instance.SquadManager.GetSquad(BattleManager.Instance.UnitSelectionManager.SelectedSquadIds[0]);
-                LoadSquadBattleInfo(hoveredSquad);
+                if (cachedSquadHovered == 0 || !TryShowComparison(BattleManager.Instance.SquadManager.GetSquad(cachedSquadHovered)))
+                    LoadSquadBattleInfo(hoveredSquad);
             }
             else
             {
@@ -1060,42 +1075,123 @@ namespace TJ
                     break;
             }
         }
+        #region End battle
         private void HandleEndBattle()
         {
             Debug.Log($"HandleEndBattle()");
-            continueAfterBattleButton.onClick.RemoveAllListeners();
-            restartBattleButton.onClick.RemoveAllListeners();
-
-            string companyShatteredLocalized = LocalizationManager.Instance.GetText("CompanyShattered");
-            string enemyHostLocalized = LocalizationManager.Instance.GetText("EnemyHost");
-            string victoryLocalized = LocalizationManager.Instance.GetText("Victory");
-            string defeatLocalized = LocalizationManager.Instance.GetText("Defeat");
-            string defeatedLocalized = LocalizationManager.Instance.GetText("Defeated");
-
             bool playerWon = BattleManager.Instance.PlayerWon;
-            battleOutcomeText.text = playerWon ? enemyHostLocalized + " " + defeatedLocalized : companyShatteredLocalized;
-            battleVictoryOrDefeatText.text = playerWon ? victoryLocalized : defeatLocalized;
-            endBattlePanel.SetActive(true);
+            BattleSaveManager saves = BattleManager.Instance.BattleSaveManager;
+            bool isCustomBattle = saves.IsCustomBattle;
+            List<ArmySpawnManager.EndBattleSquad> results = BattleManager.Instance.ArmySpawnManager.BuildEndBattleResults();
 
-            bool isCustomBattle = BattleManager.Instance.BattleSaveManager.IsCustomBattle;
-
-            continueAfterBattleButton.onClick.AddListener(isCustomBattle ?
-                () => BattleManager.Instance.BattleCleanUpManager.LeaveBattleLoadMainMenu() :
-                () => BattleManager.Instance.BattleCleanUpManager.LeaveBattleLoadMap()
-            );
-
-            continueAfterBattleButtonText.text = isCustomBattle ?
-                LocalizationManager.Instance.GetText("exitToMenuButton") :
-                LocalizationManager.Instance.GetText("continueButton");
-
-            restartBattleButton.gameObject.SetActive(isCustomBattle);
-            if(isCustomBattle)
+            var yours = new List<DamageReportRow>();
+            var enemy = new List<DamageReportRow>();
+            int slain = 0, troopsLost = 0, squadsLost = 0;
+            UnitName? yourFirst = null, enemyFirst = null;
+            foreach (ArmySpawnManager.EndBattleSquad squad in results)
             {
-                restartBattleButton.onClick.AddListener(() =>
-                    HandleRestartCustomBattle()
-                );
+                var row = new DamageReportRow { Unit = squad.Unit, Damage = squad.Damage, Kills = squad.Kills, Lost = squad.Lost };
+                if (squad.IsPlayer)
+                {
+                    yours.Add(row);
+                    slain += squad.Kills;
+                    troopsLost += squad.Lost;
+                    if (squad.UnitsLeft <= 0) squadsLost++;
+                    yourFirst ??= squad.Unit;
+                }
+                else
+                {
+                    enemy.Add(row);
+                    enemyFirst ??= squad.Unit;
+                }
+            }
+            yours.Sort((a, b) => b.Damage.CompareTo(a.Damage));
+            enemy.Sort((a, b) => b.Damage.CompareTo(a.Damage));
+            TabletopTavernData data = TabletopTavernData.Instance;
+            Race yourRace = yourFirst.HasValue ? data.GetRaceFromUnitName(yourFirst.Value) : Race.IronLegion;
+            Race enemyRace = enemyFirst.HasValue ? data.GetRaceFromUnitName(enemyFirst.Value) : Race.IronLegion;
+
+            string title = GetText(playerWon ? "Victory" : "Defeat");
+            string outcome = playerWon ? GetText(saves.IsGarrisonBattle ? "engagementOutcomeGarrison" : "engagementOutcomeHost") : GetText("CompanyShattered");
+            string caption = isCustomBattle ? GetText("customBattleButton") : GetText("Act") + " " + Memori.UI.MemoriUI.ConvertNumberToRomanNumeral(Mathf.Max(1, SaveDataHandler.Load().bookNumber));
+            string losses = string.Format(GetText("engagementTroopsCount"), troopsLost.ToString("N0"));
+            if (troopsLost > 0) losses = $"<color={ColorData.Negative}>{losses}</color>";
+            // A lost campaign battle ends the run; the map's result says so again with the run summary.
+            string defeatLine = !playerWon && !isCustomBattle ? GetText("engagementDefeatLine") : null;
+            endBattleStats = DamageReportTooltip.Build(yours, enemy, string.Format(GetText("engagementResultSub"), outcome, caption),
+                endBattleView.DamageIcon, yourRace, slain, troopsLost, squadsLost);
+
+            endBattleView.ClearBadges();
+            endBattleView.Show(playerWon, title, outcome, caption, GetText(enemyRace.ToString()), slain.ToString("N0"), losses, defeatLine, isCustomBattle);
+            ShowEndBattleBadges(results);
+
+            endBattleView.DetailedStatsButton.onClick.RemoveAllListeners();
+            endBattleView.DetailedStatsButton.onClick.AddListener(ToggleEndBattleStats);
+            endBattleView.ContinueButton.onClick.RemoveAllListeners();
+            endBattleView.ContinueButton.onClick.AddListener(() =>
+            {
+                CloseEndBattleStats();
+                BattleManager.Instance.BattleCleanUpManager.LeaveBattleLoadMap();
+            });
+            endBattleView.ExitButton.onClick.RemoveAllListeners();
+            endBattleView.ExitButton.onClick.AddListener(() =>
+            {
+                CloseEndBattleStats();
+                BattleManager.Instance.BattleCleanUpManager.LeaveBattleLoadMainMenu();
+            });
+            endBattleView.RematchButton.onClick.RemoveAllListeners();
+            endBattleView.RematchButton.onClick.AddListener(() =>
+            {
+                CloseEndBattleStats();
+                HandleRestartCustomBattle();
+            });
+        }
+
+        // Kills and losses on each surviving card; the squad with the most kills gets the gold frame.
+        private void ShowEndBattleBadges(List<ArmySpawnManager.EndBattleSquad> results)
+        {
+            int best = 0, bestKills = 0;
+            foreach (ArmySpawnManager.EndBattleSquad squad in results)
+                if (squad.IsPlayer && squad.Kills > bestKills && GetSquadCard(squad.SquadId) != null)
+                {
+                    best = squad.SquadId;
+                    bestKills = squad.Kills;
+                }
+            string mostSlain = GetText("endBattleMostSlain");
+            foreach (ArmySpawnManager.EndBattleSquad squad in results)
+            {
+                if (!squad.IsPlayer) continue;
+                SquadDisplayCardBattle card = GetSquadCard(squad.SquadId);
+                if (card == null) continue;
+                endBattleView.AddBadge((RectTransform)card.transform, squad.Kills, squad.Lost, bestKills > 0 && squad.SquadId == best, mostSlain);
             }
         }
+
+        // Detailed stats opens the shared Damage dealt panel pinned under the card; a second click or its red X closes it.
+        private void ToggleEndBattleStats()
+        {
+            if (endBattleStatsOpen)
+            {
+                CloseEndBattleStats();
+                return;
+            }
+            if (endBattleStats == null) return;
+            endBattleStatsOpen = true;
+            endBattleView.SetStatsOpen(true);
+            TooltipManager.Instance.Pin(endBattleStats, endBattleView.Card, TooltipSide.Below, () =>
+            {
+                endBattleStatsOpen = false;
+                if (endBattleView != null) endBattleView.SetStatsOpen(false);
+            });
+        }
+
+        private void CloseEndBattleStats()
+        {
+            if (endBattleStatsOpen && TooltipManager.HasInstance) TooltipManager.Instance.Unpin();
+        }
+
+        private static string GetText(string key) => LocalizationManager.Instance.GetText(key);
+        #endregion
         private void HandleRestartCustomBattle()
         {
             SceneHandler.Instance.RequestCustomBattleRestart();

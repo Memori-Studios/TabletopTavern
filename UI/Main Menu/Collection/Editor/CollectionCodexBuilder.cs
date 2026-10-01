@@ -46,21 +46,22 @@ namespace TJ.MainMenu.EditorTools
         static readonly Color Parchment = Hex("D9D2C2");
         static readonly Color Flavour = Hex("A99F8A");
         static readonly Color Sub = Hex("B4AA94");
-        static readonly Color Label = Hex("8E8672");
+        static readonly Color Label = Hex("A99F8A");
         static readonly Color Muted = Hex("8E9A9A");
         static readonly Color Stat = Hex("E3BB71");
         static readonly Color Line = Hex("2C3A3D");
 
         static TMP_FontAsset displayDrop, display, body;
         static Sprite panel, shadow, keyCap, fadeRule, roundedFill, roundedOutline, edgeFade, lockIcon, arrow, gearIcon, potionIcon;
-        static Sprite circle, questsIcon, runsIcon, boardsIcon;
+        static Sprite circle, questsIcon, runsIcon, boardsIcon, fleur, lineLeft, lineRight;
         static QuestCatalogSO questCatalog;
 
         static void LoadAssets()
         {
             displayDrop = Load<TMP_FontAsset>("Assets/ImportedPackages/InterfaceFantasyWarriorHUD/Fonts/Texturina/Texturina_18pt-SemiBold SDF Drop.asset");
             display = Load<TMP_FontAsset>("Assets/ImportedPackages/InterfaceFantasyWarriorHUD/Fonts/Texturina/Texturina_18pt-SemiBold SDF.asset");
-            body = Load<TMP_FontAsset>("Assets/Synty/InterfaceFantasyMenus/Fonts/Alegreya Sans/AlegreyaSans-Medium SDF.asset");
+            // Texturina is the UI font everywhere (ui-design.md, Type); Alegreya Sans was the codex body font until 2026-09-30.
+            body = Load<TMP_FontAsset>("Assets/ImportedPackages/InterfaceFantasyWarriorHUD/Fonts/Texturina/Texturina_18pt-SemiBold SDF.asset");
             var sheet = new Dictionary<string, Sprite>();
             foreach (Object asset in AssetDatabase.LoadAllAssetsAtPath(SheetPath))
                 if (asset is Sprite sprite) sheet[sprite.name] = sprite;
@@ -80,6 +81,9 @@ namespace TJ.MainMenu.EditorTools
             questsIcon = Load<Sprite>("Assets/Art/Icons/Map/Event.png");
             runsIcon = Load<Sprite>("Assets/Art/Icons/Map/EndTurn.png");
             boardsIcon = Load<Sprite>("Assets/Art/Icons/Stats/Leadership.png");
+            fleur = Load<Sprite>("Assets/ImportedPackages/InterfaceFantasyWarriorHUD/Sprites/HUD/SPR_HUD_FantasyWarrior_Symbol_FleurDeLis01.png");
+            lineLeft = Load<Sprite>("Assets/ImportedPackages/InterfaceFantasyWarriorHUD/Sprites/HUD/SPR_HUD_FantasyWarrior_Line03_Left.png");
+            lineRight = Load<Sprite>("Assets/ImportedPackages/InterfaceFantasyWarriorHUD/Sprites/HUD/SPR_HUD_FantasyWarrior_Line03_Right.png");
             questCatalog = Load<QuestCatalogSO>("Assets/Data/SOs/Achievements/QuestCatalog.asset");
         }
 
@@ -434,12 +438,17 @@ namespace TJ.MainMenu.EditorTools
             value.fontStyle = FontStyles.Bold;
             value.alignment = TextAlignmentOptions.MidlineRight;
             Fixed(value.gameObject, 44f, 24f);
+            // The bar gave up the delta's width and spacing, so the name keeps its room.
             RectTransform bar = Rect("Bar", rect);
-            Fixed(bar.gameObject, 110f, 5f);
+            Fixed(bar.gameObject, 64f, 5f);
             Img(Stretch(Rect("Track", bar)), null, Hex("2A3739"));
             RectTransform fill = Rect("Fill", bar);
             Anchor(fill, Vector2.zero, new Vector2(0.5f, 1f), Vector2.zero, Vector2.zero);
             Img(fill, null, Stat);
+            TMP_Text delta = Text("Delta", rect, body, 14f, Cream, string.Empty);
+            delta.fontStyle = FontStyles.Bold;
+            delta.alignment = TextAlignmentOptions.MidlineRight;
+            Fixed(delta.gameObject, 36f, 24f);
             MemoriTooltipTrigger tooltip = go.AddComponent<MemoriTooltipTrigger>();
             CollectionStatRow stat = go.AddComponent<CollectionStatRow>();
             var so = new SerializedObject(stat);
@@ -448,6 +457,7 @@ namespace TJ.MainMenu.EditorTools
             Ref(so, "value", value);
             Ref(so, "barFill", fill);
             Ref(so, "tooltip", tooltip);
+            Ref(so, "delta", delta);
             so.ApplyModifiedPropertiesWithoutUndo();
         }
 
@@ -706,10 +716,15 @@ namespace TJ.MainMenu.EditorTools
             RectTransform header = (RectTransform)go.transform;
             HorizontalLayoutGroup row = HLayout(header, 10f, TextAnchor.MiddleLeft, new RectOffset(0, 0, 8, 4));
             row.childForceExpandWidth = false;
-            Image diamond = Img(Rect("Diamond", header), null, Gold);
-            Fixed(diamond.gameObject, 9f, 9f);
-            diamond.rectTransform.localEulerAngles = new Vector3(0f, 0f, 45f);
+            // Still named Diamond: the Settings screen finds the group mark by that name.
+            Image diamond = Img(Rect("Diamond", header), fleur, Gold);
+            diamond.preserveAspect = true;
+            Fixed(diamond.gameObject, 16f, 16f);
             TMP_Text label = Text("Label", header, displayDrop, 18f, Cream, "Rare");
+            // Shrinks rather than overflow when a narrow column (Settings on the Steam Deck) gives it less than its width.
+            label.enableAutoSizing = true;
+            label.fontSizeMin = 14f;
+            label.fontSizeMax = 18f;
             TMP_Text count = Text("Count", header, body, 14f, Muted, "0 of 0 found");
             Image rule = Img(Rect("Rule", header), fadeRule, A(Brass, 0.4f));
             Flexible(rule.gameObject, 1f).preferredHeight = 1f;
@@ -893,7 +908,9 @@ namespace TJ.MainMenu.EditorTools
             textElement.minWidth = 0f;
             CanvasGroup textGroup = text.gameObject.AddComponent<CanvasGroup>();
             TMP_Text name = Text("Name", text, displayDrop, 18f, Cream, "Quest");
-            name.overflowMode = TextOverflowModes.Ellipsis;
+            name.enableAutoSizing = true;
+            name.fontSizeMin = 13f;
+            name.fontSizeMax = 18f;
             TMP_Text description = Text("Description", text, body, 14f, Sub, "Description");
             Wrap(description, TextAlignmentOptions.TopLeft);
             description.overflowMode = TextOverflowModes.Ellipsis;
@@ -1137,6 +1154,7 @@ namespace TJ.MainMenu.EditorTools
             Img(Stretch(Rect("Fill", header)), null, HeaderFill);
             Image headerRule = Img(Rect("Rule", header), null, A(Brass, 0.55f));
             Anchor(headerRule.rectTransform, new Vector2(0f, 0f), new Vector2(1f, 0f), Vector2.zero, new Vector2(0f, 1f));
+            HeaderClasp(header);
             TMP_Text title = Text("Title", header, displayDrop, 38f, Gold, "Collection");
             Anchor(title.rectTransform, new Vector2(0f, 0f), new Vector2(0.5f, 1f), new Vector2(48f, 0f), Vector2.zero);
             title.alignment = TextAlignmentOptions.MidlineLeft;
@@ -1999,6 +2017,20 @@ namespace TJ.MainMenu.EditorTools
             rect.anchorMax = max;
             rect.offsetMin = offsetMin;
             rect.offsetMax = offsetMax;
+        }
+
+        // Line03's line sits 8-15 px up its 64 px height, so at 24 px tall each half starts 4 px below the rule.
+        static void HeaderClasp(RectTransform header)
+        {
+            RectTransform clasp = Rect("Clasp", header);
+            Anchor(clasp, new Vector2(0.5f, 0f), new Vector2(0.5f, 0f), new Vector2(-118f, -14f), new Vector2(118f, 14f));
+            Image left = Img(Rect("Left", clasp), lineLeft, Brass);
+            Anchor(left.rectTransform, new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f), new Vector2(-118f, -4f), new Vector2(-22f, 20f));
+            Image right = Img(Rect("Right", clasp), lineRight, Brass);
+            Anchor(right.rectTransform, new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f), new Vector2(22f, -4f), new Vector2(118f, 20f));
+            Image mark = Img(Rect("Fleur", clasp), fleur, Gold);
+            mark.preserveAspect = true;
+            Centre(mark.rectTransform, 28f, 28f);
         }
 
         static void Centre(RectTransform rect, float width, float height)

@@ -16,6 +16,8 @@ namespace TJ
         [SerializeField] private Transform[] crewTransforms;
 
 
+        private const float CREW_LEFT_BEHIND_DISTANCE = 10f;
+
         private Entity _artilleryCrewEntity;
         private Entity _animatorEntity;
         int cachedAnimationID = -1;
@@ -55,13 +57,17 @@ namespace TJ
                 EntityQuery query = entityManager.CreateEntityQuery(ComponentType.ReadOnly<BattleHasStarted>());
                 if (query.CalculateEntityCount() == 0)
                 {
-                    HandlePreBattleMovement();
+                    SnapCrewToSlots();
                     query.Dispose();
                     return;
                 }
                 query.Dispose();
                 battleHasStarted = true;
             }
+
+            // A teleport (deferred enemy deploy on Start Battle, Starstep) moves the gun without a Move animation.
+            if (!inMeleeCombat && Vector3.Distance(crewGameObjects[0].transform.position, crewTransforms[0].position) > CREW_LEFT_BEHIND_DISTANCE)
+                SnapCrewToSlots();
 
             if (!entityManager.HasComponent<GpuEcsAnimatorControlComponent>(_animatorEntity)) return;
 
@@ -157,7 +163,7 @@ namespace TJ
                 }
             }
         }
-        private void HandlePreBattleMovement()
+        private void SnapCrewToSlots()
         {
             for (int i = 0; i < crewGameObjects.Length; i++)
             {

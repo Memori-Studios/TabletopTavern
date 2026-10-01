@@ -195,7 +195,8 @@ namespace TJ
             }
 
             TJ.Spells.SpellData mageSpell = TabletopTavernData.Instance.SquadAssetsDictionary[squadEntity.UnitName].mageSpell;
-            float blastRadius = mageSpell == null ? 0f : mageSpell.SpellRadius;
+            float radiusScale = TabletopTavernConstants.SpellRadiusScale(BattleManager.Instance.SquadManager.GetBattleSquadAttributes(squadEntity.UnitName, squadEntity.SquadId));
+            float blastRadius = mageSpell == null ? 0f : mageSpell.TargetingRadius * radiusScale;
             _castsOnFriends = mageSpell != null && mageSpell.TargetTeam == Team.Player;
 
             // A single-target spell, or a caster whose SquadData has no mageSpell at all (which
@@ -267,7 +268,7 @@ namespace TJ
             // A live cast outranks a preview: where the spell is actually going matters more than
             // where one would go.
             Vector3 impactPoint = castTargetCenter;
-            bool show = isCasting || TryGetHoverPreviewCenter(out impactPoint);
+            bool show = (isCasting && OrderReadoutShown()) || TryGetHoverPreviewCenter(out impactPoint);
 
             blastRadiusRing.gameObject.SetActive(show);
             if (!show) return;
@@ -275,6 +276,14 @@ namespace TJ
             PositionBlastRadiusRing(impactPoint);
             blastRingBloom.SetColor(CastColor);
             blastRingBloom.Bloom();
+        }
+
+        // The live cast ring follows the arrow's own rule: selected, hovered, or every order toggled on.
+        private bool OrderReadoutShown()
+        {
+            return _arrowToggleState == ArrowToggleState.ToggledOn
+                || BattleManager.Instance.UnitSelectionManager.SelectedSquadIds.Contains(squadEntity.SquadId)
+                || BattleManager.Instance.UIManager.HoveredSquadId == squadEntity.SquadId;
         }
 
         // The footprint is also worth seeing BEFORE an order exists: a player deciding which squad
