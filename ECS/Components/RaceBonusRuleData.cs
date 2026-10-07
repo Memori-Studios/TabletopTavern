@@ -109,7 +109,7 @@ public static class RaceBonusRuleData
     {
         CrashingHorde = new CrashingHordeConfig { WeaponStrengthPerStack = 5, MaxStacks = 4, HealthThreshold = 0.5f, UpdateInterval = 1f };
         ApexHunters = new ApexHuntersConfig { WeaponStrengthPerStack = 8, MaxStacks = 2, UpdateInterval = 0.5f };
-        HuntersPatience = new HuntersPatienceConfig { RangedBonusPerTick = 3, MeleeBonusPerTick = 2, RangedBonusCap = 20, MeleeBonusCap = 12, UpdateInterval = 1f };
+        HuntersPatience = new HuntersPatienceConfig { RangedBonusPerTick = 3, MeleeBonusPerTick = 2, RangedBonusCap = 12, MeleeBonusCap = 8, UpdateInterval = 1f };
         KenseiEye = new KenseiEyeConfig { MeleeAttackPerStage = 5, SecondsPerStage = 10f, MaxStages = 3, UpdateInterval = 1f };
         Oathcarved = new OathcarvedConfig { WeaponStrengthPerDeath = 2 };
         IronResolve = new IronResolveConfig { ClampDurationSeconds = 10f };

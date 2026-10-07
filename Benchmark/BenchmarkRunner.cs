@@ -8,6 +8,7 @@ using Unity.Entities;
 using Unity.Profiling;
 using Unity.Profiling.LowLevel.Unsafe;
 using UnityEngine;
+using UnityEngine.Experimental.Rendering;
 using UnityEngine.Rendering;
 using UnityEngine.Rendering.Universal;
 
@@ -16,10 +17,12 @@ namespace TJ.Benchmark
     /// <summary>
     /// Headless-ish benchmark: launch the player with -benchmark, it runs one mode, records it, writes CSV + marker
     /// tables, and quits. Modes: battle (saved custom battle, deployment then the fight), menu (main menu at rest),
-    /// map (continues the saved campaign, times the load, records the default view and a closer one).
-    /// Args: -benchmark -benchmark-saveroot &lt;dir&gt; -benchmark-mode battle|menu|map -benchmark-out &lt;dir&gt;
+    /// map (continues the saved campaign, times the load, records the default view and a closer one),
+    /// loop (menu, map, battle, map, menu, repeated; no frame recording, a memory census at every stop).
+    /// Args: -benchmark -benchmark-saveroot &lt;dir&gt; -benchmark-mode battle|menu|map|loop -benchmark-out &lt;dir&gt;
     ///       -benchmark-label &lt;text&gt; -benchmark-scale &lt;renderScale&gt; -benchmark-deploy &lt;seconds&gt;
     ///       -benchmark-battle &lt;seconds&gt; -benchmark-record &lt;seconds&gt; -benchmark-settle &lt;seconds&gt;
+    ///       -benchmark-loops &lt;count&gt;
     /// </summary>
     public class BenchmarkRunner : MonoBehaviour
     {
@@ -64,9 +67,12 @@ namespace TJ.Benchmark
         private string _outDir, _label, _mode;
         private float _deploySeconds, _battleSeconds, _renderScale, _recordSeconds, _settleSeconds;
         private bool _hover;
+        private int _loops;
         // Seconds of binary profiler log (.raw) to write mid-battle; 0 = off. Load it in the Editor Profiler.
         private float _profileSeconds;
         private readonly StringBuilder _log = new();
+        private ProfilerRecorder _memSystem, _memTotal, _memGcUsed, _memGcReserved;
+        private int _censusIndex;
 
         private IEnumerator CaptureProfilerLog(string phase)
         {
@@ -117,6 +123,11 @@ namespace TJ.Benchmark
             _renderScale = float.Parse(ArgValue("-benchmark-scale", "0"), System.Globalization.CultureInfo.InvariantCulture);
             _hover = HasArg("-benchmark-hover");
             _profileSeconds = float.Parse(ArgValue("-benchmark-profile", "0"), System.Globalization.CultureInfo.InvariantCulture);
+            _loops = int.Parse(ArgValue("-benchmark-loops", "2"), System.Globalization.CultureInfo.InvariantCulture);
+            _memSystem = ProfilerRecorder.StartNew(ProfilerCategory.Memory, "System Used Memory");
+            _memTotal = ProfilerRecorder.StartNew(ProfilerCategory.Memory, "Total Used Memory");
+            _memGcUsed = ProfilerRecorder.StartNew(ProfilerCategory.Memory, "GC Used Memory");
+            _memGcReserved = ProfilerRecorder.StartNew(ProfilerCategory.Memory, "GC Reserved Memory");
             Directory.CreateDirectory(_outDir);
             Log($"benchmark start label={_label} mode={_mode} out={_outDir} saveRoot={SaveDataHandler.SaveRoot} deploy={_deploySeconds}s battle={_battleSeconds}s record={_recordSeconds}s settle={_settleSeconds}s scale={_renderScale} hover={_hover}");
             if (string.IsNullOrEmpty(ArgValue("-benchmark-saveroot", "")))
@@ -151,6 +162,7 @@ namespace TJ.Benchmark
             {
                 case "menu": yield return RunMenu(); break;
                 case "map": yield return RunMap(); break;
+                case "loop": yield return RunLoop(); break;
                 default: yield return RunBattle(); break;
             }
 
@@ -159,10 +171,11 @@ namespace TJ.Benchmark
         }
 
         #region Modes
-        private IEnumerator RunBattle()
-        {
-            yield return new WaitForSecondsRealtime(4f);
+        private BattleManager _bm;
 
+        // Loads the saved custom battle with both armies deployed, from whatever state the game is in.
+        private IEnumerator EnterCustomBattle()
+        {
             // Same path as the Custom Battle button on the main menu.
             PlayerSaveData saveData = SaveDataHandler.LoadPlayerSaveData();
             saveData.customBattle = true;
@@ -173,10 +186,10 @@ namespace TJ.Benchmark
 
             // SquadManager.SetUp runs at the end of battlefield generation, which is after the
             // Deployment phase begins; loading armies before it NREs on a null ECB system.
-            BattleManager bm = null;
-            while (bm == null || bm.GamePhase != GamePhase.Deployment || !SceneHandler.Instance.SceneSetUpComplete)
+            _bm = null;
+            while (_bm == null || _bm.GamePhase != GamePhase.Deployment || !SceneHandler.Instance.SceneSetUpComplete)
             {
-                bm = FindFirstObjectByType<BattleManager>();
+                _bm = FindFirstObjectByType<BattleManager>();
                 yield return null;
             }
             Log($"battle loaded in {Time.realtimeSinceStartupAsDouble - battleLoadStart:F2}s");
@@ -184,7 +197,7 @@ namespace TJ.Benchmark
 
             // Same path as the Load Formation button: pulls both armies from customBattleSaveData.json.
             double armyLoadStart = Time.realtimeSinceStartupAsDouble;
-            var load = bm.ArmySpawnManager.LoadBothArmies();
+            var load = _bm.ArmySpawnManager.LoadBothArmies();
             while (!load.IsCompleted) yield return null;
             Log($"army load task finished in {Time.realtimeSinceStartupAsDouble - armyLoadStart:F2}s");
             if (load.IsFaulted) Log("LoadBothArmies faulted: " + load.Exception);
@@ -197,6 +210,16 @@ namespace TJ.Benchmark
                 yield return null;
             }
             Log($"armies loaded: units={units} entities={CountAll()}");
+        }
+
+        private IEnumerator RunBattle()
+        {
+            yield return new WaitForSecondsRealtime(4f);
+            LogMem("menu");
+
+            yield return EnterCustomBattle();
+            BattleManager bm = _bm;
+            LogMem("battle deployed");
 
             ApplyFrameSettings();
 
@@ -213,6 +236,7 @@ namespace TJ.Benchmark
             yield return Record("battle", _battleSeconds, bm);
 
             Log($"end: units={CountUnits()} phase={bm.GamePhase}");
+            LogMem("battle fighting");
         }
 
         private IEnumerator RunMenu()
@@ -223,7 +247,55 @@ namespace TJ.Benchmark
             ApplyFrameSettings();
             ParkCursor();
             LogScene("menu");
+            LogMem("menu");
             yield return Record("menu", _recordSeconds, null);
+        }
+
+        // The round trip a campaign makes: map, a battle entered from the map, back to the map, out to the menu.
+        private IEnumerator RunLoop()
+        {
+            yield return WaitForSetUp(GameStateEnum.MainMenu);
+            Log($"menu ready {Time.realtimeSinceStartup:F2}s after startup");
+            yield return new WaitForSecondsRealtime(_settleSeconds);
+            LogMem("menu start");
+
+            for (int i = 1; i <= _loops; i++)
+            {
+                var menu = FindFirstObjectByType<TJ.MainMenu.MainMenu>();
+                if (!SaveDataHandler.CampaignSaveExists() || menu == null)
+                {
+                    Log($"loop: cannot continue (campaign save={SaveDataHandler.CampaignSaveExists()}, menu found={menu != null})");
+                    yield break;
+                }
+                double start = Time.realtimeSinceStartupAsDouble;
+                menu.LoadMapScene();
+                yield return WaitForSetUp(GameStateEnum.Map);
+                Log($"loop {i}: map loaded in {Time.realtimeSinceStartupAsDouble - start:F2}s");
+                yield return new WaitForSecondsRealtime(_settleSeconds);
+                LogMem($"loop {i} map");
+
+                yield return EnterCustomBattle();
+                LogMem($"loop {i} battle deployed");
+                _bm.StartBattle();
+                yield return new WaitForSecondsRealtime(_battleSeconds);
+                LogMem($"loop {i} battle fighting");
+
+                // The map reads the campaign save, so the custom battle flag has to be off again first.
+                PlayerSaveData saveData = SaveDataHandler.LoadPlayerSaveData();
+                saveData.customBattle = false;
+                SaveDataHandler.SavePlayerSaveData(saveData);
+                start = Time.realtimeSinceStartupAsDouble;
+                _bm.BattleCleanUpManager.LeaveBattleLoadMap();
+                yield return WaitForSetUp(GameStateEnum.Map);
+                Log($"loop {i}: map reloaded in {Time.realtimeSinceStartupAsDouble - start:F2}s");
+                yield return new WaitForSecondsRealtime(_settleSeconds);
+                LogMem($"loop {i} map after battle");
+
+                SceneHandler.Instance.SwitchGameState(GameStateEnum.MainMenu);
+                yield return WaitForSetUp(GameStateEnum.MainMenu);
+                yield return new WaitForSecondsRealtime(_settleSeconds);
+                LogMem($"loop {i} menu");
+            }
         }
 
         private IEnumerator RunMap()
@@ -249,6 +321,7 @@ namespace TJ.Benchmark
             ApplyFrameSettings();
             ParkCursor();
             LogScene("map");
+            LogMem("map");
             yield return Record("map", _recordSeconds, null);
 
             var mapCamera = FindFirstObjectByType<TJ.Map.MapCamera>();
@@ -310,6 +383,108 @@ namespace TJ.Benchmark
             var world = World.DefaultGameObjectInjectionWorld;
             return world == null ? 0 : world.EntityManager.UniversalQuery.CalculateEntityCount();
         }
+
+        #region Memory census
+        private const double MB = 1024.0 * 1024.0;
+
+        // A release build cannot attach the Memory Profiler, so the census lists what is loaded, sized from each object's own format.
+        private void LogMem(string tag)
+        {
+            string memLine = $"mem {tag}: systemUsedMB={_memSystem.LastValue / MB:F0} totalUsedMB={_memTotal.LastValue / MB:F0} gcUsedMB={_memGcUsed.LastValue / MB:F0} gcReservedMB={_memGcReserved.LastValue / MB:F0}";
+            Log(memLine);
+
+            var textures = new List<(long bytes, string line)>();
+            var targets = new List<(long bytes, string line)>();
+            var meshes = new List<(long bytes, string line)>();
+            var clips = new List<(long bytes, string line)>();
+            var copies = new Dictionary<string, int>();
+            long texBytes = 0, texReadable = 0, texDuplicate = 0, targetBytes = 0, meshBytes = 0, meshReadable = 0, pcmBytes = 0;
+            int compressedClips = 0, streamingClips = 0;
+
+            foreach (Texture t in Resources.FindObjectsOfTypeAll<Texture>())
+            {
+                long bytes = TextureBytes(t);
+                string line = $"{bytes / MB,8:F1} MB  {t.width}x{t.height} {t.graphicsFormat} mips={t.mipmapCount} readable={t.isReadable}  {t.name}";
+                if (t is RenderTexture rt)
+                {
+                    if (!rt.IsCreated()) continue;
+                    targetBytes += bytes;
+                    targets.Add((bytes, line));
+                    continue;
+                }
+                texBytes += bytes;
+                if (t.isReadable) texReadable += bytes;
+                string key = $"{t.name}|{t.width}|{t.height}|{t.graphicsFormat}";
+                copies.TryGetValue(key, out int seen);
+                copies[key] = seen + 1;
+                if (seen > 0) texDuplicate += bytes;
+                textures.Add((bytes, line));
+            }
+            foreach (Mesh m in Resources.FindObjectsOfTypeAll<Mesh>())
+            {
+                long bytes = MeshBytes(m);
+                meshBytes += bytes;
+                if (m.isReadable) meshReadable += bytes;
+                meshes.Add((bytes, $"{bytes / MB,8:F1} MB  verts={m.vertexCount} readable={m.isReadable}  {m.name}"));
+            }
+            foreach (AudioClip c in Resources.FindObjectsOfTypeAll<AudioClip>())
+            {
+                if (c.loadState != AudioDataLoadState.Loaded) continue;
+                if (c.loadType == AudioClipLoadType.CompressedInMemory) { compressedClips++; continue; }
+                if (c.loadType == AudioClipLoadType.Streaming) { streamingClips++; continue; }
+                long bytes = (long)c.samples * c.channels * 2;
+                pcmBytes += bytes;
+                clips.Add((bytes, $"{bytes / MB,8:F1} MB  {c.length:F0}s ch={c.channels}  {c.name}"));
+            }
+
+            string censusLine = $"census {tag}: textures n={textures.Count} MB={texBytes / MB:F0} readableCopiesMB={texReadable / MB:F0} duplicateMB={texDuplicate / MB:F0} | renderTargets n={targets.Count} MB={targetBytes / MB:F0} | meshes n={meshes.Count} MB={meshBytes / MB:F0} readableCopiesMB={meshReadable / MB:F0} | decodedAudio n={clips.Count} MB={pcmBytes / MB:F0} compressedClips={compressedClips} streamingClips={streamingClips}";
+            Log(censusLine);
+
+            var sb = new StringBuilder();
+            sb.AppendLine(memLine).AppendLine(censusLine);
+            AppendTop(sb, "TEXTURES", textures, 60);
+            AppendTop(sb, "RENDER TARGETS", targets, 25);
+            AppendTop(sb, "MESHES", meshes, 30);
+            AppendTop(sb, "DECODED AUDIO CLIPS", clips, 60);
+            _censusIndex++;
+            File.WriteAllText(Path.Combine(_outDir, $"{_label}_census_{_censusIndex:00}_{tag.Replace(' ', '-')}.txt"), sb.ToString());
+        }
+
+        private static void AppendTop(StringBuilder sb, string title, List<(long bytes, string line)> rows, int count)
+        {
+            rows.Sort((a, b) => b.bytes.CompareTo(a.bytes));
+            sb.AppendLine($"== {title}: {rows.Count}, top {Mathf.Min(count, rows.Count)} ==");
+            for (int i = 0; i < rows.Count && i < count; i++) sb.AppendLine(rows[i].line);
+        }
+
+        private static long TextureBytes(Texture t)
+        {
+            long slices = 1;
+            if (t is Cubemap) slices = 6;
+            else if (t is Texture2DArray array) slices = array.depth;
+            else if (t is Texture3D volume) slices = volume.depth;
+            // A depth-only target has no colour format.
+            long bytes = t.graphicsFormat == GraphicsFormat.None ? 0 : GraphicsFormatUtility.ComputeMipmapSize(t.width, t.height, t.graphicsFormat) * slices;
+            if (t.mipmapCount > 1) bytes = bytes * 4 / 3;
+            if (t is RenderTexture rt)
+            {
+                int samples = Mathf.Max(1, rt.antiAliasing);
+                bytes *= samples * Mathf.Max(1, rt.volumeDepth);
+                if (rt.depthStencilFormat != GraphicsFormat.None)
+                    bytes += (long)GraphicsFormatUtility.ComputeMipmapSize(rt.width, rt.height, rt.depthStencilFormat) * samples;
+            }
+            return bytes;
+        }
+
+        private static long MeshBytes(Mesh m)
+        {
+            long bytes = 0;
+            for (int i = 0; i < m.vertexBufferCount; i++) bytes += (long)m.vertexCount * m.GetVertexBufferStride(i);
+            long indices = 0;
+            for (int s = 0; s < m.subMeshCount; s++) indices += m.GetIndexCount(s);
+            return bytes + indices * (m.indexFormat == IndexFormat.UInt16 ? 2 : 4);
+        }
+        #endregion
 
         #region Recording
         private IEnumerator Record(string phase, float seconds, BattleManager bm)

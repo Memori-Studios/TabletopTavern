@@ -375,7 +375,12 @@ namespace TJ.MainMenu
             // instance must survive the ReleaseAll() calls on scene transitions.
             // Released explicitly in UnloadHeroes when the instance is destroyed.
             GameObject prefab = await TabletopTavernData.Instance.LoadHeroPrefabAsync(hero.HeroID, persistent: true);
-            if (version != _heroPrefabLoadVersion) return;
+            if (version != _heroPrefabLoadVersion)
+            {
+                // A newer hero took over during the load, so UnloadHeroes will never release this claim.
+                if (prefab != null) AddressablesManager.Instance.Release(key);
+                return;
+            }
             _loadedHeroPrefabKey = key;
             heroObject = Instantiate(prefab, heroParent);
 

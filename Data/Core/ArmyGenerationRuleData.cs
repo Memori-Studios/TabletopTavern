@@ -173,11 +173,12 @@ namespace TJ
             return result;
         }
 
+        // KnightDifficulty false is the Easy horde: DifficultyMod 6 switches to the true rows from Medium up.
         public static readonly List<EnemyArmyRule> DefaultEnemyArmyRules = new()
         {
             // Board 1
-            new() { Board = 1, FinalBattle = true, KnightDifficulty = true, TierCounts = T((1, 3), (2, 3), (3, 1), (4, 1)) },
-            new() { Board = 1, FinalBattle = true, KnightDifficulty = false, TierCounts = T((1, 3), (2, 2), (3, 1), (4, 1)) },
+            new() { Board = 1, FinalBattle = true, KnightDifficulty = true, TierCounts = T((1, 2), (2, 2), (3, 1), (4, 1)) },
+            new() { Board = 1, FinalBattle = true, KnightDifficulty = false, TierCounts = T((1, 2), (2, 1), (3, 1), (4, 1)) },
             new() { Board = 1, FinalBattle = false, BattlesFoughtMax = 3, TierCounts = T((1, 4)) },
             new() { Board = 1, FinalBattle = false, BattlesFoughtMin = 3, BattlesFoughtMax = 5, TierCounts = T((1, 3), (2, 1)) },
             new() { Board = 1, FinalBattle = false, BattlesFoughtMin = 5, BattlesFoughtMax = 7, TierCounts = T((1, 3), (2, 1), (3, 1)) },
@@ -185,7 +186,7 @@ namespace TJ
 
             // Board 2
             new() { Board = 2, FinalBattle = true, KnightDifficulty = true, TierCounts = T((1, 1), (2, 3), (3, 4), (4, 1)) },
-            new() { Board = 2, FinalBattle = true, KnightDifficulty = false, TierCounts = T((1, 1), (2, 4), (3, 3), (4, 1)) },
+            new() { Board = 2, FinalBattle = true, KnightDifficulty = false, TierCounts = T((1, 1), (2, 3), (3, 2), (4, 1)) },
             new() { Board = 2, FinalBattle = false, BattlesFoughtMax = 3, TierCounts = T((1, 1), (2, 2), (3, 1)) },
             new() { Board = 2, FinalBattle = false, BattlesFoughtMin = 3, BattlesFoughtMax = 5, TierCounts = T((1, 1), (2, 3), (3, 2)) },
             new() { Board = 2, FinalBattle = false, BattlesFoughtMin = 5, BattlesFoughtMax = 7, TierCounts = T((1, 1), (2, 2), (3, 5)) },
@@ -193,7 +194,7 @@ namespace TJ
 
             // Board 3
             new() { Board = 3, FinalBattle = true, KnightDifficulty = true, TierCounts = T((1, 2), (2, 4), (3, 4), (4, 1)) },
-            new() { Board = 3, FinalBattle = true, KnightDifficulty = false, TierCounts = T((1, 3), (2, 3), (3, 4), (4, 1)) },
+            new() { Board = 3, FinalBattle = true, KnightDifficulty = false, TierCounts = T((1, 3), (2, 3), (3, 3), (4, 1)) },
             new() { Board = 3, FinalBattle = false, BattlesFoughtMax = 3, TierCounts = T((1, 3), (2, 3), (3, 2)) },
             new() { Board = 3, FinalBattle = false, BattlesFoughtMin = 3, BattlesFoughtMax = 5, TierCounts = T((1, 2), (2, 2), (3, 4)) },
             new() { Board = 3, FinalBattle = false, BattlesFoughtMin = 5, BattlesFoughtMax = 7, TierCounts = T((1, 1), (2, 3), (3, 6)) },
@@ -203,11 +204,11 @@ namespace TJ
         public static readonly List<TownGarrisonRule> DefaultTownGarrisonRules = new()
         {
             new() { BookNumber = 1, TownSize = TownSize.Village, DifficultyImperator = false, TierCounts = T((1, 3)) },
-            new() { BookNumber = 1, TownSize = TownSize.Castle, DifficultyImperator = false, TierCounts = T((1, 4), (2, 2)) },
-            new() { BookNumber = 1, TownSize = TownSize.City, DifficultyImperator = false, TierCounts = T((1, 2), (2, 2), (3, 2)) },
+            new() { BookNumber = 1, TownSize = TownSize.Castle, DifficultyImperator = false, TierCounts = T((1, 3), (2, 2)) },
+            new() { BookNumber = 1, TownSize = TownSize.City, DifficultyImperator = false, TierCounts = T((1, 2), (2, 2), (3, 1)) },
             new() { BookNumber = 1, TownSize = TownSize.Village, DifficultyImperator = true, TierCounts = T((1, 4)) },
-            new() { BookNumber = 1, TownSize = TownSize.Castle, DifficultyImperator = true, TierCounts = T((1, 2), (2, 4)) },
-            new() { BookNumber = 1, TownSize = TownSize.City, DifficultyImperator = true, TierCounts = T((1, 3), (2, 3), (3, 2)) },
+            new() { BookNumber = 1, TownSize = TownSize.Castle, DifficultyImperator = true, TierCounts = T((1, 2), (2, 3)) },
+            new() { BookNumber = 1, TownSize = TownSize.City, DifficultyImperator = true, TierCounts = T((1, 2), (2, 3), (3, 2)) },
 
             new() { BookNumber = 2, TownSize = TownSize.Village, DifficultyImperator = false, TierCounts = T((1, 5)) },
             new() { BookNumber = 2, TownSize = TownSize.Castle, DifficultyImperator = false, TierCounts = T((2, 6)) },
@@ -218,10 +219,10 @@ namespace TJ
 
             new() { BookNumber = 3, TownSize = TownSize.Village, DifficultyImperator = false, TierCounts = T((1, 8)) },
             new() { BookNumber = 3, TownSize = TownSize.Castle, DifficultyImperator = false, TierCounts = T((1, 2), (2, 5)) },
-            new() { BookNumber = 3, TownSize = TownSize.City, DifficultyImperator = false, TierCounts = T((2, 3), (3, 6)) },
+            new() { BookNumber = 3, TownSize = TownSize.City, DifficultyImperator = false, TierCounts = T((2, 4), (3, 4)) },
             new() { BookNumber = 3, TownSize = TownSize.Village, DifficultyImperator = true, TierCounts = T((1, 9)) },
             new() { BookNumber = 3, TownSize = TownSize.Castle, DifficultyImperator = true, TierCounts = T((1, 2), (2, 7)) },
-            new() { BookNumber = 3, TownSize = TownSize.City, DifficultyImperator = true, TierCounts = T((2, 2), (3, 7)) },
+            new() { BookNumber = 3, TownSize = TownSize.City, DifficultyImperator = true, TierCounts = T((2, 3), (3, 6)) },
         };
 
         public static readonly List<EnemyPrestigeRule> DefaultEnemyPrestigeRules = new()

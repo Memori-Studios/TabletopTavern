@@ -49,6 +49,8 @@ namespace Memori.SaveData
         public List<int> plannedNodes = new();
         public bool battleCompleted;
         public bool playerWonBattle;
+        // A battle was won at the current node; CompleteChapter clears it. False in older saves.
+        public bool wonBattleThisTurn;
         public List<SquadKillsStored> SquadKillsStore;
         public List<SquadKillsStored> HistoricalKillStore;
         public List<SquadLossesStored> SquadLossesStore;
@@ -108,7 +110,7 @@ namespace Memori.SaveData
         public bool victoryWasFirstHeroCompletion;
         // Hero leading the saved enemy army with his bonus rules (see EnemyWarlord), or 0 for none.
         public int enemyWarlordHeroID;
-        // Ordeals taken on the endless march, in the order taken. One is due per endless act. See OrdealRegistry.
+        // Ordeals taken on the March, in the order taken. One is due per warlord beaten. See OrdealRegistry.
         public List<OrdealId> ordeals = new();
         // Gear broken by Rusted Arms. It stays in Gear, keeping its slot, but no longer works.
         public List<GearID> brokenGear = new();
@@ -117,23 +119,52 @@ namespace Memori.SaveData
         // Sealed Page's slot; 0 means none, since slot 0 is the signature spell and is never sealed.
         public int sealedSpellSlot;
 
-        public bool HasOrdeal(OrdealId id) => ordeals != null && ordeals.Contains(id);
+        // Battles won since March On. The March's score, and what its enemy armies scale on.
+        public int marchBattlesWon;
+        // Ordeal picks made on the March; one is due for every warlord beaten.
+        public int marchOrdealPicks;
+        // The Twists on the node being fought: Ordeals that last this one battle. CompleteChapter clears them.
+        public List<OrdealId> activeTwists = new();
+        // Twists bought off this run; each one raises the next price.
+        public int twistsStruck;
+        // Twists bought off the node being fought, so a reload does not bring them back. CompleteChapter clears them.
+        public List<OrdealId> twistsStruckHere = new();
+
+        /// <summary>Past the last story act: no healing, no recruits, only battles.</summary>
+        public bool InMarch => MarchRules.InMarch(bookNumber);
+        public bool HasOrdeal(OrdealId id)
+        {
+            if (ordeals != null && ordeals.Contains(id)) return true;
+            if (activeTwists != null && activeTwists.Contains(id)) return true;
+            return InMarch && OrdealRegistry.IsMarchLaw(id);
+        }
+        /// <summary>Everything in force right now: the March's laws, the cards taken, then this battle's Twists.</summary>
+        public IEnumerable<OrdealId> ActiveOrdeals
+        {
+            get
+            {
+                if (InMarch)
+                    foreach (OrdealId law in OrdealRegistry.MarchLaws) yield return law;
+                if (ordeals != null)
+                    foreach (OrdealId id in ordeals) yield return id;
+                if (activeTwists != null)
+                    foreach (OrdealId id in activeTwists)
+                        if (ordeals == null || !ordeals.Contains(id)) yield return id;
+            }
+        }
         public bool IsGearBroken(GearID gear) => brokenGear != null && brokenGear.Contains(gear);
         // Owned but switched off: broken by Rusted Arms, or cancelled by a held Ordeal.
-        public bool IsGearInactive(GearID gear) => IsGearBroken(gear) || OrdealRegistry.CounteringOrdeal(ordeals, gear) != OrdealId.None;
-        public bool IsConsumableBlocked(ConsumableEnum consumable) => OrdealRegistry.CounteringOrdeal(ordeals, consumable) != OrdealId.None;
-        public bool IsFactionPassiveBlocked(Race race) => OrdealRegistry.CounteringOrdeal(ordeals, race) != OrdealId.None;
+        public bool IsGearInactive(GearID gear) => IsGearBroken(gear) || OrdealRegistry.CounteringOrdeal(ActiveOrdeals, gear) != OrdealId.None;
+        public bool IsConsumableBlocked(ConsumableEnum consumable) => OrdealRegistry.CounteringOrdeal(ActiveOrdeals, consumable) != OrdealId.None;
+        public bool IsFactionPassiveBlocked(Race race) => OrdealRegistry.CounteringOrdeal(ActiveOrdeals, race) != OrdealId.None;
         public bool HasWorkingGear(GearID gear) => Gear != null && Gear.Contains(gear) && !IsGearInactive(gear);
-        // The last act whose Ordeal start ran (pick and per-act cards), so each endless act starts exactly once.
-        public int ordealActStarted;
-        public bool OrdealPickDue => TabletopTavernConstants.EndlessActs(bookNumber) > 0 && ordealActStarted < bookNumber;
+        public bool OrdealPickDue => InMarch && MarchRules.WarlordsBeaten(marchBattlesWon) > marchOrdealPicks;
         public ulong OrdealBits
         {
             get
             {
                 ulong bits = 0;
-                if (ordeals != null)
-                    foreach (OrdealId id in ordeals) bits |= OrdealMask.Bit(id);
+                foreach (OrdealId id in ActiveOrdeals) bits |= OrdealMask.Bit(id);
                 return bits;
             }
         }
@@ -222,6 +253,7 @@ namespace Memori.SaveData
         public bool heldMage;                    // true once the army ever held a mage (SteelOverSorcery)
         public int campfireTrainings;            // squads trained at campfires this run (DrillSergeant)
         public List<TJ.Map.NodeType> nodeTypesVisited; // kinds of node picked this run (GrandTour)
+        public int battlesWon;                   // battles won this run, garrisons included; BattlesFought resets every act
     }
     [System.Serializable] public struct SpellCastStored
     {
@@ -271,6 +303,8 @@ namespace Memori.SaveData
         public int actRenown;
         public TT_Difficulty difficulty;
         public float difficultyMultiplier;
+        public int marchBattles;
+        public int marchRenown;
         public int ordealCount;
         public float ordealMultiplier;
         public int total;
@@ -309,6 +343,8 @@ namespace Memori.SaveData
         public List<int> consumablesAcknowledged = new ();
         public List<int> metaprogressionNodesUnlocked = new ();
         public List<string> BattlefieldInfoSectionsViewed = new ();
+        // The player ticked "Don't show this again" on the March guide. Reset Tutorial clears it.
+        public bool hideMarchGuide;
         // Legacy deposited-gold system, disabled in favor of Renown. Fields kept (not removed)
         // so JsonUtility can still deserialize existing saves for MigrateLegacyDepositedGoldToRenown.
         public int goldToDeposit;
@@ -351,6 +387,8 @@ namespace Memori.SaveData
     {
         public string SquadGUID;
         public int Damage;
+        // The worth of the enemy troops that damage destroyed, in unit value points. 0 in saves from before it existed.
+        public float Value;
     }
     [System.Serializable] public struct UnitNameKillsStored
     {
@@ -675,6 +713,11 @@ namespace Memori.SaveData
             saveData.enemyArmy = _enemySquads;
             saveData.battleCompleted = true;
             saveData.playerWonBattle = _playerWon;
+            if (_playerWon)
+            {
+                saveData.wonBattleThisTurn = true;
+                saveData.RunStats.battlesWon++;
+            }
             saveData.spoilsTaken = null;
             saveData.manaDraughtsArmed = 0;
             saveData.eventBattleEffects = new EventBattleEffects();
@@ -1276,11 +1319,10 @@ namespace Memori.SaveData
             int renownEarned = 0;
             if (abandonedRun.victoryBanked)
             {
-                RenownAward award = ComputeRenownReward(abandonedRun.RunStats, Mathf.Max(abandonedRun.bookNumber - 1, 0), abandonedRun.difficultyLevel, abandonedRun.ordeals?.Count ?? 0);
+                RenownAward award = ComputeRenownReward(abandonedRun.RunStats, Mathf.Max(abandonedRun.bookNumber - 1, 0), abandonedRun.difficultyLevel, abandonedRun.ordeals?.Count ?? 0, abandonedRun.marchBattlesWon);
                 saveData.renown += award.total;
                 renownEarned = award.total;
                 outcome = RunOutcome.Win;
-                SubmitDeepestMarch(abandonedRun);
             }
 
             AppendRunRecord(saveData, abandonedRun, outcome, renownEarned);
@@ -1304,7 +1346,9 @@ namespace Memori.SaveData
                 endedAtUtcTicks = DateTime.UtcNow.Ticks,
                 actReached = run.bookNumber,
                 chaptersCompleted = run.RunStats.chaptersCompleted,
-                battlesFought = run.BattlesFought,
+                // BattlesFought resets every act; a save from before the whole-run count has only that.
+                battlesFought = Math.Max(run.RunStats.battlesWon, run.BattlesFought),
+                marchBattles = run.marchBattlesWon,
                 goldAtEnd = run.goldAmount,
                 goldEarned = run.RunStats.goldEarned,
                 enemiesSlain = run.RunStats.enemiesSlain,
@@ -1409,24 +1453,26 @@ namespace Memori.SaveData
         // Placeholder tuning values - adjust to taste.
         private const int RENOWN_PER_CHAPTER = 1;
         private const int RENOWN_PER_ACT_COMPLETED = 50;
-        // Endless acts pay less so lifetime Renown does not run away on a long march.
-        private const int RENOWN_PER_ENDLESS_ACT = 25;
 
-        private static RenownAward ComputeRenownReward(RunStats runStats, int bookNumber, TT_Difficulty difficulty, int ordealCount)
+        // The March pays by the battle (MarchRules.Renown), not by the act: only story acts pay the act rate.
+        private static RenownAward ComputeRenownReward(RunStats runStats, int bookNumber, TT_Difficulty difficulty, int ordealCount, int marchBattles = 0)
         {
             int chapterRenown = runStats.chaptersCompleted * RENOWN_PER_CHAPTER;
             int storyActs = Mathf.Min(bookNumber, TabletopTavernConstants.FINAL_STORY_ACT);
-            int actRenown = storyActs * RENOWN_PER_ACT_COMPLETED + (bookNumber - storyActs) * RENOWN_PER_ENDLESS_ACT;
+            int actRenown = storyActs * RENOWN_PER_ACT_COMPLETED;
+            int marchRenown = MarchRules.Renown(marchBattles);
             float difficultyMultiplier = DifficultyRules.RenownMultiplier(difficulty);
             float ordealMultiplier = OrdealRegistry.RenownMultiplier(ordealCount);
-            int total = Mathf.RoundToInt((chapterRenown + actRenown) * difficultyMultiplier * ordealMultiplier);
+            int total = Mathf.RoundToInt((chapterRenown + actRenown + marchRenown) * difficultyMultiplier * ordealMultiplier);
 
             return new RenownAward
             {
                 chaptersCompleted = runStats.chaptersCompleted,
                 chapterRenown = chapterRenown,
-                actsCompleted = bookNumber,
+                actsCompleted = storyActs,
                 actRenown = actRenown,
+                marchBattles = marchBattles,
+                marchRenown = marchRenown,
                 difficulty = difficulty,
                 difficultyMultiplier = difficultyMultiplier,
                 ordealCount = ordealCount,
@@ -1437,7 +1483,7 @@ namespace Memori.SaveData
 
         /// <summary>
         /// Locks the win in the moment the last story act falls: completions, difficulty unlock, hero
-        /// records, roster achievement and the Godking time. A player who marches on into endless acts
+        /// records and roster achievement. A player who marches on into endless acts
         /// keeps all of it whatever happens next. Runs once per run; RecordGameOver skips the same block
         /// once the campaign save says it ran.
         /// </summary>
@@ -1451,20 +1497,9 @@ namespace Memori.SaveData
             campaignSaveData.victoryWasFirstHeroCompletion = GetHeroDifficultiesCompleted(campaignSaveData.heroID).Count == 0;
 
             ApplyVictoryUnlocks(saveData, campaignSaveData);
-            SubmitGodkingTimeIfEligible(campaignSaveData);
             campaignSaveData.victoryBanked = true;
 
             SavePlayerSaveData(saveData);
-        }
-
-        private static void SubmitGodkingTimeIfEligible(CampaignSaveData campaignSaveData)
-        {
-            // Only Godking goes on the board: it is the one difficulty with no auto-resolve, so the
-            // time is a real one. Fire and forget - the run record is the source of truth.
-            // Deliberately NOT behind SPELLS, unlike the Leaderboard button: times are collected
-            // from the moment this ships so the board is populated when players first see it.
-            if (campaignSaveData.difficultyLevel == TT_Difficulty.Godking)
-                _ = SteamLeaderboards.SubmitGodkingTime((int)Math.Round(campaignSaveData.playTimeSeconds));
         }
 
         public static RenownAward RecordGameOver(bool _playerWon)
@@ -1478,19 +1513,16 @@ namespace Memori.SaveData
             // bookNumber is the act currently in progress. On a win it was actually finished, but on a
             // loss it wasn't - don't award renown for the act the player died in.
             int actsCompleted = _playerWon ? campaignSaveData.bookNumber : Mathf.Max(campaignSaveData.bookNumber - 1, 0);
-            RenownAward renownAward = ComputeRenownReward(campaignSaveData.RunStats, actsCompleted, campaignSaveData.difficultyLevel, campaignSaveData.ordeals?.Count ?? 0);
+            RenownAward renownAward = ComputeRenownReward(campaignSaveData.RunStats, actsCompleted, campaignSaveData.difficultyLevel, campaignSaveData.ordeals?.Count ?? 0, campaignSaveData.marchBattlesWon);
             saveData.renown += renownAward.total;
 
             if (saveData.renown >= 100)
                 SteamAchievements.Unlock(AchievementId.ASnackForLater);
 
-            // A banked victory already ran the win block and submitted the time; the run is a win however it ended.
+            // A banked victory already ran the win block; the run is a win however it ended.
             bool countsAsWin = _playerWon || campaignSaveData.victoryBanked;
             if (_playerWon && !campaignSaveData.victoryBanked)
-            {
                 ApplyVictoryUnlocks(saveData, campaignSaveData);
-                SubmitGodkingTimeIfEligible(campaignSaveData);
-            }
 
             // --- Legacy deposited-gold sweep, disabled - kept in case this system is restored ---
             // saveData.goldToDeposit += campaignSaveData.goldAmount;
@@ -1498,20 +1530,9 @@ namespace Memori.SaveData
             // DepositGold();
 
             AppendRunRecord(saveData, campaignSaveData, countsAsWin ? RunOutcome.Win : RunOutcome.Loss, renownAward.total);
-            if (campaignSaveData.victoryBanked) SubmitDeepestMarch(campaignSaveData);
 
             SavePlayerSaveData(saveData);
             return renownAward;
-        }
-
-        // Every run on the two hardest levels that banked its act 3 win goes on the Deepest March board, a plain
-        // act 3 claim included, so the board fills from the first win and marching on is what climbs it.
-        // Lower difficulties cannot march on and stay off the board. Steam keeps the player's best.
-        // Fire and forget - the run record is the source of truth.
-        private static void SubmitDeepestMarch(CampaignSaveData run)
-        {
-            if (!DifficultyRules.EndlessAllowed(run.difficultyLevel)) return;
-            _ = SteamLeaderboards.SubmitDeepestMarch(DeepestMarchScore.FromRun(run));
         }
 
         private static void ApplyVictoryUnlocks(PlayerSaveData saveData, CampaignSaveData campaignSaveData)
@@ -1657,12 +1678,47 @@ namespace Memori.SaveData
             // UnityEngine.Debug.Log($"IsMetaprogressionNodeUnlocked {_node.name}: {conditionUnlocked}");
             return conditionUnlocked;
         }
-        #if UNITY_EDITOR
-        //record hero completions for testing
+        #region Dev Tools
+        public static void AddRenown(int _amount)
+        {
+            PlayerSaveData saveData = LoadPlayerSaveData();
+            // Renown is a lifetime total that spending never lowers, so it cannot go below zero.
+            saveData.renown = Math.Max(0, saveData.renown + _amount);
+            SavePlayerSaveData(saveData);
+        }
+        /// <summary>Marks every Collection entry found and seen, or clears them all, in one write.</summary>
+        public static void DevSetCollection(bool _found, IEnumerable<UnitName> _units, IEnumerable<GearID> _gear, IEnumerable<ConsumableEnum> _consumables)
+        {
+            PlayerSaveData saveData = LoadPlayerSaveData();
+            saveData.troopsRecruited.Clear();
+            saveData.troopsAcknowledged.Clear();
+            saveData.gearIdsCollected.Clear();
+            saveData.gearIdsAcknowledged.Clear();
+            saveData.consumablesAquired.Clear();
+            saveData.consumablesAcknowledged.Clear();
+            if (_found)
+            {
+                saveData.troopsRecruited.AddRange(_units);
+                saveData.troopsAcknowledged.AddRange(_units);
+                foreach (GearID gear in _gear)
+                {
+                    saveData.gearIdsCollected.Add((int)gear);
+                    saveData.gearIdsAcknowledged.Add((int)gear);
+                }
+                foreach (ConsumableEnum consumable in _consumables)
+                {
+                    saveData.consumablesAquired.Add((int)consumable);
+                    saveData.consumablesAcknowledged.Add((int)consumable);
+                }
+            }
+            SavePlayerSaveData(saveData);
+        }
+        #endregion
+        // Writes the completion only: no Steam call, no last-difficulty or completion count. Steam still awards the hero's victory at the next stats sync.
         public static void RecordHeroCompletionForTesting(int _heroID, TT_Difficulty _difficulty)
         {
             PlayerSaveData saveData = LoadPlayerSaveData();
-            int newDifficulty = (int)_difficulty;
+            int newDifficulty = (int)DifficultyRules.Normalize(_difficulty);
 
             //update max difficulty unlocked if needed
             saveData.MaxDifficultyOverall = DifficultyRules.Harder(saveData.MaxDifficultyOverall, newDifficulty);
@@ -1694,6 +1750,5 @@ namespace Memori.SaveData
             }
             SavePlayerSaveData(saveData);
         }
-        #endif
     }
 }

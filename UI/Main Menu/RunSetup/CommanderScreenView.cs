@@ -17,7 +17,6 @@ namespace TJ.MainMenu
         [SerializeField] private HeroRosterTile[] tiles;
         [SerializeField] private TMP_Text[] factionNames;
         [SerializeField] private Image[] factionPips;
-        [SerializeField] private TMP_Text rosterCountText;
         [SerializeField] private TMP_Text comingSoonText;
 
         [Header("Hero")]
@@ -76,19 +75,16 @@ namespace TJ.MainMenu
                 tiles[i].gameObject.SetActive(i < count);
                 if (i < count) tiles[i].Load(heroes[i], playPanel);
             }
-            int factions = 0;
             for (int card = 0; card < factionNames.Length; card++)
             {
                 int first = card * 2;
                 bool shown = first < count;
                 factionNames[card].transform.parent.parent.gameObject.SetActive(shown);
                 if (!shown) continue;
-                factions++;
                 Race race = heroes[first].Race;
                 factionNames[card].text = T(race.ToString());
                 factionPips[card].color = ColorData.GetRaceDisplayColor(race);
             }
-            rosterCountText.text = string.Format(T("heroSelectCount"), count, factions);
             comingSoonText.text = string.Format(T("heroSelectComingSoon"), T("OlympianPhalanx"));
             return count;
         }

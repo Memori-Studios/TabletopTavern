@@ -37,7 +37,9 @@ namespace TJ.Campfire.EditorTools
         const string ContinueName = "Continue Parent";
         const float PanelWidth = 1160f;
         // The card's top edge sits 200 px below the top of a 1080 screen, so every state keeps its header in place.
-        const float PanelTopY = 340f;
+        // The anchor height brings it to 130 on an 864-tall canvas (UI Scale 125%), clear of the Campfire banner.
+        const float PanelAnchorY = 0.676f;
+        const float PanelTopY = 150f;
         const float BandAlpha = 0.12f;
         const float PanelPadding = 5f;
         const float HeaderHeight = 92f;
@@ -620,10 +622,17 @@ namespace TJ.Campfire.EditorTools
         {
             rootGo.layer = 5;
             var root = (RectTransform)rootGo.transform;
-            root.anchorMin = root.anchorMax = new Vector2(0.5f, 0.5f);
+            root.anchorMin = root.anchorMax = new Vector2(0.5f, PanelAnchorY);
             root.pivot = new Vector2(0.5f, 1f);
             root.sizeDelta = new Vector2(PanelWidth, 460f);
             root.anchoredPosition = new Vector2(0f, PanelTopY);
+            // Keeps its 1080 size on screen when UI Scale shortens the canvas (0.8 at 125%), so it never crowds the map.
+            UIFitToCanvas fit = GetOrAdd<UIFitToCanvas>(rootGo);
+            var fitSo = new SerializedObject(fit);
+            fitSo.FindProperty("designSize").vector2Value = new Vector2(1f, 1080f);
+            fitSo.FindProperty("reservedSize").vector2Value = Vector2.zero;
+            fitSo.FindProperty("minScale").floatValue = 0.5f;
+            fitSo.ApplyModifiedPropertiesWithoutUndo();
             VerticalLayoutGroup rootLayout = GetOrAdd<VerticalLayoutGroup>(rootGo);
             rootLayout.padding = new RectOffset((int)PanelPadding, (int)PanelPadding, (int)PanelPadding, (int)PanelPadding);
             rootLayout.spacing = 0f;
@@ -761,7 +770,8 @@ namespace TJ.Campfire.EditorTools
             Unlocalize(restValues[0], "30%");
             Localize(restValues[1], "campfireFree");
             restValues[1].color = Positive;
-            TMP_Text restLine = Lines(rest, healIcon, Positive, null, "Every squad heals 30% of its health, reserves too.", goldIcon, Coin, "campfireNoRisk");
+            TMP_Text restLine = Lines(rest, healIcon, Positive, null, "Every squad heals 30% of its health, reserves too.", goldIcon, Coin, null);
+            rest.transform.Find("Body/Line 2").gameObject.SetActive(false);
             Ref(so, "restHealValue", restValues[0]);
             Ref(so, "restLine", restLine);
             Ref(so, "restButton", ColumnButton(rest, "CampfireRest"));
@@ -792,7 +802,8 @@ namespace TJ.Campfire.EditorTools
             Unlocalize(scavengeValues[0], "1 of 3");
             Localize(scavengeValues[1], "campfireFree");
             scavengeValues[1].color = Positive;
-            TMP_Text scavengeLine = Lines(scavenge, gearIcon, Sub, null, "See 3 gear items and keep one.", goldIcon, Coin, "campfireNoRisk");
+            TMP_Text scavengeLine = Lines(scavenge, gearIcon, Sub, null, "See 3 gear items and keep one.", goldIcon, Coin, null);
+            scavenge.transform.Find("Body/Line 2").gameObject.SetActive(false);
             Ref(so, "scavengeGearValue", scavengeValues[0]);
             Ref(so, "scavengeLine", scavengeLine);
             Ref(so, "scavengeButton", ColumnButton(scavenge, "Scavenge"));

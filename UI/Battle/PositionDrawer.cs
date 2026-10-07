@@ -63,6 +63,8 @@ namespace TJ
         public SpawnBox PlayerDeploymentZone => playerDeploymentZone;
         public SpawnBox EnemyDeploymentZone => enemyDeploymentZone;
         public SpawnBox BattleZone => battleZone;
+        public bool HasGarrisonZone => _hasGarrisonZone;
+        public GarrisonConcaveZone GarrisonZone => _garrisonZone;
 
         [SerializeField] private Polyline playerDeploymentZoneLine, enemyDeploymentZoneLine, battleZoneLine;
         [SerializeField] private Polyline secondaryPlayerDeploymentZoneLine;

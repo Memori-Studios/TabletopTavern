@@ -33,6 +33,26 @@ namespace TJ.Prestige
             return offer;
         }
 
+        /// <summary>
+        /// The deal's seed, built only from values a quit to the menu cannot change, so Continue deals the same cards.
+        /// earlierPicks counts this unit's squads that already chose a trait, so a second gold squad gets its own deal.
+        /// </summary>
+        public static int Seed(int runSeed, UnitName unit, int earlierPicks, IReadOnlyCollection<UnitAttribute> exclude)
+        {
+            unchecked
+            {
+                int hash = runSeed;
+                hash = hash * 31 + (int)unit;
+                hash = hash * 31 + earlierPicks;
+                // Summed, so the shown cards give the same reroll in any order.
+                int excluded = 0;
+                if (exclude != null)
+                    foreach (UnitAttribute trait in exclude) excluded += MathUtilities.MixSeed((int)trait + 1);
+                hash = hash * 31 + excluded;
+                return MathUtilities.MixSeed(hash);
+            }
+        }
+
         /// <summary>True when a saved offer still fits the pool: the right size, no repeats and every trait still eligible.</summary>
         public static bool IsValid(IReadOnlyList<UnitAttribute> offer, IReadOnlyList<UnitAttribute> pool)
         {

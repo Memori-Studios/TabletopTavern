@@ -75,7 +75,8 @@ public struct RemoveBattlefieldBonusFog : IComponentData { }
 public struct RemoveSwampTag : IComponentData { }
 public struct RemoveForestTag : IComponentData { }
 
-public struct ApplyBiomeBonusTag : IComponentData { public BattlefieldBonusEnum BattlefieldBonusEnum; public Guid Guid; }
+// IgnoresSwamp is resolved on the main thread from the squad's merged attributes, which the stats blob does not hold.
+public struct ApplyBiomeBonusTag : IComponentData { public BattlefieldBonusEnum BattlefieldBonusEnum; public Guid Guid; public bool IgnoresSwamp; }
 
 [System.Serializable] public struct BattlefieldBonus : IComponentData
 {

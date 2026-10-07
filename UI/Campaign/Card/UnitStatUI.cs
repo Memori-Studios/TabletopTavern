@@ -253,6 +253,7 @@ namespace TJ
                 {
                     if(entityManager.HasComponent<BattlefieldBonusBufferElement>(_liveSquad))
                     {
+                        SquadAttributes liveAttributes = battleManager.SquadManager.GetBattleSquadAttributes(_unitName, entityManager.GetComponentData<SquadEntity>(_liveSquad).SquadId);
                         DynamicBuffer<BattlefieldBonusBufferElement> battlefieldBonus = entityManager.GetBuffer<BattlefieldBonusBufferElement>(_liveSquad);
                         float speedMultiplier = 1f;
                         foreach(BattlefieldBonusBufferElement bonus in battlefieldBonus)
@@ -270,7 +271,7 @@ namespace TJ
                                 else if (unitStat == UnitStat.Speed && (bonus.Value.BattlefieldBonusEnum == BattlefieldBonusEnum.Swamp || bonus.Value.BattlefieldBonusEnum == BattlefieldBonusEnum.Rain))
                                 {
                                     bool isSwamp = bonus.Value.BattlefieldBonusEnum == BattlefieldBonusEnum.Swamp;
-                                    if (isSwamp && TabletopTavernData.Instance.IgnoresSwamp(_unitName))
+                                    if (isSwamp && TabletopTavernData.IgnoresSwamp(liveAttributes))
                                     {
                                         continue;
                                     }
@@ -308,7 +309,7 @@ namespace TJ
                                 }
                             }
                             
-                            if(TabletopTavernData.Instance.IsForestDweller(_unitName))
+                            if(liveAttributes.ForestDweller)
                             {
                                 // Debug.Log($"Squad is forest dweller, checking for forest bonuses");
                                 if (bonus.Value.BattlefieldBonusEnum == BattlefieldBonusEnum.Forest)

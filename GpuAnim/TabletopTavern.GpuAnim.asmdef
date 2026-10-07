@@ -1,0 +1,23 @@
+{
+    "name": "TabletopTavern.GpuAnim",
+    "rootNamespace": "",
+    "references": [
+        "MemoriStudios.TJBake",
+        "Unity.Entities",
+        "Unity.Entities.Graphics",
+        "Unity.Transforms",
+        "Unity.Mathematics",
+        "Unity.Mathematics.Extensions",
+        "Unity.Collections",
+        "Unity.Burst"
+    ],
+    "includePlatforms": [],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": false,
+    "precompiledReferences": [],
+    "autoReferenced": false,
+    "defineConstraints": [],
+    "versionDefines": [],
+    "noEngineReferences": false
+}

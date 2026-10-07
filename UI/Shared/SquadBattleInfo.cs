@@ -1001,7 +1001,7 @@ namespace TJ
             TJ.Spells.SpellData spell = squadData.assets.mageSpell;
             // Same placeholders GetLocalizedSpellDescription fills, keyword tags left raw: KeywordText
             // localizes through LocalizationManager too.
-            string description = string.Format(EditorLocalizedText(spell.Spell + "_Desc"), spell.SpellType, spell.SpellModifierValue, spell.SpellDuration);
+            string description = string.Format(EditorLocalizedText(spell.Spell + "_Desc"), spell.SpellType, spell.SpellModifierValue, spell.SpellDuration, spell.MonstrousPercentOfMaxHealth);
 
             ShowSpellUI(true);
             EditorSetPanelAlpha(1f);

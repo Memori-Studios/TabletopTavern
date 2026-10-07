@@ -40,6 +40,8 @@ namespace TJ.Town
         int selectedNodeIndex;
         bool hasRecruitedMaxUnits = false;
         bool imperialEdictActive = false;
+        // True once the sacked town's spoil rows are on screen; gear left behind only pays from there.
+        bool spoilsShown;
 
         private void Awake()
         {
@@ -71,6 +73,7 @@ namespace TJ.Town
             goldManager.OnGoldAmountChanged += UpdateAffordability;
             StartCoroutine(CampaignManager.Instance.MapCamera.LerpFocusedOnNodeVolume(0.5f, 0.25f));
             selectedNodeIndex = _selectedNodeIndex;
+            spoilsShown = false;
             if (!campaignSaveManager.SaveData.nodeGenerated) {
                 Debug.Log($"generating town for node {_selectedNodeIndex}");
                 campaignSaveManager.GenerateTown(_selectedNodeIndex, level);
@@ -113,7 +116,7 @@ namespace TJ.Town
             string raceLocalized = LocalizationManager.Instance.GetText(townSaveData.townRace.ToString());
             view.SetHeader(LocalizationManager.Instance.GetText(townSaveData.townName), raceLocalized + " " + townSizeLocalized,
                 ColorData.GetRaceDisplayColor(townSaveData.townRace), townSaveData.townSize);
-            view.SetTownInfo(LocalizationManager.Instance.GetText("Town Info"), TownInfoDescription());
+            view.SetTownInfo(TownInfoContent());
             hasRecruitedMaxUnits = false;
             imperialEdictActive = false;
             SetRecruitmentAvailable(true);
@@ -124,6 +127,8 @@ namespace TJ.Town
             UpdateAffordability(campaignSaveManager.SaveData.goldAmount);
             view.SetFightSubtitle(LocalizationManager.Instance.GetText("sackTownFlavor"));
             view.SetBounty(BountyRangeText());
+            SetUpGearPreview();
+            SetUpPrediction();
             view.SetEliteRavagers(null, null, null);
 
             SetUpBattlefieldInfo();
@@ -185,7 +190,41 @@ namespace TJ.Town
                 note += $"\n<color={ColorData.Gold}>{LocalizationManager.Instance.GetText("IronLegionBonusDescription")}</color>";
             return note;
         }
-        private int ActBonus() => 5 * (campaignSaveManager.SaveData.bookNumber - 1); //add 5 gold per book number to the bounty amount
+        private int ActBonus() => 10 * (campaignSaveManager.SaveData.bookNumber - 1); //add 10 gold per book number to the bounty amount
+        // The loot is rolled when the town is generated, so the player can weigh it before choosing a road.
+        private void SetUpGearPreview()
+        {
+            List<GearID> loot = townSaveData.townLootGearIDs;
+            GearTooltip(loot, out string title, out string body);
+            if (title == null)
+            {
+                view.SetGearPreview(null, null, null);
+                return;
+            }
+            List<string> names = new();
+            foreach (GearID gearID in loot)
+                names.Add($"<color=#{ColorUtility.ToHtmlStringRGB(ColorData.GetGearRarityColor(GearData.GetGear(gearID).GearRarity))}>{LocalizationManager.Instance.GetText(gearID + "Name")}</color>");
+            string line = string.Format(LocalizationManager.Instance.GetText(loot.Count == 1 ? "townGearOne" : "townGearPick"), string.Join(", ", names));
+            view.SetGearPreview(line, title, body);
+        }
+        private void SetUpPrediction()
+        {
+            CampaignSaveData saveData = campaignSaveManager.SaveData;
+            bool hidden = townSaveData.townInteractionStatus != TownInteractionStatus.None
+                || DifficultyRules.AutoResolveDisabled(saveData.difficultyLevel)
+                || saveData.HasOrdeal(OrdealId.BlindMarch)
+                || townSaveData.townGarrisonUnits == null || townSaveData.townGarrisonUnits.Length == 0;
+            if (hidden)
+            {
+                view.SetPrediction("");
+                return;
+            }
+            MapRegion mapRegion = MapThemeManager.Instance.GetMapRegion(mapSceneUIManager.MapSceneManager.MapRace);
+            Weather weather = CampaignSaveManager.GenerateNodeWeather(selectedNodeIndex, saveData.seed, saveData.bookNumber, mapRegion, saveData.ordealWeather);
+            bool win = mapSceneUIManager.EngagementPanel.PredictGarrisonAssault(townSaveData.townGarrisonUnits, weather);
+            string result = $"<color={(win ? ColorData.Positive : ColorData.Negative)}>{LocalizationManager.Instance.GetText(win ? "Victory" : "Defeat")}</color>";
+            view.SetPrediction(string.Format(LocalizationManager.Instance.GetText("engagementPredicts"), result));
+        }
         private string BountyRangeText()
         {
             (int min, int max) = TownSaveData.GetEffectiveBountyRange(townSaveData.townSize);
@@ -219,6 +258,8 @@ namespace TJ.Town
                 squadDisplayCardMenu.SetUp(squad, false, mapSceneUIManager.HUDPanel, true);
                 squadDisplayCardMenu.SpawnInJuice(false);
                 await Task.Delay(100);
+                // Leaving the Map mid-loop destroys this panel; a card made after that has no parent and leaks into the active scene.
+                if (this == null) return;
             }
             foreach (SquadDisplayCardMenu squad in enemySquadsCards)
             {
@@ -304,9 +345,11 @@ namespace TJ.Town
             }
             view.GoldRow.Set(LocalizationManager.Instance.GetText("Loot Gold"), goldDetail, $"{townSaveData.bountyAmount + actBonus}<sprite name=GoldSprite>");
             view.GoldRow.SetTaken(townSaveData.bountyAmount <= 0);
-            view.GearRow.Set(LocalizationManager.Instance.GetText("Loot Gear"), LocalizationManager.Instance.GetText("townSpoilGear"), LocalizationManager.Instance.GetText("townSpoilGearValue"));
+            spoilsShown = true;
+            SetUpGearRow();
             view.GearRow.SetTaken(townSaveData.hasLootedGear);
-            view.ConscriptRow.Set(LocalizationManager.Instance.GetText("Recruit Units"), LocalizationManager.Instance.GetText("townRecruitLine"),
+            view.ConscriptRow.Set(LocalizationManager.Instance.GetText("Recruit Units"),
+                LocalizationManager.Instance.GetText(TownSaveData.ConscriptPrestige(townSaveData.townSize) > 0 ? "townConscriptPrestige" : "townRecruitLine"),
                 $"<color={ColorData.Positive}>{LocalizationManager.Instance.GetText("townSpoilFree")}</color>");
             view.ConscriptRow.SetTaken(false);
 
@@ -320,12 +363,6 @@ namespace TJ.Town
                 HeroData.GetRaceFromHero(campaignSaveManager.SaveData.heroID) == Race.RavenHost)
             {
                 SteamAchievements.Unlock(AchievementId.NineRealms);
-            }
-
-            //Thirst for Blood: Sacking a city heals all units to full health
-            if (HeroBonusManager.Instance.ActiveHeroID == 10)
-            {
-                campaignSaveManager.ModifyTroopHealth(1);
             }
         }
         private void OnEnterTown()
@@ -355,9 +392,87 @@ namespace TJ.Town
                 Debug.LogError("[TownPanel] OnLootGearButtonClicked: townLootGearIDs is empty.");
                 return;
             }
-            treasurePanel.LoadTreasurePanelFromShop(townSaveData.townLootGearIDs[0]);
+            // A single item was shown on the row already, so it is taken on the click with no chest to open.
+            if (townSaveData.townLootGearIDs.Count == 1)
+            {
+                if (!campaignSaveManager.CanAquireGear())
+                {
+                    NotificationManager.Instance.ErrorNotification(LocalizationManager.Instance.GetText("No space for gear"));
+                    return;
+                }
+                GearID gearID = townSaveData.townLootGearIDs[0];
+                TabletopTavern.Analytics.NodeLog.Try("town loot", () => TabletopTavern.Analytics.NodeLog.Add("loot",
+                    new Dictionary<string, object> { { "k", "gear" }, { "v", gearID.ToString() } }));
+                IAudioRequester.Instance.PlaySFX(SFXData.SelectCard);
+                campaignSaveManager.AquireGear(gearID);
+                TooltipManager.Instance.HideTooltip();
+                view.GearRow.Button.OnPointerExit(null);
+                view.GearRow.SetTaken(true, true);
+                townSaveData.hasLootedGear = true;
+                campaignSaveManager.SetTownData(townSaveData);
+                return;
+            }
+            treasurePanel.LoadTreasurePanelFromTown(townSaveData.townLootGearIDs, OnLootGearClosed);
             view.GearRow.SetTaken(true, true);
             townSaveData.hasLootedGear = true;
+        }
+        // One item shows itself on the row: its art, name, rarity and a hover with what it does. A pick keeps the chest.
+        private void SetUpGearRow()
+        {
+            List<GearID> loot = townSaveData.townLootGearIDs;
+            string leave = string.Format(LocalizationManager.Instance.GetText("townSpoilGearLeave"), $"{TownSaveData.GearLeftGold(townSaveData.townSize)}<sprite name=GoldSprite>");
+            if (loot == null || loot.Count != 1)
+            {
+                int choices = loot == null ? 0 : loot.Count;
+                view.GearRow.Set(LocalizationManager.Instance.GetText("Loot Gear"), leave,
+                    choices > 1 ? string.Format(LocalizationManager.Instance.GetText("townSpoilGearPick"), choices) : LocalizationManager.Instance.GetText("townSpoilGearValue"));
+                view.GearRow.SetIcon(null);
+                GearTooltip(loot, out string title, out string body);
+                view.GearRow.SetTooltip(title, body);
+                return;
+            }
+            Gear gear = GearData.GetGear(loot[0]);
+            string rarity = $"<color=#{ColorUtility.ToHtmlStringRGB(ColorData.GetGearRarityColor(gear.GearRarity))}>{LocalizationManager.Instance.GetText(gear.GearRarity.ToString())}</color>";
+            string name = LocalizationManager.Instance.GetText(loot[0] + "Name");
+            view.GearRow.Set(name, leave, rarity);
+            view.GearRow.SetIcon(SpriteData.GetSprite(gear.GearName));
+            string description = string.Format(LocalizationManager.Instance.GetText(loot[0] + "Desc"), gear.GearModifierValue);
+            view.GearRow.SetTooltip(name, $"{rarity}\n{KeywordText.Render(description, false)}");
+        }
+        // Every item on offer, named in its rarity colour with what it does.
+        private void GearTooltip(List<GearID> loot, out string title, out string body)
+        {
+            title = body = null;
+            if (loot == null || loot.Count == 0) return;
+            List<string> details = new();
+            foreach (GearID gearID in loot)
+            {
+                Gear gear = GearData.GetGear(gearID);
+                string name = $"<color=#{ColorUtility.ToHtmlStringRGB(ColorData.GetGearRarityColor(gear.GearRarity))}>{LocalizationManager.Instance.GetText(gearID + "Name")}</color>";
+                string description = string.Format(LocalizationManager.Instance.GetText(gearID + "Desc"), gear.GearModifierValue);
+                details.Add($"{name}\n{KeywordText.Render(description, false)}");
+            }
+            title = LocalizationManager.Instance.GetText("Loot Gear");
+            body = string.Join("\n\n", details);
+        }
+        // Gear still in the vault when the player walks on pays its gold, the same as leaving it on the pick screen.
+        private void PayForGearLeftBehind()
+        {
+            if (!spoilsShown || townSaveData.hasLootedGear) return;
+            if (townSaveData.townLootGearIDs == null || townSaveData.townLootGearIDs.Count == 0) return;
+            townSaveData.hasLootedGear = true;
+            view.GearRow.SetTaken(true);
+            OnLootGearClosed(false);
+        }
+        // Gear left in the vault pays gold, so a full gear bar never makes the reward worth nothing.
+        private void OnLootGearClosed(bool gearTaken)
+        {
+            if (gearTaken) return;
+            int gold = TownSaveData.GearLeftGold(townSaveData.townSize);
+            TabletopTavern.Analytics.NodeLog.Try("town loot", () => TabletopTavern.Analytics.NodeLog.Add("loot",
+                new Dictionary<string, object> { { "k", "gearLeft" }, { "v", gold } }));
+            goldManager.ModifyGold(gold, LocalizationManager.Instance.GetText("townGearLeft"));
+            campaignSaveManager.SetTownData(townSaveData);
         }
         public void OnLootGearCardSelected()
         {
@@ -430,12 +545,13 @@ namespace TJ.Town
         {
             townPanelCanvasGroup.FadeOutAsync(0.25f);
             IAudioRequester.Instance.PlaySFX(SFXData.FocusNode);
-            recruitPanel.LoadRecruitPanelFromTown(townSaveData.townRace, townSaveData.townSize);
+            recruitPanel.LoadRecruitPanelFromTown(townSaveData.townRace, townSaveData.townSize, TownSaveData.ConscriptPrestige(townSaveData.townSize));
             view.ConscriptRow.Button.OnPointerExit(null);
             view.ConscriptRow.SetTaken(true, true);
         }
         public void CompleteTown()
         {
+            PayForGearLeftBehind();
             mapSceneUIManager.TryDrainPendingPrestigeChoices(() => mapSceneUIManager.CompleteLayerAction());
         }
         public override void ClosePanel()
@@ -505,24 +621,27 @@ namespace TJ.Town
             return townSaveData.townRace == HeroData.GetRaceFromHero(CampaignManager.Instance.CampaignSaveManager.GetHeroID());
         }
         // Built when the town loads because garrison sizes depend on the current act and difficulty.
-        private string TownInfoDescription()
+        private TooltipContent TownInfoContent()
         {
-            string villageLocalized = LocalizationManager.Instance.GetText("Village");
-            string castleLocalized = LocalizationManager.Instance.GetText("Castle");
-            string cityLocalized = LocalizationManager.Instance.GetText("City");
-            string garrisonUnitsLocalized = LocalizationManager.Instance.GetText("Garrison Units");
-
-            string description = LocalizationManager.Instance.GetText("townDescription");
-            description += $"\n\n{LocalizationManager.Instance.GetText("Garrison")}:";
-            description += $"\n<color={ColorData.Tier1}>{villageLocalized}: {GarrisonSize(TownSize.Village)} {garrisonUnitsLocalized}</color>";
-            description += $"\n<color={ColorData.Tier2}>{castleLocalized}: {GarrisonSize(TownSize.Castle)} {garrisonUnitsLocalized}</color>";
-            description += $"\n<color={ColorData.Tier3}>{cityLocalized}: {GarrisonSize(TownSize.City)} {garrisonUnitsLocalized}</color>";
-
-            description += $"\n\n{LocalizationManager.Instance.GetText("Bounty For Sacking")}:";
-            description += $"\n<color={ColorData.Tier1}>{villageLocalized}: {BountyRange(TownSize.Village)}</color><sprite name=GoldSprite>";
-            description += $"\n<color={ColorData.Tier2}>{castleLocalized}: {BountyRange(TownSize.Castle)}</color><sprite name=GoldSprite>";
-            description += $"\n<color={ColorData.Tier3}>{cityLocalized}: {BountyRange(TownSize.City)}</color><sprite name=GoldSprite>";
-            return description;
+            string caption = $"<line-height=135%><size=11><color=#8C9AA2><uppercase><pos=46%>{LocalizationManager.Instance.GetText("Garrison")}"
+                + $"<pos=72%>{LocalizationManager.Instance.GetText("Bounty")}</uppercase></color></size>";
+            return new TooltipContent
+            {
+                Title = LocalizationManager.Instance.GetText("Town Info"),
+                Body = LocalizationManager.Instance.GetText("townDescription"),
+                Footer = caption
+                    + TownInfoRow(TownSize.Village, ColorData.Tier1)
+                    + TownInfoRow(TownSize.Castle, ColorData.Tier2)
+                    + TownInfoRow(TownSize.City, ColorData.Tier3),
+                Width = 420f,
+            };
+        }
+        // One table line: the size in its tier colour, garrison squads, bounty. A diamond marks the town being visited.
+        private string TownInfoRow(TownSize townSize, string colour)
+        {
+            string marker = townSize == townSaveData.townSize ? $"<color={ColorData.Gold}>\u25C6</color>" : "";
+            return $"\n<size=15>{marker}<pos=6%><color={colour}>{LocalizationManager.Instance.GetText(townSize.ToString())}</color>"
+                + $"<pos=46%>{GarrisonSize(townSize)}<pos=72%>{BountyRange(townSize)}<sprite name=GoldSprite></size>";
         }
         private string BountyRange(TownSize townSize)
         {
@@ -537,6 +656,8 @@ namespace TJ.Town
             int count = 0;
             foreach (TierCount entry in ArmyGenerationRuleData.ResolveTownGarrisonTierCounts(townSize, saveData.bookNumber, strongerGarrisons))
                 count += entry.Count;
+            // Must match the squad ArmyCreator.GenerateTownGarrison drops on Easy in act 1.
+            if (DifficultyRules.SmallerGarrison(saveData.difficultyLevel, saveData.bookNumber) && count > 1) count--;
             // Must match ArmyCreator.AddEliteSquad, which stops at the deployment cap.
             if (saveData.HasOrdeal(OrdealId.EliteGuard) && count < TabletopTavernConstants.ENDLESS_ENEMY_SQUAD_CAP) count++;
             // Must match the squad CampaignSaveManager.GenerateTown drops for Aura Farming.
@@ -605,11 +726,26 @@ namespace TJ.Town
 
     public static (int Min, int Max) GetDefaultBountyRange(TownSize townSize) => townSize switch
     {
-        TownSize.Village => (4, 7),
-        TownSize.Castle => (9, 12),
-        TownSize.City => (14, 17),
+        TownSize.Village => (8, 13),
+        TownSize.Castle => (16, 21),
+        TownSize.City => (26, 31),
         _ => (0, 0),
     };
+    // How many gear items a sacked town offers; the player keeps one.
+    public static int LootGearChoices(TownSize townSize) => townSize switch
+    {
+        TownSize.Castle => 2,
+        TownSize.City => 3,
+        _ => 1,
+    };
+    public static int GearLeftGold(TownSize townSize) => townSize switch
+    {
+        TownSize.Castle => 15,
+        TownSize.City => 20,
+        _ => 10,
+    };
+    // A City sits one step before the act's final battle, so its free recruit arrives ready for it.
+    public static int ConscriptPrestige(TownSize townSize) => townSize == TownSize.City ? 1 : 0;
     public static (int Min, int Max) GetEffectiveBountyRange(TownSize townSize) =>
         BountyRangeOverrides.TryGetValue(townSize, out var range) ? range : GetDefaultBountyRange(townSize);
 

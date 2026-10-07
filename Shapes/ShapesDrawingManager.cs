@@ -68,6 +68,18 @@ public class ShapesDrawingManager : ImmediateModeShapeDrawer
 
     private float _ringAlpha;
 
+    [Header("Enemy Cast Warning")]
+    // The spell ring's look in ColorData.Error, on every enemy mage cast until it lands.
+    [SerializeField] private float _warningRingIntensity = 100f;
+    [SerializeField] [Range(0f, 1f)] private float _warningBandAlpha = 0.35f;
+
+    [Header("Barricade Preview")]
+    // Each piece of the line being drawn: the spell ring's colour where it will rise, ColorData.Error where a unit is in the way.
+    [SerializeField] private float _barricadeIntensity = 3f;
+    [SerializeField] [Range(0f, 1f)] private float _barricadeFillAlpha = 0.2f;
+    [SerializeField] private float _barricadeBorderThickness = 0.15f;
+    private bool _barricadeShow;
+
     [Header("Mage leash")]
     // From the armed mage to the cursor: caster blue while the point is in reach. Out of range it
     // splits where the mage would come into reach: a solid movement-green leg with an arrow head up
@@ -148,6 +160,9 @@ public class ShapesDrawingManager : ImmediateModeShapeDrawer
             _leashFriendly = _spellManager.ArmedSpellTargetsFriends;
             _leashRange = _spellManager.ArmedMageRange;
         }
+        _barricadeShow = BattleManager.Instance.CursorMode == CursorMode.CastSpell
+                         && _spellManager.PlacingBarricade
+                         && _spellManager.BarricadePreview.Count > 0;
         float leashTarget = leash ? 1f : 0f;
         _leashAlpha = _spellRingFadeSeconds <= 0f ? leashTarget
             : Mathf.MoveTowards(_leashAlpha, leashTarget, Time.unscaledDeltaTime / _spellRingFadeSeconds);
@@ -155,7 +170,8 @@ public class ShapesDrawingManager : ImmediateModeShapeDrawer
 
     public override void DrawShapes( Camera cam )
     {
-        if(_ringAlpha <= 0f && _leashAlpha <= 0f) return;
+        if(_ringAlpha <= 0f && _leashAlpha <= 0f && !_barricadeShow && CastWarnings.Count == 0) return;
+        if(TJ.BattleMarkers.Hidden) return;
         // Every camera calls this; the tavern base camera and the minimap would each draw their own copy.
         if(cam.cameraType != CameraType.SceneView && cam != BattleManager.Instance.BattleCamera) return;
 
@@ -165,8 +181,10 @@ public class ShapesDrawingManager : ImmediateModeShapeDrawer
             // (ZTest Always): forest shell grass stands taller than _groundOffset and swallowed a depth-tested ring.
             Draw.ZTest = UnityEngine.Rendering.CompareFunction.Always;
             if(_leashAlpha > 0f) DrawLeash();
+            if(_barricadeShow) DrawBarricadePreview();
+            DrawCastWarnings();
             if(_ringAlpha <= 0f) return;
-            DrawAreaBand();
+            DrawAreaBand(_ringPosition, _ringRadius, _bandColor, _bandAlpha * _ringAlpha, ShapesBlendMode.Lighten);
 
             Color ringColor = _spellRingColor * _spellRingIntensity;
             ringColor.a = _ringAlpha;
@@ -183,6 +201,23 @@ public class ShapesDrawingManager : ImmediateModeShapeDrawer
             if(_showStar) DrawPentagram(starColor);
             if(_showSquare) DrawSquare(starColor);
             DrawWisps(ringColor, starColor);
+        }
+    }
+    private void DrawBarricadePreview()
+    {
+        Vector2 size = _spellManager.BarricadePieceSize;
+        // Rectangles draw in their local XY plane; the extra 90 on X lays them on the ground under the line's facing.
+        Quaternion flat = _spellManager.BarricadeRotation * Quaternion.Euler(90f, 0f, 0f);
+        for(int i = 0; i < _spellManager.BarricadePreview.Count; i++) {
+            bool blocked = i < _spellManager.BarricadePreviewOccupied.Count && _spellManager.BarricadePreviewOccupied[i];
+            Color baseColor = blocked ? (Color)ColorData.HexToRgba(ColorData.Error) : _spellRingColor;
+            Color border = baseColor * _barricadeIntensity;
+            border.a = 1f;
+            Color fill = baseColor;
+            fill.a = _barricadeFillAlpha;
+            Vector3 position = _spellManager.BarricadePreview[i] + Vector3.up * _groundOffset;
+            Draw.Rectangle(position, flat, size, fill);
+            Draw.RectangleBorder(position, flat, size, _barricadeBorderThickness * MarkerScale, border);
         }
     }
     private bool LoadArrowStyle()
@@ -265,32 +300,61 @@ public class ShapesDrawingManager : ImmediateModeShapeDrawer
         float s = MarkerScale;
         Draw.Triangle(ToWorld(_arrowHeadA * s), ToWorld(_arrowHeadB * s), ToWorld(_arrowHeadC * s), _arrowHeadRoundness, ArrowColor(_arrowPrefab.MovementColor, _arrowHeadBloom));
     }
-    private void DrawAreaBand()
+    private void DrawAreaBand(Vector3 position, float radius, Color color, float alpha, ShapesBlendMode blend)
     {
-        if(_bandAlpha <= 0f) return;
-        float thickness = _ringRadius * _bandFraction;
-        Color outer = new Color(_bandColor.r, _bandColor.g, _bandColor.b, _bandAlpha * _ringAlpha);
-        Color inner = new Color(_bandColor.r, _bandColor.g, _bandColor.b, 0f);
-        Draw.BlendMode = ShapesBlendMode.Lighten;
+        if(alpha <= 0f) return;
+        float thickness = radius * _bandFraction;
+        Color outer = new Color(color.r, color.g, color.b, alpha);
+        Color inner = new Color(color.r, color.g, color.b, 0f);
+        Draw.BlendMode = blend;
         Draw.Ring(
-            _ringPosition,
+            position,
             Quaternion.Euler(90, 0, 0),
-            _ringRadius - thickness * 0.5f,
+            radius - thickness * 0.5f,
             thickness,
             DiscColors.Radial(inner, outer)
         );
         if(_outerBandFraction > 0f) {
-            float outerThickness = _ringRadius * _outerBandFraction;
+            float outerThickness = radius * _outerBandFraction;
             Draw.Ring(
-                _ringPosition,
+                position,
                 Quaternion.Euler(90, 0, 0),
-                _ringRadius + outerThickness * 0.5f,
+                radius + outerThickness * 0.5f,
                 outerThickness,
                 DiscColors.Radial(outer, inner)
             );
         }
         Draw.BlendMode = ShapesBlendMode.Transparent;
     }
+
+    #region Enemy cast warnings
+    private struct CastWarning
+    {
+        public ActiveSpell Spell;
+        public float Start;
+    }
+    // Static so an ActiveSpell can register without a reference to the battle scene's drawer.
+    private static readonly System.Collections.Generic.List<CastWarning> CastWarnings = new();
+    public static void AddCastWarning(ActiveSpell spell) => CastWarnings.Add(new CastWarning { Spell = spell, Start = Time.time });
+    public static void RemoveCastWarning(ActiveSpell spell) => CastWarnings.RemoveAll(w => w.Spell == spell);
+
+    // Transparent, not Lighten: a red band lightened over grass reads orange.
+    private void DrawCastWarnings()
+    {
+        if(CastWarnings.Count == 0) return;
+        Color red = (Color)ColorData.HexToRgba(ColorData.Error);
+        foreach(CastWarning warning in CastWarnings) {
+            if(warning.Spell == null) continue;
+            float alpha = _spellRingFadeSeconds <= 0f ? 1f : Mathf.Clamp01((Time.time - warning.Start) / _spellRingFadeSeconds);
+            Vector3 position = warning.Spell.transform.position + Vector3.up * _groundOffset;
+            float radius = warning.Spell.AreaRadius;
+            DrawAreaBand(position, radius, red, _warningBandAlpha * alpha, ShapesBlendMode.Transparent);
+            Color ring = red * _warningRingIntensity;
+            ring.a = alpha;
+            Draw.Ring(position, Quaternion.Euler(90, 0, 0), radius, _spellRingThickness * MarkerScale, ring);
+        }
+    }
+    #endregion
     private void DrawPentagram(Color color)
     {
         if(_pentagramPath == null) {

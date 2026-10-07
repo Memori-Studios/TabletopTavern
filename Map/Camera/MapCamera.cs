@@ -217,6 +217,8 @@ namespace TJ.Map
                     Quaternion.Slerp(camStartRotation, endRotation, t));
 
                 await Task.Yield();
+                // Leaving the Map mid-intro destroys the camera before this loop sees it.
+                if (mapCamera == null) return;
             }
 
             mapCamera.transform.SetPositionAndRotation(endPosition, endRotation);

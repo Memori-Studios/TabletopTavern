@@ -14,8 +14,10 @@ namespace TJ.Map
     {
         [SerializeField] private bool allowMapInput = false;
         public bool AllowMapInput => allowMapInput;
-        // Holds map input off from the act's first load until its Ordeal is taken.
+        // Holds map input off from the moment a beaten warlord's Ordeal is due until it is taken.
         private bool ordealPickPending;
+        // The March guide is up after a stretch's intro; the map takes no input until it closes.
+        private bool marchGuideOpen;
         [SerializeField] MapSceneUIManager mapSceneUIManager;
         [SerializeField] private MapGenerator mapGenerator;
         
@@ -74,7 +76,7 @@ namespace TJ.Map
             activeChapterIndex = CampaignManager.Instance.CampaignSaveManager.SaveData.activeMapLayer;
             Debug.Log($"Loading map scene with active chapter index: {activeChapterIndex}");
             CampaignSaveData save = CampaignManager.Instance.CampaignSaveManager.SaveData;
-            ordealPickPending = activeChapterIndex == -1 && !save.battleCompleted && save.OrdealPickDue;
+            ordealPickPending = !save.battleCompleted && !save.nodeResume.active && save.OrdealPickDue;
             ResetAllNodes();
             if (CampaignManager.Instance.CampaignSaveManager.SaveData.nodesRevealed)
                 RevealNodesVisually(-1, mapLayers.Count);
@@ -112,35 +114,7 @@ namespace TJ.Map
             void SnapshotLoad()
             {
                 Debug.Log($"Snapshot load of map scene activeChapterIndex: {activeChapterIndex}");
-                List<int> nodePath = CampaignManager.Instance.CampaignSaveManager.SaveData.nodePath;
-
-                // Find the pivot: the last nodePath entry that lives on mapLayers[activeChapterIndex].
-                // This is the last *completed* node on the current layer — SelectNextLayer uses it
-                // to mark the correct layer-(N+1) nodes as selectable.
-                selectedNode = null;
-                for (int ni = nodePath.Count - 1; ni >= 0 && selectedNode == null; ni--)
-                {
-                    selectedNode = mapLayers[activeChapterIndex].LayerNodes
-                        .Find(x => x.index == nodePath[ni]).mapNodeGameObject;
-                }
-
-                // Place the token at the pre-selected next node if one exists, else at the pivot.
-                int tokenNodeId = selectedNodeID != -1 ? selectedNodeID : (selectedNode != null ? selectedNode.Value.index : -1);
-                if (tokenNodeId != -1)
-                {
-                    bool placed = false;
-                    for (int i = 0; i < mapLayers.Count && !placed; i++) {
-                        for (int j = 0; j < mapLayers[i].LayerNodes.Count && !placed; j++) {
-                            if (mapLayers[i].LayerNodes[j].index == tokenNodeId) {
-                                playerToken.transform.position = mapLayers[i].LayerNodes[j].mapNodeGameObject.transform.position;
-                                placed = true;
-                            }
-                        }
-                    }
-                }
-
-                SelectNextLayer();
-                UpdateNodePathFromSave();
+                ShowSavedProgress();
                 mapSceneUIManager.HUDPanel.HudAnimator.Play("HUD Open");
             }
 
@@ -181,6 +155,44 @@ namespace TJ.Map
             MapRoutePlan.Prune(RouteMarks(), LayerOfNode, ReachedLayer());
             ApplyRoutePlan();
             SetMapInput(true);
+            // A new stretch offers its Ordeal once the intro title has gone; a reload mid-stretch has no intro to wait for.
+            if (ordealPickPending && activeChapterIndex != -1) StartCoroutine(OfferOrdeals());
+        }
+        // Puts the map where the save stands mid-act: the last finished node as the pivot, the token on it or on the
+        // node picked next, the passed layers greyed and the next layer's nodes open.
+        private void ShowSavedProgress()
+        {
+            CampaignSaveData save = CampaignManager.Instance.CampaignSaveManager.SaveData;
+            int selectedNodeID = save.GetSelectedNodeIndex();
+            List<int> nodePath = save.nodePath;
+
+            // Find the pivot: the last nodePath entry that lives on mapLayers[activeChapterIndex].
+            // This is the last *completed* node on the current layer — SelectNextLayer uses it
+            // to mark the correct layer-(N+1) nodes as selectable.
+            selectedNode = null;
+            for (int ni = nodePath.Count - 1; ni >= 0 && selectedNode == null; ni--)
+            {
+                selectedNode = mapLayers[activeChapterIndex].LayerNodes
+                    .Find(x => x.index == nodePath[ni]).mapNodeGameObject;
+            }
+
+            // Place the token at the pre-selected next node if one exists, else at the pivot.
+            int tokenNodeId = selectedNodeID != -1 ? selectedNodeID : (selectedNode != null ? selectedNode.Value.index : -1);
+            if (tokenNodeId != -1)
+            {
+                bool placed = false;
+                for (int i = 0; i < mapLayers.Count && !placed; i++) {
+                    for (int j = 0; j < mapLayers[i].LayerNodes.Count && !placed; j++) {
+                        if (mapLayers[i].LayerNodes[j].index == tokenNodeId) {
+                            playerToken.transform.position = mapLayers[i].LayerNodes[j].mapNodeGameObject.transform.position;
+                            placed = true;
+                        }
+                    }
+                }
+            }
+
+            SelectNextLayer();
+            UpdateNodePathFromSave();
         }
         public void Update()
         {
@@ -219,6 +231,7 @@ namespace TJ.Map
         public void LeftClick()
         {
             if (UnityEngine.EventSystems.EventSystem.current.IsPointerOverGameObject()) {
+                LogClickBlocker();
                 return;
             }
             if (!AllowMapInput) return;
@@ -241,6 +254,23 @@ namespace TJ.Map
                 SelectNode(hoveredNode);
             }
         }
+        // Names each new non-button UI object that eats a map click, so an invisible raycast target shows in a player's log.
+        private string lastClickBlocker;
+        private void LogClickBlocker()
+        {
+            UnityEngine.EventSystems.EventSystem eventSystem = UnityEngine.EventSystems.EventSystem.current;
+            UnityEngine.EventSystems.PointerEventData pointer = new(eventSystem) { position = InputHandler.Instance.MousePosition };
+            List<UnityEngine.EventSystems.RaycastResult> hits = new();
+            eventSystem.RaycastAll(pointer, hits);
+            if (hits.Count == 0) return;
+
+            GameObject blocker = hits[0].gameObject;
+            if (blocker.GetComponentInParent<UnityEngine.UI.Selectable>() != null || blocker.name == lastClickBlocker) return;
+            lastClickBlocker = blocker.name;
+            string parent = blocker.transform.parent != null ? blocker.transform.parent.name : "-";
+            string canvas = hits[0].module != null ? hits[0].module.name : "-";
+            Debug.Log($"[Map] Click blocked by UI: {blocker.name} (parent {parent}, canvas {canvas}, scene {blocker.scene.name})");
+        }
         #region Route Marks
         // The free camera turns map input off, but it is where the player looks over the act, so marking stays on there.
         private bool CanHoverNodes => AllowMapInput || mapCamera.IsFreeCameraMode;
@@ -256,6 +286,7 @@ namespace TJ.Map
             List<int> marks = RouteMarks();
             bool marked = MapRoutePlan.Toggle(marks, hoveredNode.Value.index, LayerOfNode);
             ApplyRoutePlan();
+            TutorialManager.Instance.CompleteStepCheck(TutorialStepEnum.MarkRoute);
             IAudioRequester.Instance.PlaySFX(marked ? SFXData.SelectCard : SFXData.TinyClick);
             CampaignManager.Instance.CampaignSaveManager.SaveCampaign();
             CampaignManager.Instance.CampaignSaveManager.SaveCampaignSnapshot();
@@ -537,10 +568,16 @@ namespace TJ.Map
 
             SelectNextLayer();
             ApplyRoutePlan();
+            // A beaten warlord brings an Ordeal; the map stays locked until it is taken.
+            ordealPickPending = CampaignManager.Instance.CampaignSaveManager.SaveData.OrdealPickDue;
             SetMapInput(true);
             mapSceneUIManager.HUDPanel.ShowFreeCameraTip();
+            // From the second node on, so it never shares a node with the free camera callout or cuts into another tip.
+            if (activeChapterIndex >= 2 && !TutorialManager.Instance.IsShowingStep)
+                TutorialManager.Instance.LoadStepsFromRandomSpot(new TutorialStep[1] { TutorialData.MarkRoute });
             CampaignManager.Instance.CampaignSaveManager.SaveCampaign();
             CampaignManager.Instance.CampaignSaveManager.SaveCampaignSnapshot();
+            if (ordealPickPending) StartCoroutine(OfferOrdeals());
         }
         // Locks the win in when the last story act falls: achievements, difficulty unlock, hero
         // completion, Godking time and the analytics win. Marching on afterwards cannot undo any of it.
@@ -767,7 +804,12 @@ namespace TJ.Map
             int bookNumber = CampaignManager.Instance.CampaignSaveManager.SaveData.bookNumber;
             
             RaceData raceData = TabletopTavernData.Instance.GetRaceData(MapRace);
-            switch(bookNumber)
+            CampaignSaveData marchRun = CampaignManager.Instance.CampaignSaveManager.SaveData;
+            if (marchRun.InMarch)
+            {
+                mapSceneUIManager.MapIntroDisplay3.DisplayMarchTitle(bookNumber);
+            }
+            else switch(bookNumber)
             {
                 case 1:
                     mapSceneUIManager.MapIntroDisplay1.DisplayTitle(raceData, bookNumber);
@@ -808,13 +850,28 @@ namespace TJ.Map
             }
             
             mapSceneUIManager.HUDPanel.HudAnimator.Play("HUD Open");
+            if (marchRun.InMarch && mapSceneUIManager.MarchGuidePanel != null && !TJ.March.MarchGuidePanel.Hidden)
+            {
+                marchGuideOpen = true;
+                SetMapInput(false);
+                mapSceneUIManager.MarchGuidePanel.Open(AfterMarchGuide);
+            }
+            else AfterIntro();
+        }
+        private void AfterMarchGuide()
+        {
+            marchGuideOpen = false;
+            AfterIntro();
+        }
+        private void AfterIntro()
+        {
             if (ordealPickPending) StartCoroutine(OfferOrdeals());
             else SetMapInput(true);
         }
         public void SetMapInput(bool _allowMapInput)
         {
             // Debug.Log($"Setting map input to {_allowMapInput}");
-            allowMapInput = _allowMapInput && !ordealPickPending;
+            allowMapInput = _allowMapInput && !ordealPickPending && !marchGuideOpen;
         }
         #region Ordeals
         // The Tithe and Mercenary Contract, on every completed layer; gold floors at 0, so a broke run loses nothing.
@@ -837,23 +894,25 @@ namespace TJ.Map
                 FinishOrdealPick(OrdealId.None, offer);
                 yield break;
             }
-            mapSceneUIManager.OrdealPanel.Open(offer, save.bookNumber, taken => FinishOrdealPick(taken, offer));
+            mapSceneUIManager.OrdealPanel.Open(offer, MarchRules.CurrentBattle(save), taken => FinishOrdealPick(taken, offer));
         }
         private void FinishOrdealPick(OrdealId taken, List<OrdealId> offer)
         {
             List<string> notices = CampaignManager.Instance.CampaignSaveManager.BeginOrdealAct(taken, offer);
             if (notices.Count > 0) Memori.Notifications.NotificationManager.Instance.DisplayNotification(string.Join("\n", notices));
 
-            bool redrawMap = taken != OrdealId.None && OrdealRegistry.Get(taken).RedrawsMap;
+            // Every card changes the road ahead: a node never carries a Twist the run holds, so each node's Twists
+            // are drawn again, and the map cards change what the nodes show.
             ordealPickPending = false;
-            if (redrawMap)
+            if (taken != OrdealId.None)
             {
                 mapGenerator.RedrawNodes();
                 hoveredNode = null;
                 selectedNode = null;
                 if (CampaignManager.Instance.CampaignSaveManager.SaveData.nodesRevealed)
                     RevealNodesVisually(-1, mapLayers.Count);
-                SelectNextLayer();
+                if (activeChapterIndex >= 0) ShowSavedProgress();
+                else SelectNextLayer();
                 ApplyRoutePlan();
             }
             SetMapInput(true);

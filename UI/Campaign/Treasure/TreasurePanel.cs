@@ -64,6 +64,9 @@ namespace TJ.Treasure
         PanelLoadedFrom panelLoadedFrom;
         // This opening's offer and pick for the node log; sent by Continue, where every opening ends.
         Dictionary<string, object> treasureLog;
+        // Town loot only: told once, when the panel closes, whether a gear item was taken.
+        System.Action<bool> townLootClosed;
+        bool gearTaken;
 
         private void Awake()
         {
@@ -101,7 +104,32 @@ namespace TJ.Treasure
             OpenFeedback.PlayFeedbacks();
             // await Task.Delay(500);
 
-            List<GearID> gearList = campaignSaveManager.DrawRandomGear(count);
+            townLootClosed = null;
+            ShowGearChoices(campaignSaveManager.DrawRandomGear(count), loadConsumable, count);
+        }
+        // A sacked town's loot. One item opens the chest; more than one is a pick, as on a Treasure node.
+        public void LoadTreasurePanelFromTown(List<GearID> gearList, System.Action<bool> onClosed)
+        {
+            if (gearList.Count == 1)
+            {
+                LoadTreasurePanelFromShop(gearList[0]);
+            }
+            else
+            {
+                panelLoadedFrom = PanelLoadedFrom.Shop;
+
+                openSizeTransform.localScale = Vector3.zero;
+                memoriCanvasGroup.CGEnable();
+                openMMFPlayer.PlayFeedbacks();
+                IAudioRequester.Instance.PlaySFX(SFXData.OpenUI);
+
+                ShowGearChoices(gearList, false, 0);
+            }
+            townLootClosed = onClosed;
+        }
+        private void ShowGearChoices(List<GearID> gearList, bool loadConsumable, int consumableSeedOffset)
+        {
+            gearTaken = false;
             bool gearFull = !campaignSaveManager.CanAquireGear();
             TabletopTavern.Analytics.NodeLog.Try("treasure offer", () => BeginTreasureLog(gearList, gearFull));
             // The count line shows a full bag in red now; the banner's old warning icon would sit on top of it.
@@ -129,7 +157,7 @@ namespace TJ.Treasure
             if (loadConsumable)
             {
                 int bookNumber = campaignSaveManager.SaveData.bookNumber;
-                ConsumableEnum randomConsumable = ConsumableData.GetWeightedConsumable(bookNumber, campaignSaveManager.GetSeededRandom() + count);
+                ConsumableEnum randomConsumable = ConsumableData.GetWeightedConsumable(bookNumber, campaignSaveManager.GetSeededRandom() + consumableSeedOffset);
                 if (treasureLog != null) treasureLog["cons"] = randomConsumable.ToString();
                 ChoiceCardView card = view.AddWideCard();
                 string description = CampaignManager.Instance.ConsumableManager.GetConsumableDescription(randomConsumable);
@@ -175,6 +203,7 @@ namespace TJ.Treasure
             }
 
             rewardPicked = true;
+            gearTaken = true;
             if (treasureLog != null) treasureLog["pick"] = gearID.ToString();
             campaignSaveManager.AquireGear(gearID);
             ShowPicked(chosen);
@@ -221,6 +250,8 @@ namespace TJ.Treasure
         public void LoadTreasurePanelFromShop(GearID _gearItemEnum)
         {
             panelLoadedFrom = PanelLoadedFrom.Shop;
+            townLootClosed = null;
+            gearTaken = false;
             gearItemEnum = _gearItemEnum;
             TabletopTavern.Analytics.NodeLog.Try("treasure offer", () => BeginTreasureLog(new List<GearID> { _gearItemEnum }, !campaignSaveManager.CanAquireGear()));
             shopRewardCanvasGroup.CGEnable();
@@ -290,9 +321,15 @@ namespace TJ.Treasure
             }
             else if (panelLoadedFrom == PanelLoadedFrom.Shop)
             {
+                ResetCards();
+                skipGearButton.gameObject.SetActive(false);
                 mapSceneUIManager.ShopPanel.RenableShopPanel();
                 ClosePanel();
             }
+
+            System.Action<bool> closed = townLootClosed;
+            townLootClosed = null;
+            closed?.Invoke(gearTaken);
         }
         public void Skip()
         {
@@ -377,6 +414,7 @@ namespace TJ.Treasure
 
             IAudioRequester.Instance.PlaySFX(SFXData.SelectCard);
             if (treasureLog != null) treasureLog["pick"] = gearItemEnum.ToString();
+            gearTaken = true;
             campaignSaveManager.AquireGear(gearItemEnum);
             Continue();
         }

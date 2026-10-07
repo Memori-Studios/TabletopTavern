@@ -239,11 +239,15 @@ partial struct MageSquadFindTargetSystem : ISystem
         switch (priority)
         {
             case MageTargetPriority.DensestEnemyCluster:
-                // Model count, so a Smite lands on the block worth spending a charge on rather than
+            case MageTargetPriority.MonstrousFirst:
+                // Model count, so an AoE lands on the block worth spending a charge on rather than
                 // on whichever 4-model skirmisher happened to wander closest.
                 int modelCount = 0;
                 if (entityManager.HasBuffer<EntityReferenceBufferElement>(candidate))
                     modelCount = entityManager.GetBuffer<EntityReferenceBufferElement>(candidate).Length;
+                // The bonus outweighs any squad's model count, so an in-range monster always wins.
+                if (priority == MageTargetPriority.MonstrousFirst && entityManager.HasComponent<MonsterousSquadTag>(candidate))
+                    modelCount += 1000;
                 return modelCount - distance * 0.01f;
 
             case MageTargetPriority.FriendlyNearestEnemy:

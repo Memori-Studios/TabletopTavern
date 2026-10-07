@@ -68,8 +68,10 @@ namespace TJ.Games
         [SerializeField] private TMP_Text cashOutDetail;
         [SerializeField] private GameObject resultRow;
         [SerializeField] private GameObject readout;
-        [SerializeField] private TMP_Text youFace;
-        [SerializeField] private TMP_Text houseFace;
+        [SerializeField] private Image youFace;
+        [SerializeField] private Image houseFace;
+        // Faces 1-6 in order.
+        [SerializeField] private Sprite[] dieFaces;
         [SerializeField] private Image youRing;
         [SerializeField] private Image houseRing;
         [SerializeField] private GameObject rewindHint;
@@ -93,6 +95,18 @@ namespace TJ.Games
         [SerializeField] private float fadeSeconds = 0.2f;
         #endregion
 
+        #region Placement
+        // Canvas units from the canvas top; the strip hangs here, just under the dice, when it fits above the army bar.
+        [SerializeField] private float stripTop = 520f;
+        // The dice table with its result row is the tallest strip, so it decides whether the strip fits under the dice.
+        [SerializeField] private float stripTallest = 260f;
+        // The army bar's top edge sits this far above the canvas bottom at every UI Scale, plus a small gap.
+        [SerializeField] private float armyBarClearance = 280f;
+        // On a short canvas GamesPanel raises the dice, and the strip's bottom edge sits here, just above the army bar.
+        [SerializeField] private float shortStripBottom = 545f;
+        #endregion
+
+        private float placedCanvasHeight;
         private Coroutine swap;
         private Coroutine[] columnFades;
 
@@ -262,8 +276,11 @@ namespace TJ.Games
             callRow.SetActive(false);
             resultRow.SetActive(true);
             readout.SetActive(you > 0 && house > 0);
-            youFace.text = you.ToString();
-            houseFace.text = house.ToString();
+            if (you > 0 && house > 0)
+            {
+                youFace.sprite = dieFaces[Mathf.Clamp(you, 1, 6) - 1];
+                houseFace.sprite = dieFaces[Mathf.Clamp(house, 1, 6) - 1];
+            }
             SetRing(youRing, youResult);
             SetRing(houseRing, houseResult);
             rewindHint.SetActive(offerRewind);
@@ -280,10 +297,31 @@ namespace TJ.Games
 
         public void HideResult() => resultRow.SetActive(false);
 
+        // True when the tallest strip no longer fits between the dice and the army bar (UI Scale 125%).
+        public bool ShortCanvas => ((RectTransform)transform).rect.height - armyBarClearance - stripTop < stripTallest;
+
+        private void LateUpdate() => PlaceStrip();
+
+        // On a short canvas the strip hangs from its bottom edge above the army bar, so a row that appears grows it upward.
+        private void PlaceStrip()
+        {
+            float canvasHeight = ((RectTransform)transform).rect.height;
+            if (canvasHeight == placedCanvasHeight) return;
+            placedCanvasHeight = canvasHeight;
+
+            var stripRect = (RectTransform)strip.transform;
+            bool shortCanvas = ShortCanvas;
+            stripRect.pivot = new Vector2(0.5f, shortCanvas ? 0f : 1f);
+            stripRect.anchoredPosition = new Vector2(0f, shortCanvas ? -shortStripBottom : -stripTop);
+        }
+
         private void SetRing(Image ring, int result)
         {
             ring.enabled = result != 0;
-            ring.color = result > 0 ? Positive : Negative;
+            // The glow keeps the alpha set on the prefab; only its hue follows the result.
+            Color colour = result > 0 ? Positive : Negative;
+            colour.a = ring.color.a;
+            ring.color = colour;
         }
         #endregion
 

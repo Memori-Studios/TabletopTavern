@@ -48,6 +48,7 @@ namespace TJ.Campfire
         private CampaignSaveManager campaignSaveManager;
         private MapSceneUIManager mapSceneUIManager;
         private MemoriCanvasGroup panelCanvasGroup;
+        private bool trainPickerOpen;
 
         // Read by the nodeCompleted report when the layer completes.
         public CampfireChoice Chosen { get; private set; }
@@ -76,6 +77,21 @@ namespace TJ.Campfire
                 continueButton.interactable = false;
                 mapSceneUIManager.TryDrainPendingPrestigeChoices(() => mapSceneUIManager.CompleteLayerAction());
             });
+            campaignSaveManager.OnArmyStructureChanged -= OnArmyStructureChanged;
+            campaignSaveManager.OnArmyStructureChanged += OnArmyStructureChanged;
+        }
+
+        private void OnDestroy()
+        {
+            if (campaignSaveManager != null) campaignSaveManager.OnArmyStructureChanged -= OnArmyStructureChanged;
+        }
+
+        // The Train strip holds copies of the squads, so a merge or disband on the army bar rebuilds it.
+        private void OnArmyStructureChanged()
+        {
+            if (Chosen != CampfireChoice.None) return;
+            if (trainPickerOpen) OpenTrainPicker();
+            else FillChoices();
         }
 
         public void LoadCampfirePanel()
@@ -84,6 +100,7 @@ namespace TJ.Campfire
             TrainedUnit = null;
             TrainedPrestige = 0;
             TrainedSquadId = null;
+            trainPickerOpen = false;
             OpenFeedback.PlayFeedbacks();
 
             view.ClearSlots();
@@ -228,7 +245,22 @@ namespace TJ.Campfire
 
             view.SetTrainCounts(string.Format(Text("campfireCanTrainCount"), GetTrainableSquads().Count, CountLiveSquads()), Text("campfireTrainHint"), hasReserve);
             view.ShowState(CampfirePanelView.State.Train);
+            trainPickerOpen = true;
             IAudioRequester.Instance.PlaySFX(SFXData.OpenUI);
+        }
+
+        // A slot's squad is a copy taken when the strip was built; only a squad still in the army can be trained.
+        private bool TryGetLiveSquad(string _uniqueId, out SquadToLoad _live)
+        {
+            _live = default;
+            if (string.IsNullOrEmpty(_uniqueId)) return false;
+            foreach (SquadToLoad squad in campaignSaveManager.SaveData.playerArmy)
+            {
+                if (squad.UniqueID != _uniqueId || squad.UnitIndex == -1 || squad.isEmptySquad || squad.SquadCurrentHealth <= 0) continue;
+                _live = squad;
+                return true;
+            }
+            return false;
         }
 
         private void OnTrainSquadHovered(SquadToLoad _squad, bool _hovered)
@@ -246,12 +278,19 @@ namespace TJ.Campfire
 
         private void CloseTrainPicker()
         {
+            trainPickerOpen = false;
             view.ClearSlots();
+            FillChoices();
             ShowChoosing();
         }
 
-        private void OnTrainSquadPicked(SquadToLoad _squad)
+        private void OnTrainSquadPicked(SquadToLoad _picked)
         {
+            if (!TryGetLiveSquad(_picked.UniqueID, out SquadToLoad _squad) || _squad.UnitPrestige >= MaxPrestige)
+            {
+                OpenTrainPicker();
+                return;
+            }
             int cost = TrainCost(_squad);
             if (!CampaignManager.Instance.GoldManager.CheckIfCanAfford(cost))
             {
@@ -272,6 +311,7 @@ namespace TJ.Campfire
             IAudioRequester.Instance.PlaySFX(SFXData.PrestigeUnit);
             CampaignManager.Instance.GoldManager.ModifyGold(-cost, Text("Train"));
 
+            trainPickerOpen = false;
             view.ClearSlots();
             ShowResult(CampfireChoice.Train,
                 Text("CampfireTrainSuccess"),

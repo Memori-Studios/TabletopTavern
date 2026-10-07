@@ -181,6 +181,11 @@ public class BattleManager : Singleton<BattleManager>
     public void ConcedeDefeat()
     {
         Conceded = true;
+        ForceBattleResult(false);
+    }
+    // BattlePhase goes first so EndBattleSystem cannot raise a second BattleOver in the same frame.
+    public void ForceBattleResult(bool _playerWon)
+    {
         EntityManager entityManager = World.DefaultGameObjectInjectionWorld.EntityManager;
         var ecb = new EntityCommandBuffer(Allocator.Temp);
         EntityQuery query = entityManager.CreateEntityQuery(ComponentType.ReadOnly<BattlePhase>());
@@ -192,8 +197,8 @@ public class BattleManager : Singleton<BattleManager>
         }
 
         Entity battleEndEntity = entityManager.CreateEntity();
-        ecb.AddComponent(battleEndEntity, new BattleOver { 
-            PlayerWon = false 
+        ecb.AddComponent(battleEndEntity, new BattleOver {
+            PlayerWon = _playerWon
         });
 
         query.Dispose();
@@ -259,6 +264,12 @@ public class BattleManager : Singleton<BattleManager>
         Entity squadDamageTotalSingletonEntity = entityManager.CreateEntity();
         entityManager.AddBuffer<SquadDamageTotalElement>(squadDamageTotalSingletonEntity);
 
+        Entity bloodDrinkerHealSingletonEntity = entityManager.CreateEntity();
+        entityManager.AddBuffer<BloodDrinkerHealElement>(bloodDrinkerHealSingletonEntity);
+
+        Entity bloodBankSingletonEntity = entityManager.CreateEntity();
+        entityManager.AddBuffer<BloodBankElement>(bloodBankSingletonEntity);
+
         Entity battlefieldBonusAppliedBufferSingletonEntity = entityManager.CreateEntity();
         entityManager.AddBuffer<BattlefieldBonusAppliedBufferElement>(battlefieldBonusAppliedBufferSingletonEntity);
 
@@ -268,6 +279,7 @@ public class BattleManager : Singleton<BattleManager>
         // absent, so a build without SPELLS never accumulates cast requests nothing would consume.
         Entity mageCastRequestBufferSingletonEntity = entityManager.CreateEntity();
         entityManager.AddBuffer<MageCastRequestBufferElement>(mageCastRequestBufferSingletonEntity);
+        SpellTestMode.PushMageOptions();
 #endif
 
         amySaveDataManager.SpawnDeferredEnemy();

@@ -23,6 +23,7 @@ namespace TJ.Engagement
         [SerializeField] private GameObject pill;
         [SerializeField] private Image pillFrame;
         [SerializeField] private TMP_Text pillText;
+        [SerializeField] private MemoriTooltipTrigger pillTooltip;
         [SerializeField] private float bandAlpha = 0.12f;
         [SerializeField] private Sprite skirmishIcon;
         [SerializeField] private Sprite hordeIcon;
@@ -33,7 +34,6 @@ namespace TJ.Engagement
 
         #region Before the battle
         [SerializeField] private GameObject preBattleBody;
-        [SerializeField] private TMP_Text enemyHostLine;
         [SerializeField] private RectTransform enemyArmySlot;
         [SerializeField] private RectTransform enemyArmyParent;
         [SerializeField] private TMP_Text battlefieldValue;
@@ -41,11 +41,13 @@ namespace TJ.Engagement
         [SerializeField] private TMP_Text weatherValue;
         [SerializeField] private Image weatherIcon;
         [SerializeField] private MemoriTooltipTrigger weatherTooltip;
-        [SerializeField] private TMP_Text yourArmyValue;
-        [SerializeField] private TMP_Text enemyValue;
         [SerializeField] private GameObject heavensongGroup;
         [SerializeField] private Button heavensongButton;
         [SerializeField] private MemoriTooltipTrigger heavensongTooltip;
+        [SerializeField] private GameObject warChestGroup;
+        [SerializeField] private Button warChestButton;
+        [SerializeField] private TMP_Text warChestNote;
+        [SerializeField] private MemoriTooltipTrigger warChestTooltip;
         [SerializeField] private GameObject reserveWarning;
         [SerializeField] private Button autoResolveButton;
         [SerializeField] private TMP_Text autoResolvePrediction;
@@ -140,6 +142,7 @@ namespace TJ.Engagement
         public Button AutoResolveButton => autoResolveButton;
         public Button FightButton => fightButton;
         public Button HeavensongButton => heavensongButton;
+        public Button WarChestButton => warChestButton;
         public AutoResolvePreview AutoResolvePreview => autoResolvePreview;
         public MemoriTooltipTrigger AutoResolveTooltip => autoResolveTooltip;
         public MemoriTooltipTrigger FightTooltip => fightTooltip;
@@ -303,17 +306,23 @@ namespace TJ.Engagement
                 _ => skirmishIcon,
             };
             headerTitle.text = title;
+            // No subtitle lets the title centre in the header.
+            headerSubtitle.gameObject.SetActive(!string.IsNullOrEmpty(subtitle));
             headerSubtitle.text = subtitle;
             wash.a = bandAlpha;
             headerBand.color = wash;
         }
 
-        public void SetPill(string text, Color colour)
+        public void SetPill(string text, Color colour, TooltipContent tooltip = null)
         {
             pill.SetActive(!string.IsNullOrEmpty(text));
             pillText.text = text;
             pillText.color = colour;
             pillFrame.color = colour;
+            // Null on a panel prefab built before the pill had a tooltip.
+            if (pillTooltip == null) return;
+            pillTooltip.enabled = tooltip != null;
+            if (tooltip != null) pillTooltip.SetUpToolTip(tooltip);
         }
         #endregion
 
@@ -325,8 +334,6 @@ namespace TJ.Engagement
             SetPill(null, Color.clear);
             PlaceEnemyArmy(false, 0);
         }
-
-        public void SetEnemyHost(string line) => enemyHostLine.text = line;
 
         public void SetBattlefield(string value, Biome biome, bool garrison)
         {
@@ -359,16 +366,22 @@ namespace TJ.Engagement
         // Cycles the value while a reroll spins; the icon follows the final weather.
         public void SetWeatherText(string value) => weatherValue.text = value;
 
-        public void SetArmies(string yours, string enemy)
-        {
-            yourArmyValue.text = yours;
-            enemyValue.text = enemy;
-        }
-
         public void ShowHeavensong(bool show, string tooltipTitle = null, string tooltipBody = null)
         {
             heavensongGroup.SetActive(show);
             if (show) heavensongTooltip.SetUpToolTip(tooltipTitle, tooltipBody);
+        }
+
+        // The War Chest row: the line names the Twist and its price, and the button dims when the gold is short.
+        public void ShowWarChest(bool show, string note = null, bool affordable = true, string tooltipTitle = null, string tooltipBody = null)
+        {
+            // Null on a panel prefab built before the War Chest row existed.
+            if (warChestGroup == null) return;
+            warChestGroup.SetActive(show);
+            if (!show) return;
+            warChestNote.text = note;
+            warChestButton.interactable = affordable;
+            warChestTooltip.SetUpToolTip(tooltipTitle, tooltipBody);
         }
 
         public void ShowReserveWarning(bool show) => reserveWarning.SetActive(show);
@@ -451,6 +464,9 @@ namespace TJ.Engagement
 
         // No Quarter can leave nothing to choose; a line says so instead of an empty column.
         public void ShowNoChoices(bool show) => noChoices.SetActive(show);
+
+        // A March win pays nothing, so both stacks go and the report stands alone.
+        public void ShowStacks(bool show) => stacks.SetActive(show);
 
         // The thread joins the diamonds from the first row's centre to the last's.
         private void LayoutThread()

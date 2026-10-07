@@ -76,6 +76,10 @@ namespace TJ.Map
         Race _race;
         // Ordeals that change the map, copied from the save before each build; tests build without them.
         bool scorchedEarth, fogOnTheRoad;
+        // Past the last story act the map is a stretch of the March. marchFirstBattle is the battle fought on layer 0;
+        // every layer is one battle, so layer i is that + i.
+        bool marchMap;
+        int marchFirstBattle;
         public Race MapRace => _race;
         public async void LoadMap(int bookNumber)
         {
@@ -214,6 +218,8 @@ namespace TJ.Map
             var run = CampaignManager.Instance.CampaignSaveManager.SaveData;
             scorchedEarth = run.HasOrdeal(OrdealId.ScorchedEarth);
             fogOnTheRoad = run.HasOrdeal(OrdealId.FogOnTheRoad);
+            marchMap = run.InMarch;
+            marchFirstBattle = marchMap ? MarchRules.BattleNumber(run, 0) : 0;
         }
         /// <summary>Test hook: builds with these map Ordeals on, as a run holding them would.</summary>
         internal void SetMapOrdeals(bool _scorchedEarth, bool _fogOnTheRoad)
@@ -221,6 +227,15 @@ namespace TJ.Map
             scorchedEarth = _scorchedEarth;
             fogOnTheRoad = _fogOnTheRoad;
         }
+        /// <summary>Test hook: builds a stretch of the March whose first layer is this battle; 0 builds a story act.</summary>
+        internal void SetMarchFirstBattle(int _firstBattle)
+        {
+            marchMap = _firstBattle > 0;
+            marchFirstBattle = _firstBattle;
+        }
+        // The March has nothing on the road but rogue hosts, and a warlord leads every fifth.
+        private NodeType MarchNodeType(int _layer) =>
+            MarchRules.IsWarlordBattle(marchFirstBattle + _layer) ? NodeType.Horde : NodeType.Skirmish;
         /// <summary>
         /// Rebuilds the act's nodes and paths after an Ordeal changes what they show. Positions and paths come out
         /// the same because Ordeals only remap values after their draw, so terrain and trees are left alone.
@@ -288,7 +303,12 @@ namespace TJ.Map
                         // Debug.LogError($"Layer {i} or {i+1} does not have enough nodes to access index {fromNodeIndex} or {toNodeIndex}");
                         continue;
                     }
-                    mapLayers[i].LayerNodes[fromNodeIndex].connectedNodeIndexes.Add(mapLayers[i + 1].LayerNodes[toNodeIndex].index);
+                    List<int> fromConnections = mapLayers[i].LayerNodes[fromNodeIndex].connectedNodeIndexes;
+                    int target = mapLayers[i + 1].LayerNodes[toNodeIndex].index;
+                    if (!fromConnections.Contains(target) && !CrossesExistingPath(mapLayers[i], mapLayers[i + 1], fromNodeIndex, toNodeIndex))
+                    {
+                        fromConnections.Add(target);
+                    }
 
                     // Remove the conflicting connection to prevent crossing
                     (int, int) conflictingConnection = (toNodeIndex, fromNodeIndex); // Reverse of the added connection
@@ -299,13 +319,26 @@ namespace TJ.Map
                 }
             }
         }
+        // Runs after FixIndexing, so connections are node indexes and nodes sit top to bottom by position.
+        private static bool CrossesExistingPath(MapLayer fromLayer, MapLayer toLayer, int fromPosition, int toPosition)
+        {
+            for (int s = 0; s < fromLayer.LayerNodes.Count; s++)
+            {
+                foreach (int targetIndex in fromLayer.LayerNodes[s].connectedNodeIndexes)
+                {
+                    int t = toLayer.LayerNodes.FindIndex(n => n.index == targetIndex);
+                    if ((s - fromPosition) * (t - toPosition) < 0) return true;
+                }
+            }
+            return false;
+        }
         private void TrimFirstLayerToOneNode(MapLayer firstLayer)
         {
             firstLayer.LayerNodes.RemoveRange(1, firstLayer.LayerNodes.Count - 1);
             var singleNode = firstLayer.LayerNodes[0];
-            // Endless acts open on the act 1 node (Treasure): the spoils of the war just won.
-            bool treasureOpener = _bookNumber == 1 || _bookNumber > TabletopTavernConstants.FINAL_STORY_ACT;
+            bool treasureOpener = _bookNumber == 1;
             singleNode.type = treasureOpener ? firstNodeTypeBook1 : firstNodeTypeOtherBooks;
+            if (marchMap) singleNode.type = MarchNodeType(0);
             singleNode.position = startNodePosition +
                                     new Vector2(SeededRandom.Range(-randomOffset.x, randomOffset.x),
                                                 SeededRandom.Range(-randomOffset.y, randomOffset.y));
@@ -315,8 +348,8 @@ namespace TJ.Map
         {
             lastLayer.LayerNodes.RemoveRange(1, lastLayer.LayerNodes.Count - 1);
             var singleNode = lastLayer.LayerNodes[0];
-            singleNode.type = lastNodeType;
-            singleNode.position = finalNodePosition + 
+            singleNode.type = marchMap ? MarchNodeType(layers - 1) : lastNodeType;
+            singleNode.position = finalNodePosition +
             // singleNode.position = new Vector2(singleNode.position.x, -0.5f) + 
                                     new Vector2(SeededRandom.Range(-randomOffset.x, randomOffset.x),
                                                 SeededRandom.Range(-randomOffset.y, randomOffset.y));
@@ -362,34 +395,21 @@ namespace TJ.Map
                 int indexToRemove = SeededRandom.Range(0, mapLayers[i].LayerNodes.Count);
                 var nodeToRemove = mapLayers[i].LayerNodes[indexToRemove];
 
-                // Before removing, fix incoming connections from the previous layer.
-                // ConnectLayers stored positions (0,1,2) into connectedNodeIndexes. After
-                // removal the list compacts, so those positions must be updated now while
-                // they still correspond 1-to-1 with the current layer's node positions.
+                // Incoming paths are positions in this layer, so remap them to post-removal positions or they cross.
                 if (i > 0)
                 {
-                    var prevLayer = mapLayers[i - 1];
-                    for (int n = 0; n < prevLayer.LayerNodes.Count; n++)
+                    int redirect = indexToRemove > 0 ? indexToRemove - 1 : 0;
+                    foreach (MapNodeData prevNode in mapLayers[i - 1].LayerNodes)
                     {
-                        // connectedNodeIndexes is a List<int> (reference type), so edits
-                        // here apply to the original even though LayerNodes is a struct list.
-                        List<int> conns = prevLayer.LayerNodes[n].connectedNodeIndexes;
-                        for (int c = conns.Count - 1; c >= 0; c--)
+                        List<int> conns = prevNode.connectedNodeIndexes;
+                        List<int> remapped = new();
+                        foreach (int position in conns)
                         {
-                            if (conns[c] == indexToRemove)
-                            {
-                                // Redirect to nearest surviving neighbor
-                                int redirect = indexToRemove > 0 ? indexToRemove - 1 : indexToRemove + 1;
-                                if (conns.Contains(redirect))
-                                    conns.RemoveAt(c);   // already connected there — drop duplicate
-                                else
-                                    conns[c] = redirect;
-                            }
-                            else if (conns[c] > indexToRemove)
-                            {
-                                conns[c]--;              // shift down to match post-removal positions
-                            }
+                            int moved = position == indexToRemove ? redirect : position > indexToRemove ? position - 1 : position;
+                            if (!remapped.Contains(moved)) remapped.Add(moved);
                         }
+                        conns.Clear();
+                        conns.AddRange(remapped);
                     }
                 }
 
@@ -479,6 +499,7 @@ namespace TJ.Map
                 if (weight <= possibleNodeTypes.nodeTypeWeights[i].weight) {
                     NodeType type = possibleNodeTypes.nodeTypeWeights[i].type;
                     // Remapped after the draw, never instead of it, so every later draw lands the same.
+                    if (marchMap) return MarchNodeType(_layer);
                     if (scorchedEarth && (type == NodeType.Campfire || type == NodeType.Games)) return NodeType.Skirmish;
                     return type;
                 }
@@ -526,7 +547,9 @@ namespace TJ.Map
                     if (x < layerNodeTypeWeights.Length && layerNodeTypeWeights[x].preventHidden) {
                         hidden = false;
                     }
-                    nodeObject.SetUp(node, mapSceneCamera, hidden, _race);
+                    // On the March every node is its own rogue host; before it, the act has one enemy.
+                    Race nodeRace = marchMap ? MarchRules.RogueRace(seed, _bookNumber, node.layer, node.index) : _race;
+                    nodeObject.SetUp(node, mapSceneCamera, hidden, nodeRace);
 
                     nodeObject.transform.localPosition = new Vector3(node.position.x, 0, node.position.y);
                 

@@ -190,6 +190,76 @@ namespace TJ
             }
         }
         #endregion
+        #region Photo mode weather look
+        // Lights, volumes and weather objects only. ToggleWeather also hands out battlefield bonuses, which a picture must not.
+        private bool photoWeatherLook;
+        private bool savedClearLight, savedRainLight, savedSnowLight, savedFogLight;
+        private float savedRainWeight, savedSnowWeight, savedFogWeight;
+        private bool savedRainObject, savedSnowObject, savedFogObject, savedFogVoidObject;
+        private readonly System.Collections.Generic.List<ParticleSystem> photoUnscaledParticles = new();
+
+        public void SetPhotoWeatherLook(Weather weather)
+        {
+            if (!photoWeatherLook)
+            {
+                photoWeatherLook = true;
+                savedClearLight = clearSkyLight.enabled;
+                savedRainLight = rainLight.enabled;
+                savedSnowLight = snowLight.enabled;
+                savedFogLight = fogLight.enabled;
+                savedRainWeight = rainVolume.weight;
+                savedSnowWeight = snowVolume.weight;
+                savedFogWeight = fogVolume.weight;
+                savedRainObject = rainObject.activeSelf;
+                savedSnowObject = snowObject.activeSelf;
+                savedFogObject = fogObject.activeSelf;
+                savedFogVoidObject = fogVoidObject.activeSelf;
+            }
+            ApplyWeatherLook(weather == Weather.ClearSkies, weather == Weather.Rain, weather == Weather.Snow, weather == Weather.Fog,
+                weather == Weather.Rain ? 1f : 0f, weather == Weather.Snow ? 1f : 0f, weather == Weather.Fog ? 1f : 0f,
+                weather == Weather.Rain, weather == Weather.Snow, weather == Weather.Fog, weather == Weather.Fog);
+            // Rain and snow keep falling over a frozen battle.
+            foreach (GameObject weatherObject in new[] { rainObject, snowObject, fogObject })
+                foreach (ParticleSystem particles in weatherObject.GetComponentsInChildren<ParticleSystem>(true))
+                {
+                    ParticleSystem.MainModule main = particles.main;
+                    if (main.useUnscaledTime) continue;
+                    main.useUnscaledTime = true;
+                    photoUnscaledParticles.Add(particles);
+                }
+        }
+
+        public void ClearPhotoWeatherLook()
+        {
+            if (!photoWeatherLook) return;
+            photoWeatherLook = false;
+            ApplyWeatherLook(savedClearLight, savedRainLight, savedSnowLight, savedFogLight, savedRainWeight, savedSnowWeight, savedFogWeight,
+                savedRainObject, savedSnowObject, savedFogObject, savedFogVoidObject);
+            foreach (ParticleSystem particles in photoUnscaledParticles)
+            {
+                if (particles == null) continue;
+                ParticleSystem.MainModule main = particles.main;
+                main.useUnscaledTime = false;
+            }
+            photoUnscaledParticles.Clear();
+        }
+
+        private void ApplyWeatherLook(bool clearLightOn, bool rainLightOn, bool snowLightOn, bool fogLightOn, float rainWeight, float snowWeight,
+            float fogWeight, bool rainOn, bool snowOn, bool fogOn, bool fogVoidOn)
+        {
+            clearSkyLight.enabled = clearLightOn;
+            rainLight.enabled = rainLightOn;
+            snowLight.enabled = snowLightOn;
+            fogLight.enabled = fogLightOn;
+            rainVolume.weight = rainWeight;
+            snowVolume.weight = snowWeight;
+            fogVolume.weight = fogWeight;
+            rainObject.SetActive(rainOn);
+            snowObject.SetActive(snowOn);
+            fogObject.SetActive(fogOn);
+            fogVoidObject.SetActive(fogVoidOn);
+        }
+        #endregion
         public void ToggleRain(bool _isRaining)
         {
             for(int i = 0; i < cachedRainObjects.Length; i++)

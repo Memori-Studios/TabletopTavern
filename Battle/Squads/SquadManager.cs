@@ -311,6 +311,7 @@ public class SquadManager : MonoBehaviour
 
         int squadId = 0;
         bool guardMode = false;
+        bool summoned = false;
         bool ceaseFire = false;
         bool autoTarget = true;
         RangedFireMode fireMode = RangedFireMode.Volley;
@@ -325,7 +326,9 @@ public class SquadManager : MonoBehaviour
                 squadId = _enemyData.squadId;
             }
             playerSquadsRegistered++;
-            guardMode = PlayerPrefs.GetInt("defaultSquadGuardMode", 1) == 1;
+            // A summon ignores the default guard stance and hunts the nearest enemy as soon as it lands.
+            summoned = BattleManager.Instance.ArmySpawnManager.IsSummonedUniqueId(_uniqueID);
+            guardMode = !summoned && PlayerPrefs.GetInt("defaultSquadGuardMode", 1) == 1;
             // Only squads the Cease Fire button is offered for. A melee squad would carry the
             // stance without any system honouring it, and its battle card would show a cease-fire
             // icon while it kept fighting.
@@ -464,7 +467,7 @@ public class SquadManager : MonoBehaviour
         ecb.AddComponent<WaitingForCommand>(squadEntity);
         if (_enemyData.Team == Team.Player)
         {
-            bool waitForCommand = PlayerPrefs.GetInt("autoCharge", 0) == 0;
+            bool waitForCommand = !summoned && PlayerPrefs.GetInt("autoCharge", 0) == 0;
             ecb.SetComponentEnabled<WaitingForCommand>(squadEntity, waitForCommand);
         }
         else
@@ -593,6 +596,19 @@ public class SquadManager : MonoBehaviour
         {
             leadership += OrdealRegistry.UNBROKEN_RANKS_LEADERSHIP;
         }
+        if (!campaignSaveDataHolder.IsCustomBattle && _enemyData.Team == Team.Player)
+        {
+            ulong ordeals = campaignSaveDataHolder.OrdealMask;
+            if (OrdealMask.Has(ordeals, OrdealId.BurnTheWagons)) leadership += OrdealMask.BURN_THE_WAGONS_LEADERSHIP;
+            if (OrdealMask.Has(ordeals, OrdealId.LastStand) && OrdealMask.BelowHalfStrength(currentHealth, maxHealth))
+                leadership += OrdealMask.LAST_STAND_LEADERSHIP;
+            // Dread must never make a squad arrive already broken.
+            if (OrdealMask.Has(ordeals, OrdealId.Dread))
+                leadership = Mathf.Max(leadership - OrdealMask.DREAD_LEADERSHIP, TabletopTavernConstants.MORALE_BREAK_THRESHOLD * 2);
+            // Forced March: the squad cannot sprint or charge until the rest runs out.
+            if (OrdealMask.Has(ordeals, OrdealId.ForcedMarch))
+                ecb.AddComponent(squadEntity, new WearyTag { Remaining = OrdealMask.FORCED_MARCH_WEARY_SECONDS });
+        }
         // A map-event morale penalty must never make a squad arrive already broken.
         int eventLeadership = _enemyData.Team == Team.Enemy ? campaignSaveDataHolder.EventLeadershipEnemy : campaignSaveDataHolder.EventLeadershipPlayer;
         if (eventLeadership != 0)
@@ -634,6 +650,7 @@ public class SquadManager : MonoBehaviour
         ecb.AddBuffer<HealthLossEvent>(squadEntity);
         ecb.AddBuffer<DamageDealtEvent>(squadEntity);
         ecb.AddComponent(squadEntity, new SquadDamageComponent { SquadId = squadId });
+        ecb.AddComponent(squadEntity, new SquadWorth { PerModel = UnitValues.PerModel(squadStats.unitName) });
         ecb.AddComponent<RetreatingNearbyAllies>(squadEntity);
         ecb.SetComponentEnabled<RetreatingNearbyAllies>(squadEntity, false);
         ecb.AddComponent<TakingFlankingDamage>(squadEntity);
@@ -1033,6 +1050,68 @@ public class SquadManager : MonoBehaviour
         }
         playerSquads.Dispose();
     }
+    #region Dev Tools
+    // An id no squad uses, so dev kills are credited to nobody and never count as spell kills (squad 0).
+    public const int DEV_DAMAGE_SQUAD_ID = 9999;
+
+    /// <summary>Kills or fully heals squads through the damage buffer, so deaths, morale and the end-of-battle check run as normal.</summary>
+    public int DevHitSquads(IEnumerable<int> _squadIds, bool _healToFull)
+    {
+        EntityManager entityManager = World.DefaultGameObjectInjectionWorld.EntityManager;
+        EntityCommandBuffer ecb = ecbSystem.CreateCommandBuffer();
+        DamageBufferElement hit = new ()
+        {
+            DamageType = _healToFull ? DamageType.Healing : DamageType.Magical,
+            HealIsPercentOfMax = _healToFull,
+            // Without a source the element reads as Melee and takes the melee damage knob.
+            DamageSource = DamageSource.Spell,
+            AttackStrength = _healToFull ? 100 : 1000000,
+            TeamOfSource = Team.Neutral,
+            DamageSourceSquadId = DEV_DAMAGE_SQUAD_ID
+        };
+        int squads = 0;
+        foreach (int squadId in _squadIds)
+        {
+            squads++;
+            foreach (Entity unit in GetEntitiesFromSquad(squadId))
+            {
+                if (!entityManager.Exists(unit) || !entityManager.HasBuffer<DamageBufferElement>(unit)) continue;
+                ecb.AppendToBuffer(unit, hit);
+            }
+        }
+        return squads;
+    }
+    /// <summary>Ids of every enemy squad still in the fight, garrison gates left out.</summary>
+    public List<int> DevEnemySquadIds()
+    {
+        EntityManager entityManager = World.DefaultGameObjectInjectionWorld.EntityManager;
+        List<int> ids = new ();
+        using NativeArray<SquadEntity> enemySquads = RetrieveSquadEntities(ComponentType.ReadOnly<EnemySquad>());
+        foreach (SquadEntity squadEntity in enemySquads)
+        {
+            if (!entityManager.Exists(squadEntity.SelfEntity)) continue;
+            if (entityManager.HasComponent<GarrisonGateSquadTag>(squadEntity.SelfEntity)) continue;
+            ids.Add(squadEntity.SquadId);
+        }
+        return ids;
+    }
+    /// <summary>Guard mode stops enemy squads picking targets on their own; the enemy general's own orders still move them.</summary>
+    public int DevSetEnemyGuardMode(bool _guardMode)
+    {
+        EntityManager entityManager = World.DefaultGameObjectInjectionWorld.EntityManager;
+        using NativeArray<SquadEntity> enemySquads = RetrieveSquadEntities(ComponentType.ReadOnly<EnemySquad>());
+        int squads = 0;
+        foreach (SquadEntity squadEntity in enemySquads)
+        {
+            if (!entityManager.Exists(squadEntity.SelfEntity) || !entityManager.HasComponent<SquadOverridesComponent>(squadEntity.SelfEntity)) continue;
+            SquadOverridesComponent squad = entityManager.GetComponentData<SquadOverridesComponent>(squadEntity.SelfEntity);
+            squad.GuardMode = _guardMode;
+            entityManager.SetComponentData(squadEntity.SelfEntity, squad);
+            squads++;
+        }
+        return squads;
+    }
+    #endregion
     public void SetAutoTarget(bool autoTarget)
     {
         EntityManager entityManager = World.DefaultGameObjectInjectionWorld.EntityManager;
@@ -1302,10 +1381,12 @@ public class SquadManager : MonoBehaviour
         squadRangeDrawers.Clear();
         gateRangeDrawers.Clear();
     }
+    // Ground layers only, so a unit never lands on top of a wall, tree, flag or bonus marker collider.
+    private static int GroundMask => LayerMask.GetMask("Tile", "Water", "Swamp", "Forest", "Path");
     private float3 GetPointOnTerrain(float3 _origionalPoint)
     {
-        //raycast down at point 
-        if (Physics.Raycast(new Vector3(_origionalPoint.x, 10, _origionalPoint.z), Vector3.down, out RaycastHit hit, 11, ~LayerMask.NameToLayer("Tile"))) {
+        //raycast down at point
+        if (Physics.Raycast(new Vector3(_origionalPoint.x, 10, _origionalPoint.z), Vector3.down, out RaycastHit hit, 11, GroundMask)) {
             return hit.point;
         } else {
             Debug.LogError("No terrain found");

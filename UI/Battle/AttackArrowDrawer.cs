@@ -64,12 +64,18 @@ namespace TJ
         // Lifts the blast ring clear of the ground it is drawn on. Matches the 0.5 the Archer
         // Range Drawer prefab authors on its own ground discs.
         private const float BLAST_RING_GROUND_OFFSET = 0.5f;
+        // The small X on the cast point: two lines under the ring, half this length from centre to tip along each axis.
+        private const float BLAST_MARK_HALF_SIZE = 0.9f;
+        private Line[] blastCenterMark;
         // A mage ordered at a target out of range walks in first. The movement line and head show
         // that walk, ending where the squad centre first sits within casting range; this dashed red
         // leg covers the rest, the same picture the leash showed before the click.
         private Line castApproachLine;
         private bool _isApproachingCast;
         private float _approachRange;
+        // A player cast on the ground walks in on a Move order, so its cast point lives only on MageManualCastOrder.
+        private bool _groundCastPending;
+        private Vector3 _groundCastPoint;
 
         #region Style shared with the caster leash
         // ShapesDrawingManager reads these off the prefab so the leash matches the arrow the order becomes.
@@ -207,9 +213,40 @@ namespace TJ
             {
                 blastRadiusRing.Radius = blastRadius;
                 blastRingBloom = blastRadiusRing.GetComponent<ShapesBloom>();
+                // Dashed like the cast leg that leads to it, from the same prefab dash values.
+                blastRadiusRing.Dashed = true;
+                blastRadiusRing.DashType = DashType.Basic;
+                blastRadiusRing.DashSpace = DashSpace.Relative;
+                blastRadiusRing.DashSize = approachDashSize;
+                blastRadiusRing.DashSpacing = approachDashSpacing;
+                blastRadiusRing.DashSnap = DashSnapping.Tiling;
+                float s = BLAST_MARK_HALF_SIZE;
+                blastCenterMark = new[]
+                {
+                    CreateBlastMarkLine(new Vector3(-s, -s, 0f), new Vector3(s, s, 0f)),
+                    CreateBlastMarkLine(new Vector3(-s, s, 0f), new Vector3(s, -s, 0f)),
+                };
             }
 
             blastRadiusRing.gameObject.SetActive(false);
+        }
+
+        // A child of the ring so it moves and hides with it; Flat2D in the ring's local plane lies on the ground.
+        private Line CreateBlastMarkLine(Vector3 start, Vector3 end)
+        {
+            GameObject lineObject = new GameObject("Blast Centre Mark");
+            lineObject.transform.SetParent(blastRadiusRing.transform, false);
+            lineObject.layer = blastRadiusRing.gameObject.layer;
+            Line line = lineObject.AddComponent<Line>();
+            line.Geometry = LineGeometry.Flat2D;
+            line.Start = start;
+            line.End = end;
+            line.Thickness = blastRadiusRing.Thickness;
+            line.ThicknessSpace = blastRadiusRing.ThicknessSpace;
+            line.BlendMode = blastRadiusRing.BlendMode;
+            line.ZTest = blastRadiusRing.ZTest;
+            line.EndCaps = LineEndCap.Round;
+            return line;
         }
 
         // A mage never receives FormationEngagedInRangedCombat: MageSquadChargeSystem deliberately
@@ -276,6 +313,8 @@ namespace TJ
             PositionBlastRadiusRing(impactPoint);
             blastRingBloom.SetColor(CastColor);
             blastRingBloom.Bloom();
+            Color mark = new Color(CastColor.r, CastColor.g, CastColor.b, blastRingBloom.BloomAmount);
+            foreach (Line line in blastCenterMark) line.Color = mark;
         }
 
         // The live cast ring follows the arrow's own rule: selected, hovered, or every order toggled on.
@@ -363,6 +402,35 @@ namespace TJ
             return Vector3.Distance(legStart, _destinationPoints[^1]) > _approachRange;
         }
 
+        // The dashed cast leg ends on the blast ring rather than crossing into it.
+        private void ShowCastLeg(Vector3 from, Vector3 target)
+        {
+            float stop = _hasBlastRing ? blastRadiusRing.Radius : 0f;
+            Vector3 leg = target - from;
+            float length = leg.magnitude;
+            if (length <= stop + 0.01f)
+            {
+                castApproachLine.gameObject.SetActive(false);
+                return;
+            }
+            castApproachLine.Start = from;
+            castApproachLine.End = target - leg / length * stop;
+            castApproachLine.gameObject.SetActive(true);
+        }
+
+        // A pending player cast at a ground point, not yet fired.
+        private bool TryGetGroundCastPoint(out Vector3 castPoint)
+        {
+            castPoint = Vector3.zero;
+            Entity self = squadEntity.SelfEntity;
+            if (!EntityManager.HasComponent<MageSquad>(self)) return false;
+            if (!EntityManager.HasComponent<MageManualCastOrder>(self) || !EntityManager.IsComponentEnabled<MageManualCastOrder>(self)) return false;
+            MageManualCastOrder order = EntityManager.GetComponentData<MageManualCastOrder>(self);
+            if (order.TargetSquadEntity != Entity.Null) return false;
+            castPoint = order.Position;
+            return true;
+        }
+
         #endregion
 
         private void Update()
@@ -400,12 +468,16 @@ namespace TJ
             // on/off path cannot express "no arrow, but still show the footprint".
             bool isCasting = false;
             Vector3 castTargetCenter = Vector3.zero;
-            if (_isCaster) isCasting = TryGetCastTargetCenter(out castTargetCenter);
+            if (_isCaster)
+            {
+                isCasting = TryGetCastTargetCenter(out castTargetCenter);
+                _groundCastPending = !isCasting && TryGetGroundCastPoint(out _groundCastPoint);
+            }
 
             DynamicBuffer<QueuedOrder> queuedOrders = EntityManager.GetBuffer<QueuedOrder>(squadEntity.SelfEntity);
             if (queuedOrders.Length == 0)
             {
-                if (_isCaster) UpdateBlastRadiusRing(isCasting, castTargetCenter);
+                if (_isCaster) UpdateBlastRadiusRing(isCasting || _groundCastPending, isCasting ? castTargetCenter : _groundCastPoint);
                 // Debug.Log($"[AttackArrow] Squad {squadEntity.SquadId}: SquadCommand is None → turning off");
                 if(_activeArrowState != ArrowState.Off)
                 {
@@ -480,8 +552,10 @@ namespace TJ
                     && queuedOrders[queuedOrders.Length - 1].Type == QueuedOrderType.Attack;
                 _isApproachingCast = IsApproachingCast(isCasting, lastOrderIsAttack);
                 // The ring sits on the pending target while the mage walks in, as it did on the leash.
-                Vector3 ringCenter = isCasting ? castTargetCenter : _isApproachingCast ? _destinationPoints[^1] : Vector3.zero;
-                UpdateBlastRadiusRing(isCasting || _isApproachingCast, ringCenter);
+                Vector3 ringCenter = isCasting ? castTargetCenter
+                    : _isApproachingCast ? _destinationPoints[^1]
+                    : _groundCastPending ? _groundCastPoint : Vector3.zero;
+                UpdateBlastRadiusRing(isCasting || _isApproachingCast || _groundCastPending, ringCenter);
 
                 if (isCasting && !isInRangedFire) TurnOnRangedFire();
                 else if (!isCasting && isInRangedFire) TurnOffRangedFire();
@@ -584,9 +658,12 @@ namespace TJ
                 Vector3 target = points[^1];
                 Vector3 split = target - (target - points[^2]).normalized * _approachRange;
                 points[^1] = split;
-                castApproachLine.Start = split;
-                castApproachLine.End = target;
-                castApproachLine.gameObject.SetActive(true);
+                ShowCastLeg(split, target);
+            }
+            else if (_groundCastPending)
+            {
+                // The Move order already stops inside range, so the cast leg runs on from its end.
+                ShowCastLeg(points[^1], _groundCastPoint);
             }
             else if (_isCaster)
             {

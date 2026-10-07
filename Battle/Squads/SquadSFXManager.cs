@@ -19,13 +19,22 @@ namespace TJ
         private const float MountCallChance = 0.5f;
         private const float ChargeShoutIntervalMin = 1.5f;
         private const float ChargeShoutIntervalMax = 3f;
+        // Less flag travel than this between shouts counts as standing; a mage casting from range keeps its Attack order.
+        private const float ChargeShoutMinTravel = 1f;
         // Where a charge shout's linear rolloff reaches silence.
         private const float ChargeShoutMaxDistance = 60f;
+        // The roar as a sprint starts: several voices at once, heard from farther than a single shout.
+        private const float SprintRoarMaxDistance = 110f;
+        private const int SprintRoarModelsPerVoice = 10;
+        private const int SprintRoarMaxVoices = 5;
+        private const float SprintRoarSpread = 0.3f;
         private const float _fadeOutDuration = 2f;
 
         private VoiceSFX _voiceSFX;
         private MountSFX _mountSFX;
         private bool _isInfantry;
+        // A one-model squad (single monster, mage) has no running, march or rattle loop.
+        private bool _hasMoveLoops;
         // Runtime copy of secondaryLoopingSource; only heavy squads get one.
         private AudioSource _rattleSource;
         // Effects slider value for the looping sources. One-shots go through SFXManager, which applies its own channel.
@@ -38,17 +47,20 @@ namespace TJ
         private bool _isMoving;
         private bool _isInCombat;
         private bool _gamePaused;
+        // Sources stay off through deployment; an order staged then is replayed when the battle starts.
+        private bool _battleStarted;
 
-        public void Initialize(VoiceSFX voiceSFX, bool isInfantry, MountSFX mountSFX, bool heavyArmor, Weather weather)
+        public void Initialize(VoiceSFX voiceSFX, bool isInfantry, MountSFX mountSFX, bool heavyArmor, Weather weather, bool singleModel)
         {
             _voiceSFX = voiceSFX;
             _mountSFX = mountSFX;
-            _isInfantry = isInfantry;
+            _hasMoveLoops = !singleModel;
+            _isInfantry = isInfantry && _hasMoveLoops;
 
             if (_mountSFX != null && _mountSFX.moveLoop != null) movingSource.clip = _mountSFX.moveLoop;
             if (weather == Weather.Snow && snowMarchLoop != null) secondaryLoopingSource.clip = snowMarchLoop;
             else if (weather == Weather.Rain && mudMarchLoop != null) secondaryLoopingSource.clip = mudMarchLoop;
-            if (heavyArmor && armorRattleLoop != null) _rattleSource = CreateRattleSource();
+            if (heavyArmor && _hasMoveLoops && armorRattleLoop != null) _rattleSource = CreateRattleSource();
 
             movingSource.enabled = false;
             secondaryLoopingSource.enabled = false;
@@ -76,10 +88,12 @@ namespace TJ
         private void OnGamePhaseChanged(GamePhase phase)
         {
             if (phase != GamePhase.Battle) return;
+            _battleStarted = true;
             movingSource.enabled = true;
             secondaryLoopingSource.enabled = true;
             combatLoopingSource.enabled = true;
             if (_rattleSource != null) _rattleSource.enabled = true;
+            if (_isMoving) StartChargeSound();
         }
 
         private void Update()
@@ -97,7 +111,7 @@ namespace TJ
             }
             else
             {
-                if (_isMoving) movingSource.UnPause();
+                if (_isMoving && _hasMoveLoops) movingSource.UnPause();
                 if (_isInfantry && _isMoving) secondaryLoopingSource.UnPause();
                 if (_isInCombat) combatLoopingSource.UnPause();
                 if (_rattleSource != null && _isMoving) _rattleSource.UnPause();
@@ -123,9 +137,10 @@ namespace TJ
             }
         }
 
-        public void StartChargeSound(Vector3 squadCenter)
+        public void StartChargeSound()
         {
             _isMoving = true;
+            if (!_battleStarted) return;
             RefreshMovingSource();
 
             if (_isInfantry)
@@ -143,8 +158,29 @@ namespace TJ
                 _rattleSource.Play();
             }
 
+        }
+
+        // The shouts belong to the sprint, not to the order: a squad roars as it breaks into the charge.
+        public void StartSprintRoar(int modelCount)
+        {
+            if (!_battleStarted) return;
             if (_chargeShoutCoroutine != null) StopCoroutine(_chargeShoutCoroutine);
-            _chargeShoutCoroutine = StartCoroutine(ChargeShoutLoop(squadCenter));
+            _chargeShoutCoroutine = StartCoroutine(SprintRoarThenShouts(modelCount));
+        }
+
+        // The mount's cry at the moment of impact; the clash clips themselves carry no animal.
+        public void PlayMountCall(Vector3 position)
+        {
+            if (_mountSFX == null || _mountSFX.calls == null || _mountSFX.calls.Length == 0) return;
+            AudioClip call = _mountSFX.calls[Random.Range(0, _mountSFX.calls.Length)];
+            SFXManager.Instance.Play(call, position, SprintRoarMaxDistance, AudioChannel.Voices);
+        }
+
+        public void StopSprintRoar()
+        {
+            if (_chargeShoutCoroutine == null) return;
+            StopCoroutine(_chargeShoutCoroutine);
+            _chargeShoutCoroutine = null;
         }
 
         public void StopChargeSound()
@@ -154,20 +190,17 @@ namespace TJ
 
             if (_isInfantry) StartFadeOut(ref _secondaryFadeCoroutine, secondaryLoopingSource);
             if (_rattleSource != null) StartFadeOut(ref _rattleFadeCoroutine, _rattleSource);
-            if (_chargeShoutCoroutine != null)
-            {
-                StopCoroutine(_chargeShoutCoroutine);
-                _chargeShoutCoroutine = null;
-            }
+            StopSprintRoar();
         }
 
         public void StartCombatSound()
         {
             _isInCombat = true;
             RefreshMovingSource();
+            // Re-entering combat mid-fade keeps the bed; left running, the fade would stop it.
+            CancelFade(ref _combatFadeCoroutine, combatLoopingSource);
             if (!combatLoopingSource.isPlaying)
             {
-                CancelFade(ref _combatFadeCoroutine, combatLoopingSource);
                 combatLoopingSource.volume = _baseVolume;
                 combatLoopingSource.loop = true;
                 combatLoopingSource.Play();
@@ -183,7 +216,7 @@ namespace TJ
 
         private void RefreshMovingSource()
         {
-            if (_isMoving)
+            if (_isMoving && _hasMoveLoops)
             {
                 CancelFade(ref _movingFadeCoroutine, movingSource);
                 if (!movingSource.isPlaying)
@@ -210,7 +243,8 @@ namespace TJ
         private void StartFadeOut(ref Coroutine fadeCoroutine, AudioSource source)
         {
             if (!source.isPlaying) return;
-            if (fadeCoroutine != null) StopCoroutine(fadeCoroutine);
+            // Stops arrive every 4 frames in combat; restarting the fade each time kept the source playing at zero volume forever.
+            if (fadeCoroutine != null) return;
             fadeCoroutine = StartCoroutine(FadeOut(source));
         }
 
@@ -228,12 +262,44 @@ namespace TJ
             source.volume = _baseVolume;
         }
 
-        private IEnumerator ChargeShoutLoop(Vector3 squadCenter)
+        private IEnumerator SprintRoarThenShouts(int modelCount)
+        {
+            bool hasShouts = _voiceSFX != null && _voiceSFX.chargeSFX != null && _voiceSFX.chargeSFX.Length > 0;
+            if (hasShouts)
+            {
+                int voices = Mathf.Clamp(modelCount / SprintRoarModelsPerVoice, 1, SprintRoarMaxVoices);
+                int start = Random.Range(0, _voiceSFX.chargeSFX.Length);
+                for (int i = 0; i < voices; i++)
+                {
+                    AudioClip clip = _voiceSFX.chargeSFX[(start + i) % _voiceSFX.chargeSFX.Length];
+                    SFXManager.Instance.Play(clip, transform.position, SprintRoarMaxDistance, AudioChannel.Voices);
+                    yield return new WaitForSeconds(Random.Range(0f, SprintRoarSpread / voices * 2f));
+                }
+            }
+            if (_mountSFX != null && _mountSFX.calls != null && _mountSFX.calls.Length > 0)
+            {
+                AudioClip call = _mountSFX.calls[Random.Range(0, _mountSFX.calls.Length)];
+                SFXManager.Instance.Play(call, transform.position, SprintRoarMaxDistance, AudioChannel.Voices);
+            }
+            yield return new WaitForSeconds(Random.Range(ChargeShoutIntervalMin, ChargeShoutIntervalMax));
+            yield return ChargeShoutLoop();
+        }
+
+        // Reads the flag's live position each shout so the cries travel with the squad.
+        private IEnumerator ChargeShoutLoop()
         {
             int lastIndex = -1;
+            bool firstShout = true;
+            Vector3 lastCheck = transform.position;
             while (true)
             {
-                if (_voiceSFX != null && _voiceSFX.chargeSFX != null && _voiceSFX.chargeSFX.Length > 0)
+                Vector3 squadCenter = transform.position;
+                // A battle that auto-pauses on start would otherwise shout once into the pause.
+                if (Time.timeScale == 0) { yield return null; continue; }
+                bool moving = firstShout || (squadCenter - lastCheck).sqrMagnitude >= ChargeShoutMinTravel * ChargeShoutMinTravel;
+                firstShout = false;
+                lastCheck = squadCenter;
+                if (moving && _voiceSFX != null && _voiceSFX.chargeSFX != null && _voiceSFX.chargeSFX.Length > 0)
                 {
                     int index = lastIndex;
                     if (_voiceSFX.chargeSFX.Length > 1)
@@ -245,7 +311,7 @@ namespace TJ
                     lastIndex = index;
                     SFXManager.Instance.Play(_voiceSFX.chargeSFX[index], squadCenter, ChargeShoutMaxDistance, AudioChannel.Voices);
                 }
-                if (_mountSFX != null && _mountSFX.calls != null && _mountSFX.calls.Length > 0 && Random.value < MountCallChance)
+                if (moving && _mountSFX != null && _mountSFX.calls != null && _mountSFX.calls.Length > 0 && Random.value < MountCallChance)
                 {
                     AudioClip call = _mountSFX.calls[Random.Range(0, _mountSFX.calls.Length)];
                     SFXManager.Instance.Play(call, squadCenter, ChargeShoutMaxDistance, AudioChannel.Voices);

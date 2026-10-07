@@ -133,6 +133,8 @@ namespace TJ.Event
             claimedByDestinyButton.onClick.RemoveAllListeners();
             claimedByDestinyButton.onClick.AddListener(() => ActivateClaimedByDestiny());
         }
+        /// <summary>Dev Tools: the next Event node shows this event instead of drawing one. Read once, then cleared.</summary>
+        public static string DevForcedEventKey;
         public async void LoadEventPanel(int _chapter)
         {
             if (_eventScenePrefab != null && _eventScenePrefab.RuntimeKeyIsValid())
@@ -184,7 +186,9 @@ namespace TJ.Event
             EventDefinitionSO resumeEvent = resume.active && resume.nodeType == NodeType.Event
                 ? System.Array.Find(gc_Events, x => x.TableKey == resume.eventKey)
                 : null;
-            gc_Event = resumeEvent != null ? resumeEvent : GetRandomEvent();
+            EventDefinitionSO forcedEvent = string.IsNullOrEmpty(DevForcedEventKey) ? null : System.Array.Find(gc_Events, x => x.TableKey == DevForcedEventKey);
+            DevForcedEventKey = null;
+            gc_Event = resumeEvent != null ? resumeEvent : forcedEvent != null ? forcedEvent : GetRandomEvent();
             rollsThisEvent = 0;
             fateshineUsed = false;
             string chapterLocalized = LocalizationManager.Instance.GetText("Chapter");

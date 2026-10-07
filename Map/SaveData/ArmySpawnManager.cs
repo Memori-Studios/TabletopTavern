@@ -3,7 +3,7 @@ using UnityEngine;
 using Unity.Entities;
 using Unity.Transforms;
 using Unity.Mathematics;
-using GPUECSAnimationBaker.Engine.AnimatorSystem;
+using TabletopTavern.GpuAnim;
 using TJ;
 using ProjectDawn.Navigation;
 using System.Linq;
@@ -39,6 +39,7 @@ namespace Memori.SaveData
         public int SpellKillCount => squadIdKillCounter.TryGetValue(SPELL_KILL_SQUAD_ID, out int kills) ? kills : 0;
         // Filled from the ECS damage totals at battle end, because the totals die with the battle's world.
         Dictionary<int, int> squadIdDamageDealt = new();
+        Dictionary<int, float> squadIdDamageValue = new();
         int squadIndex = 0;
 
         List<SquadToLoad> withdrawnSquads = new();
@@ -52,6 +53,8 @@ namespace Memori.SaveData
         readonly HashSet<string> summonedUniqueIds = new();
         readonly HashSet<int> summonedSquadIds = new();
         public bool IsSummonedSquad(int _squadId) => summonedSquadIds.Contains(_squadId);
+        // RegisterSquad runs before RecordSquadUniqueID knows the squad id, so it asks by GUID.
+        public bool IsSummonedUniqueId(string _uniqueID) => summonedUniqueIds.Contains(_uniqueID);
 
         readonly float GAP_BETWEEN_SQUADS_X = 30f; // Distance between units
         readonly float GAP_BETWEEN_SQUADS_Z = 20f;  // Distance between front and back rows
@@ -464,7 +467,7 @@ namespace Memori.SaveData
             void AddDamageEntry(SquadToLoad squad)
             {
                 if (!uniqueIDToSquadId.TryGetValue(squad.UniqueID, out int squadId)) return;
-                squadGUIDDamage.Add(new SquadDamageStored { SquadGUID = squad.UniqueID, Damage = GetSquadDamageDealt(squadId) });
+                squadGUIDDamage.Add(new SquadDamageStored { SquadGUID = squad.UniqueID, Damage = GetSquadDamageDealt(squadId), Value = GetSquadDamageValue(squadId) });
             }
             foreach (SquadToLoad squad in playerArmyLoaded) AddDamageEntry(squad);
             foreach (SquadToLoad squad in enemyArmyLoaded) AddDamageEntry(squad);
@@ -565,6 +568,8 @@ namespace Memori.SaveData
 
             SteamAchievements.AddStat(SteamStatId.UnitKills, SpellKillCount);
             AnalyticsBattleReport report = GameEventTracker.TryBuild("battleEnded", () => BuildBattleReport(playerArmyLoaded, enemyArmyLoaded, _playerWonBattle));
+            // No Respite: banked lifesteal would regrow lost models, which the March never allows.
+            if (!BattleManager.Instance.SquadManager.OrdealActive(OrdealId.NoRespite)) ApplyBloodBank(playerArmyLoaded);
             SaveDataHandler.SaveSquadsPostBattle(playerArmyLoaded, enemyArmyLoaded, _playerWonBattle, squadGUIDKillCounter, squadGUIDLossCounter, squadGUIDDamage, SpellKillCount, report);
             Debug.Log($"Saved post-battle squad data for {( _playerWonBattle ? "player" : "enemy")} with {squadGUIDKillCounter.Count} entries");
         }
@@ -591,6 +596,8 @@ namespace Memori.SaveData
             public int Kills;
             public int Lost;
             public int Damage;
+            // The worth of the enemy troops that damage destroyed, in unit value points.
+            public float Value;
             public int UnitsLeft;
         }
 
@@ -628,6 +635,7 @@ namespace Memori.SaveData
                     Kills = squadIdKillCounter.TryGetValue(squadId, out int kills) ? kills : 0,
                     Lost = Mathf.Max(0, unitsStart - unitsLeft),
                     Damage = GetSquadDamageDealt(squadId),
+                    Value = GetSquadDamageValue(squadId),
                     UnitsLeft = unitsLeft,
                 });
             }
@@ -684,6 +692,7 @@ namespace Memori.SaveData
                 UnitsEnd = unitsEnd,
                 Kills = squadIdKillCounter.TryGetValue(squadId, out int kills) ? kills : 0,
                 Damage = GetSquadDamageDealt(squadId),
+                Value = GetSquadDamageValue(squadId),
                 Status = withdrew ? "Withdrew" : unitsEnd <= 0 ? "Dead" : "Stand",
             });
         }
@@ -1573,9 +1582,9 @@ namespace Memori.SaveData
                     dat.RunSpeedThreshold = isDwarf ? 1f : 2f;
                     dat.WalkSpeedThreshold = isDwarf ? 0.5f : 1f;
                     entityManager.SetComponentData(entity, dat);
-                    GpuEcsAnimatorControlComponent controlComp = entityManager.GetComponentData<GpuEcsAnimatorControlComponent>(
+                    GpuAnimControl controlComp = entityManager.GetComponentData<GpuAnimControl>(
                         dat.gpuEcsAnimatorEntity);
-                    controlComp.transitionSpeed = 0.5f;
+                    controlComp.TransitionSeconds = 0.5f;
                     entityManager.SetComponentData(dat.gpuEcsAnimatorEntity, controlComp);
 
                     BattleManager.Instance.UnitDebugSetUp.SetUpPositionDebug(entity, entityManager);
@@ -1583,9 +1592,10 @@ namespace Memori.SaveData
                 else
                 {
                     // Structure: instantiate the artillery GPU anim dummy so all animation
-                    // system lookups (GetComponentRW<GpuEcsAnimatorControlComponent>) have a
+                    // system lookups (GetComponentRW<GpuAnimControl>) have a
                     // valid entity instead of Entity.Null
                     Entity dummyAnimEntity = entityManager.Instantiate(entitiesReferences.artilleryGPUAnim);
+                    GpuAnimLegacy.Attach(entityManager, dummyAnimEntity);
                     entityManager.AddComponentData(dummyAnimEntity, new Parent { Value = entity });
 
                     AnimationDataHolder dat = entityManager.GetComponentData<AnimationDataHolder>(entity);
@@ -1694,10 +1704,12 @@ namespace Memori.SaveData
             }
         }
 
+        // Ground layers only, so a unit never lands on top of a wall, tree, flag or bonus marker collider.
+        private static int GroundMask => LayerMask.GetMask("Tile", "Water", "Swamp", "Forest", "Path");
         private float3 GetPointOnTerrain(float3 _origionalPoint)
         {
-            //raycast down at point 
-            if (Physics.Raycast(new Vector3(_origionalPoint.x, 10, _origionalPoint.z), Vector3.down, out RaycastHit hit, 11, ~LayerMask.NameToLayer("Tile"))) {
+            //raycast down at point
+            if (Physics.Raycast(new Vector3(_origionalPoint.x, 10, _origionalPoint.z), Vector3.down, out RaycastHit hit, 11, GroundMask)) {
                 return hit.point;
             } else {
                 Debug.LogError("No terrain found");
@@ -1727,9 +1739,14 @@ namespace Memori.SaveData
         {
             return squadIdDamageDealt.TryGetValue(_squadId, out int damage) ? damage : 0;
         }
+        public float GetSquadDamageValue(int _squadId)
+        {
+            return squadIdDamageValue.TryGetValue(_squadId, out float value) ? value : 0f;
+        }
         private void CaptureDamageTotals()
         {
             squadIdDamageDealt.Clear();
+            squadIdDamageValue.Clear();
             World world = World.DefaultGameObjectInjectionWorld;
             if (world == null || !world.IsCreated) return;
 
@@ -1739,7 +1756,34 @@ namespace Memori.SaveData
             if (query.TryGetSingletonBuffer(out DynamicBuffer<SquadDamageTotalElement> totals, true))
             {
                 foreach (SquadDamageTotalElement total in totals)
+                {
                     squadIdDamageDealt[total.SquadId] = total.Total;
+                    squadIdDamageValue[total.SquadId] = total.Value;
+                }
+            }
+            query.Dispose();
+        }
+        // Runs after losses and the battle report are taken, so both still count the models that fell.
+        private void ApplyBloodBank(SquadToLoad[] playerArmy)
+        {
+            World world = World.DefaultGameObjectInjectionWorld;
+            if (world == null || !world.IsCreated) return;
+
+            EntityQuery query = world.EntityManager.CreateEntityQuery(ComponentType.ReadOnly<BloodBankElement>());
+            query.CompleteDependency();
+            if (query.TryGetSingletonBuffer(out DynamicBuffer<BloodBankElement> bank, true))
+            {
+                foreach (BloodBankElement entry in bank)
+                {
+                    for (int i = 0; i < playerArmy.Length; i++)
+                    {
+                        if (!uniqueIDToSquadId.TryGetValue(playerArmy[i].UniqueID, out int squadId) || squadId != entry.SquadId) continue;
+                        // A squad wiped out this battle stays dead.
+                        if (playerArmy[i].SquadCurrentHealth > 0)
+                            playerArmy[i].SquadCurrentHealth = Mathf.Min(playerArmy[i].SquadMaxHealth, playerArmy[i].SquadCurrentHealth + entry.Banked);
+                        break;
+                    }
+                }
             }
             query.Dispose();
         }

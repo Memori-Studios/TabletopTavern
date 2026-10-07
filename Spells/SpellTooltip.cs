@@ -83,7 +83,7 @@ namespace TJ.Spells
         {
             if (string.IsNullOrEmpty(rawDescription)) return spell.Spell.ToString();
             string description = string.Format(rawDescription, spell.SpellType,
-                $"<b>{Mathf.RoundToInt(spell.ScaledModifierValue(potency))}</b>", $"<b>{spell.SpellDuration}</b>");
+                $"<b>{Mathf.RoundToInt(spell.ScaledModifierValue(potency))}</b>", $"<b>{spell.SpellDuration}</b>", $"<b>{Mathf.RoundToInt(spell.ScaledMonstrousPercent(potency))}</b>");
             return KeywordText.ForTooltip(description);
         }
 

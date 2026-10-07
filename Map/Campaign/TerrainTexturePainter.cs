@@ -20,26 +20,47 @@ namespace TJ.Map
         [SerializeField] private int grassDetailLayer = 0;
         List<Path> paths = new(); // List of paths to paint under
         private MapRegion _mapRegion;
+        // Rows sent to the terrain per call. A strip holds every terrain layer, so this caps the one large buffer:
+        // the whole map at once is a 160 MB array.
+        private const int StripRows = 128;
+        // Shared by ClearTerrain and PaintTextures, dropped once the paint is written.
+        private float[,,] _strip;
+        private void OnDestroy()
+        {
+            // A map closed between the clear and the paint would otherwise leave the buffer on this object.
+            _strip = null;
+        }
+        // Writes the painted layers to the terrain strip by strip; every layer not in paintedLayers is written as zero.
+        private void WriteAlphamaps(TerrainData terrainData, float[,,] weights, List<int> paintedLayers)
+        {
+            int width = terrainData.alphamapWidth, height = terrainData.alphamapHeight, layers = terrainData.alphamapLayers;
+            for (int startY = 0; startY < height; startY += StripRows)
+            {
+                int rows = Mathf.Min(StripRows, height - startY);
+                if (_strip == null || _strip.GetLength(0) != rows || _strip.GetLength(1) != width || _strip.GetLength(2) != layers)
+                    _strip = new float[rows, width, layers];
+                for (int local = 0; weights != null && local < paintedLayers.Count; local++)
+                {
+                    int layer = paintedLayers[local];
+                    for (int y = 0; y < rows; y++)
+                    {
+                        for (int x = 0; x < width; x++)
+                        {
+                            _strip[y, x, layer] = weights[startY + y, x, local];
+                        }
+                    }
+                }
+                terrainData.SetAlphamaps(0, startY, _strip);
+            }
+        }
         public void ClearTerrain()
         {
             // Clear the terrain textures and details
             TerrainData terrainData = terrain.terrainData;
-            int alphamapWidth = terrainData.alphamapWidth;
-            int alphamapHeight = terrainData.alphamapHeight;
 
             // Reset the splatmap
-            float[,,] alphamaps = new float[alphamapHeight, alphamapWidth, terrainData.alphamapLayers];
-            for (int y = 0; y < alphamapHeight; y++)
-            {
-                for (int x = 0; x < alphamapWidth; x++)
-                {
-                    for (int layer = 0; layer < terrainData.alphamapLayers; layer++)
-                    {
-                        alphamaps[y, x, layer] = 0f;
-                    }
-                }
-            }
-            terrainData.SetAlphamaps(0, 0, alphamaps);
+            _strip = null;
+            WriteAlphamaps(terrainData, null, null);
 
             // Reset the detail maps
             int detailWidth = terrainData.detailWidth;
@@ -64,16 +85,23 @@ namespace TJ.Map
             TerrainData terrainData = terrain.terrainData;
             int alphamapWidth = terrainData.alphamapWidth;
             int alphamapHeight = terrainData.alphamapHeight;
-            float[,,] alphamaps = new float[alphamapHeight, alphamapWidth, terrainData.alphamapLayers];
+
+            // Only the layers this region paints ever carry weight, so only those are kept in memory.
+            List<int> paintedLayers = new List<int>(3);
+            foreach (int layer in new[] { resetTextureLayerIndex, pathPointLayerIndex, nodePointLayerIndex })
+            {
+                if (layer >= 0 && layer < terrainData.alphamapLayers && !paintedLayers.Contains(layer)) paintedLayers.Add(layer);
+            }
+            // -1 when a region names a layer the terrain does not have: nothing matches it, as before.
+            int resetLocal = paintedLayers.IndexOf(resetTextureLayerIndex);
+            int pathLocal = paintedLayers.IndexOf(pathPointLayerIndex);
+            int nodeLocal = paintedLayers.IndexOf(nodePointLayerIndex);
+            float[,,] alphamaps = new float[alphamapHeight, alphamapWidth, paintedLayers.Count];
 
             // Get detail map data
             int detailWidth = terrainData.detailWidth;
             int detailHeight = terrainData.detailHeight;
             int[][,] detailLayers = new int[terrainData.detailPrototypes.Length][,];
-            for (int i = 0; i < terrainData.detailPrototypes.Length; i++)
-            {
-                detailLayers[i] = terrainData.GetDetailLayer(0, 0, detailWidth, detailHeight, i);
-            }
 
             // Step 1: Reset the detail map to grassDetailLayer (e.g., grass)
             for (int i = 0; i < terrainData.detailPrototypes.Length; i++)
@@ -98,9 +126,9 @@ namespace TJ.Map
             {
                 for (int x = 0; x < alphamapWidth; x++)
                 {
-                    for (int layer = 0; layer < terrainData.alphamapLayers; layer++)
+                    for (int layer = 0; layer < paintedLayers.Count; layer++)
                     {
-                        alphamaps[y, x, layer] = (layer == resetTextureLayerIndex) ? 1f : 0f;
+                        alphamaps[y, x, layer] = (layer == resetLocal) ? 1f : 0f;
                     }
                 }
             }
@@ -175,10 +203,10 @@ namespace TJ.Map
                             if (strength <= 0) continue;
 
                             // Update alphamap: Increase weight of target texture, reduce others
-                            for (int layer = 0; layer < terrainData.alphamapLayers; layer++)
+                            for (int layer = 0; layer < paintedLayers.Count; layer++)
                             {
                                 float currentWeight = alphamaps[y, x, layer];
-                                if (layer == pathPointLayerIndex)
+                                if (layer == pathLocal)
                                 {
                                     // Increase target texture weight
                                     alphamaps[y, x, layer] = Mathf.Lerp(currentWeight, 1, strength);
@@ -277,10 +305,10 @@ namespace TJ.Map
                         if (strength <= 0) continue;
 
                         // Update Alphamap: Increase weight of target texture, reduce others
-                        for (int layer = 0; layer < terrainData.alphamapLayers; layer++)
+                        for (int layer = 0; layer < paintedLayers.Count; layer++)
                         {
                             float currentWeight = alphamaps[y, x, layer];
-                            if (layer == nodePointLayerIndex)
+                            if (layer == nodeLocal)
                             {
                                 // Increase target texture weight
                                 alphamaps[y, x, layer] = Mathf.Lerp(currentWeight, 1, strength);
@@ -323,7 +351,8 @@ namespace TJ.Map
             }
 
             // Apply the modified alphamap
-            terrainData.SetAlphamaps(0, 0, alphamaps);
+            WriteAlphamaps(terrainData, alphamaps, paintedLayers);
+            _strip = null;
 
             // Apply the modified detail layers
             for (int i = 0; i < terrainData.detailPrototypes.Length; i++)

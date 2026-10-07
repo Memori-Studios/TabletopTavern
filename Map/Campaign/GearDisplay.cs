@@ -21,6 +21,8 @@ namespace TJ
     public class GearDisplay : MemoriButtonV2
     {
         [SerializeField] private Image gearIcon;
+        // Shown over gear an Ordeal switches off or Rusted Arms broke; null on a slot built before it existed.
+        [SerializeField] private GameObject inactiveCross;
 
         [Header("Sell Tag")]
         [SerializeField] private GameObject gearSellTag;
@@ -63,9 +65,10 @@ namespace TJ
 
             CampaignSaveData run = CampaignManager.Instance.CampaignSaveManager.SaveData;
             broken = run.IsGearBroken(gearID);
-            OrdealId countering = OrdealRegistry.CounteringOrdeal(run.ordeals, gearID);
+            OrdealId countering = OrdealRegistry.CounteringOrdeal(run.ActiveOrdeals, gearID);
             string inactiveNote = broken ? OrdealRegistry.BrokenNote() : countering != OrdealId.None ? OrdealRegistry.InactiveNote(countering) : "";
             gearIcon.color = inactiveNote.Length > 0 ? iconColor * InactiveIconColor : iconColor;
+            if (inactiveCross != null) inactiveCross.SetActive(inactiveNote.Length > 0);
 
             memoriTooltipTrigger.SetUpToolTip(new TooltipContent
             {
@@ -147,6 +150,7 @@ namespace TJ
             gearIcon.sprite = null;
             gearIcon.enabled = false;
             gearIcon.color = iconColor;
+            if (inactiveCross != null) inactiveCross.SetActive(false);
             broken = false;
             gearSellTag.SetActive(false);
             Button.onClick.RemoveAllListeners();

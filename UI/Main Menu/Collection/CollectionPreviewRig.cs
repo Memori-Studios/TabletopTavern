@@ -45,7 +45,7 @@ namespace TJ.MainMenu
             RaceBasePrefab basePrefab = TabletopTavernData.Instance.GetRaceData(race).RaceBasePrefab;
             bool bigBase = TabletopTavernData.Instance.GetUnitSizeFromUnitName(unit) != UnitSize.Infantry;
             Load(TabletopTavernData.Instance.GetRecruitmentPrefabKey(unit),
-                () => TabletopTavernData.Instance.LoadRecruitmentPrefabAsync(unit), basePrefab, bigBase, found);
+                () => TabletopTavernData.Instance.LoadRecruitmentPrefabAsync(unit), basePrefab, bigBase, found, unit);
         }
 
         public void ShowHero(Hero hero)
@@ -55,10 +55,10 @@ namespace TJ.MainMenu
             _shownId = id;
             RaceBasePrefab basePrefab = TabletopTavernData.Instance.GetRaceData(hero.Race).RaceBasePrefab;
             Load(TabletopTavernData.Instance.GetHeroPrefabKey(hero.HeroID),
-                () => TabletopTavernData.Instance.LoadHeroPrefabAsync(hero.HeroID), basePrefab, false, true);
+                () => TabletopTavernData.Instance.LoadHeroPrefabAsync(hero.HeroID), basePrefab, false, true, null);
         }
 
-        private async void Load(string key, System.Func<System.Threading.Tasks.Task<GameObject>> loader, RaceBasePrefab basePrefab, bool bigBase, bool found)
+        private async void Load(string key, System.Func<System.Threading.Tasks.Task<GameObject>> loader, RaceBasePrefab basePrefab, bool bigBase, bool found, UnitName? unit)
         {
             int version = ++_version;
             GameObject prefab = await loader();
@@ -73,10 +73,10 @@ namespace TJ.MainMenu
 
             ClearModel();
             _loadedKey = key;
-            Place(prefab, basePrefab, bigBase, found);
+            Place(prefab, basePrefab, bigBase, found, unit);
         }
 
-        private void Place(GameObject prefab, RaceBasePrefab basePrefab, bool bigBase, bool found)
+        private void Place(GameObject prefab, RaceBasePrefab basePrefab, bool bigBase, bool found, UnitName? unit)
         {
             int layer = PreviewLayer();
 
@@ -87,7 +87,7 @@ namespace TJ.MainMenu
             _base.SetUp(found, undiscoveredMaterial);
 
             // Parented after placement, keeping world scale, so a wide plinth never stretches the model.
-            _model = Instantiate(prefab, modelHolder).transform;
+            _model = (unit.HasValue ? ModUnitPreview.Instantiate(unit.Value, prefab, modelHolder) : Instantiate(prefab, modelHolder)).transform;
             _model.localPosition = Vector3.zero;
             _model.localRotation = Quaternion.identity;
             _model.SetParent(_base.transform, true);
@@ -101,7 +101,11 @@ namespace TJ.MainMenu
                 if (!found) animator.speed = 0f;
             }
 
-            if (!found)
+            if (!found && ModUnitPreview.IsModVisual(_model.gameObject, out var modPlayer))
+            {
+                ModUnitPreview.ShowUndiscovered(modPlayer, undiscoveredMaterial);
+            }
+            else if (!found)
             {
                 foreach (Renderer renderer in _model.GetComponentsInChildren<Renderer>())
                 {

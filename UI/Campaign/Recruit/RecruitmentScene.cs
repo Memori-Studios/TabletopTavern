@@ -47,7 +47,7 @@ public class RecruitmentScene : MonoBehaviour
             GameObject prefab = await TabletopTavernData.Instance.LoadRecruitmentPrefabAsync(_recruitmentOptions[i]);
             if (token.IsCancellationRequested) return;
             if (prefab == null) return;
-            gameObjects[i] = Instantiate(prefab, GetHolder(i));
+            gameObjects[i] = ModUnitPreview.Instantiate(_recruitmentOptions[i], prefab, GetHolder(i));
         }
     }
     private Transform GetHolder(int _index)

@@ -37,6 +37,9 @@ namespace TJ
                 int maxDamageAmount = 0;
                 // Health left to credit this frame, so overkill never counts as damage dealt.
                 int creditableHealth = math.max(0, health.ValueRO.Value);
+                // A squad with no worth on it (a gate, a test squad) pays out nothing.
+                float worthPerModel = SystemAPI.HasComponent<SquadWorth>(parentSquadEntity.parentSquadEntity)
+                    ? SystemAPI.GetComponent<SquadWorth>(parentSquadEntity.parentSquadEntity).PerModel : 0f;
 
                 Unit unitTakingDamage = SystemAPI.GetComponent<Unit>(damageReceivingEntity);
                 bool infantry = SystemAPI.HasComponent<InfantryTag>(damageReceivingEntity);
@@ -45,6 +48,7 @@ namespace TJ
                 bool artillery = SystemAPI.HasComponent<ArtilleryUnit>(damageReceivingEntity);
 
                 bool hasDamageBuffer = SystemAPI.TryGetSingletonBuffer<SquadDamageBufferElement>(out var globalDamageBuffer);
+                bool hasLifestealBuffer = SystemAPI.TryGetSingletonBuffer<BloodDrinkerHealElement>(out var lifestealBuffer);
 
                 foreach (var damageElement in damageBuffer)
                 {
@@ -201,8 +205,16 @@ namespace TJ
                         }
                         int credited = math.min(attackHitPoints, creditableHealth);
                         creditableHealth -= credited;
+                        // A Neutral source (an artillery blast) hits both sides, so its side comes from the squad id: below zero is the enemy.
+                        Team sourceTeam = damageElement.TeamOfSource != Team.Neutral ? damageElement.TeamOfSource
+                            : damageElement.DamageSourceSquadId < 0 ? Team.Enemy : Team.Player;
+                        // Hits on the source's own side count as damage dealt but destroy nothing of value.
+                        float value = sourceTeam != entityTeam.Value && maxHealth.Value > 0
+                            ? credited / (float)maxHealth.Value * worthPerModel : 0f;
                         if (hasDamageBuffer)
-                            globalDamageBuffer.Add(new SquadDamageBufferElement { SquadId = damageElement.DamageSourceSquadId, DamageAmount = attackHitPoints, Credited = credited });
+                            globalDamageBuffer.Add(new SquadDamageBufferElement { SquadId = damageElement.DamageSourceSquadId, DamageAmount = attackHitPoints, Credited = credited, Value = value });
+                        if (hasLifestealBuffer && damageElement.Lifesteal && credited > 0)
+                            lifestealBuffer.Add(new BloodDrinkerHealElement { SquadId = damageElement.DamageSourceSquadId, Amount = credited });
                     }
                 }
 

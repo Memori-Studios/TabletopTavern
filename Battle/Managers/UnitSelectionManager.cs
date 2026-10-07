@@ -73,7 +73,7 @@ public class UnitSelectionManager : MonoBehaviour
     {
         if (battleInputManager.IsRearrangingSquads) return;
 
-        if (SettingsManager.Instance.SettingsPanelOpen)
+        if (SettingsManager.Instance.SettingsPanelOpen || TJ.BattleViewModes.OrdersBlocked)
         {
             battleInputManager.CancelPendingMouseActions(unitsAreSelected);
             return;
@@ -1022,6 +1022,14 @@ public class UnitSelectionManager : MonoBehaviour
                 battleInputManager.ResetCursor();
         }
         OnHoverSquadsChanged?.Invoke(new List<int> { previousHoveredSquad });
+    }
+    /// <summary>Stops the terrain glow the cursor left behind; hover is not polled while photo mode is open.</summary>
+    public void ClearHoverForCleanView()
+    {
+        if (cachedBiomeCollider == null) return;
+        cachedBiomeCollider.StopOutlineGlow();
+        BattleManager.Instance.UIManager.HideBonus();
+        cachedBiomeCollider = null;
     }
     private void HandleHoverBattlefieldBonus()
     {

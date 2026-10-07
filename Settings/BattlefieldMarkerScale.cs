@@ -9,7 +9,7 @@ namespace TJ
     public static class BattlefieldMarkerScale
     {
         public const string PrefKey = "BattlefieldMarkersScale";
-        public static readonly float[] Steps = { 1f, 1.25f, 1.5f };
+        public static readonly float[] Steps = { 0.5f, 0.75f, 1f, 1.25f, 1.5f };
         const float SteamDeckDefault = 1.25f;
 
         public static float Default => UIScaler.IsSteamDeck ? SteamDeckDefault : 1f;

@@ -7,7 +7,7 @@ using System.Collections.Generic;
 using System.Linq;
 using Unity.Transforms;
 using Unity.VisualScripting;
-using GPUECSAnimationBaker.Engine.AnimatorSystem;
+using TabletopTavern.GpuAnim;
 using TJ;
 using Memori.Audio;
 
@@ -134,9 +134,9 @@ public class SpawnManager : MonoBehaviour
             dat.WalkSpeedThreshold = isDwarf ? 0.5f : 1f;
             entityCommandBuffer.SetComponent(spawnedEntity, dat);
 
-            GpuEcsAnimatorControlComponent controlComp = entityManager.GetComponentData<GpuEcsAnimatorControlComponent>(dat.gpuEcsAnimatorEntity);
-            controlComp.transitionSpeed = 0.5f;
-            controlComp.startNormalizedTime = 0; //random.NextFloat(0, 1);
+            GpuAnimControl controlComp = entityManager.GetComponentData<GpuAnimControl>(dat.gpuEcsAnimatorEntity);
+            controlComp.TransitionSeconds = 0.5f;
+            controlComp.StartNormalizedTime = 0; //random.NextFloat(0, 1);
             entityManager.SetComponentData(dat.gpuEcsAnimatorEntity, controlComp);
 
             spawnedEntities[i] = spawnedEntity;

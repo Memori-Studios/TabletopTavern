@@ -25,6 +25,7 @@ namespace TJ.Games.EditorTools
         public const string PanelPath = PartFolder + "/Games Panel UI.prefab";
         const string StakePath = PartFolder + "/Games Stake Button.prefab";
         const string CallPath = PartFolder + "/Games Call Button.prefab";
+        const string DiceFolder = "Assets/Art/Icons/UI/Dice";
         const string StatCellPath = "Assets/Data/Prefabs/UI/Map/Town/Town Stat Cell.prefab";
         const string ScenePath = "Assets/Scenes/Map.unity";
         const string ButtonFolder = "Assets/Data/Prefabs/UI/Reuseable/Buttons";
@@ -50,7 +51,6 @@ namespace TJ.Games.EditorTools
         const float LadderStep = 90f;
 
         #region Style
-        static readonly Color Slate = Hex("1F2B2E");
         static readonly Color Brass = Hex("B08A3E");
         static readonly Color Gold = Hex("E9C06A");
         static readonly Color Cream = Hex("ECE6D8");
@@ -70,7 +70,8 @@ namespace TJ.Games.EditorTools
 
         static TMP_FontAsset displayDrop, display;
         static Sprite mount, solid, squareSliced, edgeFade;
-        static Sprite diceIcon, hiloIcon, roundIcon, arrowIcon, rewindIcon;
+        static Sprite diceIcon, hiloIcon, roundIcon, arrowIcon, rewindIcon, dieBlank;
+        static Sprite[] dieFaces;
         static GameObject primaryButton, standardButton, backButton, basicBackground, statCellPart;
 
         static void LoadAssets()
@@ -90,6 +91,9 @@ namespace TJ.Games.EditorTools
             roundIcon = Load<Sprite>("Assets/ImportedPackages/InterfaceFantasyWarriorHUD/Sprites/Icons_Map/ICON_FantasyWarrior_Map_Healing01_Clean.png");
             arrowIcon = Load<Sprite>("Assets/ImportedPackages/InterfaceFantasyWarriorHUD/Sprites/HUD/SPR_HUD_FantasyWarrior_Reticle_Arrow02_Med.png");
             rewindIcon = Load<Sprite>("Assets/Art/Icons/Consumables/Rewind.png");
+            dieBlank = Load<Sprite>(DiceFolder + "/DieBlank.png");
+            dieFaces = new Sprite[6];
+            for (int i = 0; i < 6; i++) dieFaces[i] = Load<Sprite>($"{DiceFolder}/DieFace{i + 1}.png");
             primaryButton = Load<GameObject>(ButtonFolder + "/Button - Primary.prefab");
             standardButton = Load<GameObject>(ButtonFolder + "/Button - Standard.prefab");
             backButton = Load<GameObject>(ButtonFolder + "/Button - Back.prefab");
@@ -447,31 +451,21 @@ namespace TJ.Games.EditorTools
 
             RectTransform chips = Rect("Faces", content);
             HLayout(chips, 3f, TextAnchor.MiddleLeft, new RectOffset());
-            Fixed(chips.gameObject, -1f, 19f);
-            var fills = new Object[6];
-            var edges = new Object[6];
-            var labels = new Object[6];
+            Fixed(chips.gameObject, -1f, 21f);
+            var faces = new Object[6];
             for (int i = 0; i < 6; i++)
             {
-                RectTransform chip = Rect("Face " + (i + 1), chips);
-                Fixed(chip.gameObject, 19f, 19f);
-                fills[i] = Img(Stretch(Rect("Fill", chip)), null, A(Slate, 0.35f));
-                Image edge = Img(Stretch(Rect("Edge", chip)), squareSliced, Cap, Image.Type.Sliced);
-                edge.fillCenter = false;
-                edges[i] = edge;
-                TMP_Text label = Text("Label", chip, displayDrop, 12f, Cap, (i + 1).ToString());
-                Stretch(label.rectTransform);
-                label.alignment = TextAlignmentOptions.Center;
-                labels[i] = label;
+                Image face = Img(Rect("Face " + (i + 1), chips), dieFaces[i], Cap);
+                face.preserveAspect = true;
+                Fixed(face.gameObject, 21f, 21f);
+                faces[i] = face;
             }
 
             GamesCallButton call = go.AddComponent<GamesCallButton>();
             var so = new SerializedObject(call);
             Ref(so, "button", button);
             Ref(so, "chance", chance);
-            Refs(so, "chipFills", fills);
-            Refs(so, "chipEdges", edges);
-            Refs(so, "chipLabels", labels);
+            Refs(so, "chipFaces", faces);
             so.ApplyModifiedPropertiesWithoutUndo();
         }
         #endregion
@@ -609,8 +603,9 @@ namespace TJ.Games.EditorTools
             RectTransform names = Rect("Names", header);
             VLayout(names, 2f, new RectOffset());
             Flexible(names.gameObject, 1f).preferredWidth = 0f;
-            Localize(Text("Title", names, displayDrop, 32f, Gold, "Pick a Game"), "gamesPickTitle");
-            Localize(Text("Subtitle", names, display, 17f, Sub, "Subtitle"), "gamesPickSub");
+            // The scene's banner is off, so the card carries the node's own name and line.
+            Localize(Text("Title", names, displayDrop, 32f, Gold, "Tavern Games"), "Tavern Games");
+            Localize(Text("Subtitle", names, display, 17f, Sub, "Subtitle"), "gamesDesc");
             TMP_Text stakes = CapValue(header, "Stakes", "gamesStakes", 17f, out _);
             stakes.text = "Act III";
             Ref(so, "stakesValue", stakes);
@@ -903,12 +898,12 @@ namespace TJ.Games.EditorTools
 
             RectTransform readout = Rect("Readout", row);
             HLayout(readout, 12f, TextAnchor.MiddleLeft, new RectOffset());
-            Face(readout, "You", "gamesYou", out TMP_Text youFace, out Image youRing);
+            Face(readout, "You", "gamesYou", out Image youFace, out Image youRing);
             TMP_Text vs = Text("Vs", readout, display, 15f, Sub, "vs");
             vs.fontStyle = FontStyles.Italic;
             vs.margin = new Vector4(0f, 0f, 0f, 18f);
             Localize(vs, "gamesVs");
-            Face(readout, "House", "gamesHouse", out TMP_Text houseFace, out Image houseRing);
+            Face(readout, "House", "gamesHouse", out Image houseFace, out Image houseRing);
 
             RectTransform hint = Rect("Rewind Hint", row);
             HLayout(hint, 10f, TextAnchor.MiddleLeft, new RectOffset());
@@ -948,6 +943,7 @@ namespace TJ.Games.EditorTools
             Ref(so, "readout", readout.gameObject);
             Ref(so, "youFace", youFace);
             Ref(so, "houseFace", houseFace);
+            Refs(so, "dieFaces", dieFaces);
             Ref(so, "youRing", youRing);
             Ref(so, "houseRing", houseRing);
             Ref(so, "rewindHint", hint.gameObject);
@@ -956,8 +952,8 @@ namespace TJ.Games.EditorTools
             Ref(so, "continueButton", next.GetComponent<Button>());
         }
 
-        // A flat die tile showing the face as a number, with a ring that marks the winner or loser.
-        static void Face(RectTransform parent, string name, string key, out TMP_Text face, out Image ring)
+        // A flat die tile showing the face as pips, with a ring that marks the winner or loser.
+        static void Face(RectTransform parent, string name, string key, out Image face, out Image ring)
         {
             RectTransform block = Rect(name, parent);
             VerticalLayoutGroup layout = VLayout(block, 5f, new RectOffset());
@@ -965,13 +961,12 @@ namespace TJ.Games.EditorTools
             layout.childForceExpandWidth = false;
             RectTransform tile = Rect("Tile", block);
             Fixed(tile.gameObject, 44f, 44f);
-            ring = Img(Rect("Ring", tile), squareSliced, Positive, Image.Type.Sliced);
-            Centre(ring.rectTransform, 50f, 50f);
+            ring = Img(Rect("Ring", tile), AssetDatabase.LoadAssetAtPath<Sprite>(SyntyGlow), A(Positive, 50f / 255f));
+            Centre(ring.rectTransform, 100f, 100f);
             ring.enabled = false;
-            Img(Stretch(Rect("Die", tile)), squareSliced, Ivory, Image.Type.Sliced);
-            face = Text("Face", tile, displayDrop, 26f, Pip, "5");
-            Stretch(face.rectTransform);
-            face.alignment = TextAlignmentOptions.Center;
+            // The pips are cut out of the face sprite, so a dark die underneath fills them and hides the ring.
+            Img(Stretch(Rect("Pips", tile)), dieBlank, Pip);
+            face = Img(Stretch(Rect("Die", tile)), dieFaces[4], Ivory);
             TMP_Text label = CapLabel(block, "Label");
             label.alignment = TextAlignmentOptions.Center;
             Localize(label, key);

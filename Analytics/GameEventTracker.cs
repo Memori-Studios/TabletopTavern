@@ -6,6 +6,7 @@ using Memori.SaveData;
 using Memori.Scenes;
 using TJ;
 using TJ.Spells;
+using TabletopTavern.Leaderboards;
 using UnityEngine;
 using UnityEngine.SceneManagement;
 
@@ -27,7 +28,7 @@ namespace TabletopTavern.Analytics
         #region Server
         private const string Endpoint = "https://analytics.memoristudios.com/v1/events";
         // Must match WRITE_KEY in Tools/AnalyticsServer/.env. It ships in the build, so it only filters noise.
-        private const string WriteKey = "8cb3ae857774f16277fc2ff8a3a5423b";
+        internal const string WriteKey = "8cb3ae857774f16277fc2ff8a3a5423b";
         #endregion
 
         private const string ConsentPref = "TabletopTavern.Analytics.Consent";
@@ -73,6 +74,9 @@ namespace TabletopTavern.Analytics
         // For bug reports: the id this install's events carry, or "None" when this build sends nothing.
         public static string InstallId => s_http == null ? "None" : s_http.InstallId;
 
+        // The leaderboard server rebuilds a score from these events, so a run can only be submitted while they go out.
+        internal static bool SendsRunEvents => s_http != null && AnalyticsService.IsEnabled;
+
         #region Run events
         // The Metabase views and the Difficulty Sim SQL read these props by name; AnalyticsEventTests pins them.
 
@@ -110,6 +114,7 @@ namespace TabletopTavern.Analytics
                         { "gearSpend", setup.GearSpend },
                     }
                     : null;
+                p["balanceRev"] = RemoteBalance.Revision;
                 AddQualityFlags(p);
                 AnalyticsService.Record("runStarted", p);
             });
@@ -119,6 +124,8 @@ namespace TabletopTavern.Analytics
         public static void RunEnded(CampaignSaveData run, RunResult result, string endReason, int renown = -1)
         {
             TryRun("runEnded", () => AnalyticsService.Record("runEnded", RunEndProps(run, result, endReason, renown)));
+            if (run != null && result == RunResult.Win && run.difficultyLevel == TT_Difficulty.Godking)
+                LeaderboardClient.Submit(run.RunId, LeaderboardClient.KindGodking);
         }
 
         /// <summary>
@@ -131,7 +138,11 @@ namespace TabletopTavern.Analytics
             if (!run.victoryBanked)
                 RunEnded(run, result, endReason, renown);
             else if (run.bookNumber > TabletopTavernConstants.FINAL_STORY_ACT)
+            {
                 TryRun("endlessEnded", () => AnalyticsService.Record("endlessEnded", RunEndProps(run, result, endReason, renown)));
+                if (run.difficultyLevel == TT_Difficulty.Godking && run.marchBattlesWon > 0)
+                    LeaderboardClient.Submit(run.RunId, LeaderboardClient.KindEndless);
+            }
         }
 
         public static void NodeCompleted(CampaignSaveData run, AnalyticsNodeReport node)
@@ -190,11 +201,12 @@ namespace TabletopTavern.Analytics
                 p["pauseUsed"] = report.PauseUsed;
                 p["p"] = Squads(report.Player, true);
                 p["e"] = Squads(report.Enemy, false);
+                p["balanceRev"] = RemoteBalance.Revision;
                 AnalyticsService.Record("battleEnded", p);
             });
         }
 
-        // The cards offered at an endless act's start and the one taken, so avoided cards show up in the data.
+        // The cards a beaten warlord brought and the one taken, so avoided cards show up in the data.
         public static void OrdealPicked(CampaignSaveData run, List<OrdealId> offered, OrdealId taken)
         {
             TryRun("ordealPicked", () =>
@@ -227,6 +239,25 @@ namespace TabletopTavern.Analytics
                 p["recentSigs"] = ExceptionTracker.RecentSignatures;
                 AddQualityFlags(p);
                 AnalyticsService.Record("bugReportSubmitted", p);
+            });
+        }
+
+        /// <summary>
+        /// The player closed photo mode. One event per visit, with what they did inside it.
+        /// </summary>
+        public static void PhotoModeUsed(int photosTaken, float secondsInside, string phase, string look, int captureScale, bool depthOfField)
+        {
+            TryRun("photoModeUsed", () =>
+            {
+                Dictionary<string, object> p = SavedRunProps(SaveDataHandler.CampaignSaveExists());
+                p["photos"] = photosTaken;
+                p["seconds"] = (int)secondsInside;
+                p["phase"] = phase;
+                p["look"] = look;
+                p["captureScale"] = captureScale;
+                p["depthOfField"] = depthOfField;
+                AddQualityFlags(p);
+                AnalyticsService.Record("photoModeUsed", p);
             });
         }
 
@@ -414,6 +445,7 @@ namespace TabletopTavern.Analytics
                     { "n1", r.UnitsEnd },
                     { "k", r.Kills },
                     { "d", r.Damage },
+                    { "v", System.Math.Round(r.Value, 1) },
                     { "st", r.Status },
                 };
                 if (withSlot) squad["s"] = r.Slot;

@@ -15,16 +15,29 @@ namespace TJ.Ordeals
     {
         [SerializeField] private Image _icon;
         [SerializeField] private TMP_Text _overflowText;
+        // The March's two laws read red, apart from the cards a player chose.
+        [SerializeField] private Color _lawColour = new(0.847f, 0.149f, 0.118f, 1f);
+
+        Color _restingColour;
+        bool _restingColourRead;
 
         public void Load(OrdealDefinition ordeal, CampaignSaveData run)
         {
+            if (!_restingColourRead)
+            {
+                _restingColour = _icon.color;
+                _restingColourRead = true;
+            }
+            bool law = OrdealRegistry.IsMarchLaw(ordeal.Id);
             _icon.enabled = true;
             _icon.sprite = SpriteData.GetSprite(ordeal.IconName);
+            _icon.color = law ? _lawColour : _restingColour;
             _overflowText.gameObject.SetActive(false);
             GetComponent<MemoriTooltipTrigger>().SetUpToolTip(new TooltipContent
             {
                 Title = LocalizationManager.Instance.GetText(ordeal.NameKey),
                 Icon = _icon.sprite,
+                IconColor = law ? _lawColour : Color.white,
                 Body = KeywordText.ForTooltip(LocalizationManager.Instance.GetText(ordeal.DescriptionKey)),
                 Detail = DrawnValue(ordeal.Id, run),
             });

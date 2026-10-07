@@ -15,6 +15,8 @@ public class UnitOutlineFeature : ScriptableRendererFeature
 {
     [SerializeField] private Shader outlineShader;
     [SerializeField] private Shader markerShader;
+    [Tooltip("Photo mode's in-focus tint. Optional: with no shader the guide does not draw.")]
+    [SerializeField] private Shader focusGuideShader;
     [Tooltip("GameObject layers whose depth counts as 'a model'. Units, flagposts and props sit on Default; the grass is the ground mesh on Tile.")]
     [SerializeField] private LayerMask modelLayers = 1;
     [Tooltip("How far in front of an outline or marker the terrain may be before it hides them. Lets grass through, not hills.")]
@@ -36,6 +38,7 @@ public class UnitOutlineFeature : ScriptableRendererFeature
 
     private Material _outlineMaterial;
     private Material _markerMaterial;
+    private Material _focusGuideMaterial;
     private UnitOutlinePass _pass;
 
     public override void Create()
@@ -43,7 +46,8 @@ public class UnitOutlineFeature : ScriptableRendererFeature
         if (outlineShader == null || markerShader == null) return;
         _outlineMaterial = CoreUtils.CreateEngineMaterial(outlineShader);
         _markerMaterial = CoreUtils.CreateEngineMaterial(markerShader);
-        _pass = new UnitOutlinePass(_outlineMaterial, _markerMaterial) { renderPassEvent = RenderPassEvent.BeforeRenderingTransparents };
+        if (focusGuideShader != null) _focusGuideMaterial = CoreUtils.CreateEngineMaterial(focusGuideShader);
+        _pass = new UnitOutlinePass(_outlineMaterial, _markerMaterial, _focusGuideMaterial) { renderPassEvent = RenderPassEvent.BeforeRenderingTransparents };
         _pass.ConfigureInput(ScriptableRenderPassInput.Depth);
     }
 
@@ -54,8 +58,12 @@ public class UnitOutlineFeature : ScriptableRendererFeature
         // Only the camera that draws the units; the tavern base camera and the minimap share its type.
         if ((renderingData.cameraData.camera.cullingMask & (1 << TabletopTavernConstants.UNITS_LAYER)) == 0) return;
 
-        uint activeOutlines = UnitOutlineState.ActiveMask;
-        if (activeOutlines == 0 && UnitMarkerState.Count == 0) return;
+        bool focusGuide = TJ.PhotoFocusGuide.Visible && _focusGuideMaterial != null;
+        bool markersHidden = TJ.BattleMarkers.Hidden;
+        if (markersHidden && !focusGuide) return;
+        uint activeOutlines = markersHidden ? 0u : UnitOutlineState.ActiveMask;
+        if (activeOutlines == 0 && (markersHidden || UnitMarkerState.Count == 0) && !focusGuide) return;
+        _pass.ConfigureFocusGuide(focusGuide, markersHidden, TJ.PhotoFocusGuide.Distance, TJ.PhotoFocusGuide.HalfWidth);
 
         float markerScale = TJ.BattlefieldMarkerScale.Current;
         // Only player squads can be selected, so the selected colour is a player colour.
@@ -69,6 +77,7 @@ public class UnitOutlineFeature : ScriptableRendererFeature
         if (_pass != null) _pass.Dispose();
         CoreUtils.Destroy(_outlineMaterial);
         CoreUtils.Destroy(_markerMaterial);
+        CoreUtils.Destroy(_focusGuideMaterial);
     }
 
     private class UnitOutlinePass : ScriptableRenderPass
@@ -83,6 +92,12 @@ public class UnitOutlineFeature : ScriptableRendererFeature
             public Material material;
             public MaterialPropertyBlock properties;
             public TextureHandle outlineDepth;
+        }
+
+        private class FocusGuidePassData
+        {
+            public Material material;
+            public MaterialPropertyBlock properties;
         }
 
         private class MarkerPassData
@@ -104,9 +119,16 @@ public class UnitOutlineFeature : ScriptableRendererFeature
         private static readonly int BlitScaleBiasId = Shader.PropertyToID("_BlitScaleBias");
         private static readonly int MarkersId = Shader.PropertyToID("_UnitMarkers");
         private static readonly int MarkerWidthId = Shader.PropertyToID("_UnitMarkerWidth");
+        private static readonly int FocusGuideColorId = Shader.PropertyToID("_FocusGuideColor");
+        private static readonly int FocusGuideParamsId = Shader.PropertyToID("_FocusGuideParams");
+        private static readonly Color FocusGuideColor = new(1f, 0.78f, 0.2f, 0.5f);
 
         private readonly Material _outlineMaterial;
         private readonly Material _markerMaterial;
+        private readonly Material _focusGuideMaterial;
+        private readonly MaterialPropertyBlock _focusGuideProperties = new();
+        private bool _focusGuide;
+        private bool _markersHidden;
         // Selected is last so a hovered selected squad shows the selected colour.
         private readonly uint[] _bits =
         {
@@ -127,10 +149,11 @@ public class UnitOutlineFeature : ScriptableRendererFeature
         private GraphicsBuffer _markerBuffer;
         private readonly MaterialPropertyBlock _markerProperties = new();
 
-        public UnitOutlinePass(Material outlineMaterial, Material markerMaterial)
+        public UnitOutlinePass(Material outlineMaterial, Material markerMaterial, Material focusGuideMaterial)
         {
             _outlineMaterial = outlineMaterial;
             _markerMaterial = markerMaterial;
+            _focusGuideMaterial = focusGuideMaterial;
             profilingSampler = new ProfilingSampler("Unit Outline");
         }
 
@@ -147,6 +170,15 @@ public class UnitOutlineFeature : ScriptableRendererFeature
             _colors[2] = selected;
         }
 
+        public void ConfigureFocusGuide(bool show, bool markersHidden, float distance, float halfWidth)
+        {
+            _focusGuide = show;
+            _markersHidden = markersHidden;
+            _focusGuideProperties.SetColor(FocusGuideColorId, FocusGuideColor);
+            _focusGuideProperties.SetVector(FocusGuideParamsId, new Vector4(distance, halfWidth, 0f, 0f));
+            _focusGuideProperties.SetVector(BlitScaleBiasId, new Vector4(1f, 1f, 0f, 0f));
+        }
+
         public void Dispose()
         {
             _compatOutlineDepth?.Release();
@@ -157,7 +189,7 @@ public class UnitOutlineFeature : ScriptableRendererFeature
             _markerBuffer = null;
         }
 
-        private static bool DrawMarkers => UnitMarkerState.Count > 0 && UnitMarkerState.Mesh != null;
+        private bool DrawMarkers => !_markersHidden && UnitMarkerState.Count > 0 && UnitMarkerState.Mesh != null;
 
         // Uploads this frame's instances (ECS units first, then the placement preview) and returns the count.
         private int UploadMarkers(CommandBuffer cmd)
@@ -218,6 +250,18 @@ public class UnitOutlineFeature : ScriptableRendererFeature
 
             uint active = _activeOutlines;
             bool drawMarkers = DrawMarkers;
+            if (_focusGuide)
+            {
+                using (IRasterRenderGraphBuilder builder = renderGraph.AddRasterRenderPass("Photo Focus Guide", out FocusGuidePassData data, profilingSampler))
+                {
+                    data.material = _focusGuideMaterial;
+                    data.properties = _focusGuideProperties;
+                    builder.UseGlobalTexture(CameraDepthTextureId);
+                    builder.SetRenderAttachment(resourceData.activeColorTexture, 0, AccessFlags.ReadWrite);
+                    builder.SetRenderFunc((FocusGuidePassData d, RasterGraphContext context) =>
+                        context.cmd.DrawProcedural(Matrix4x4.identity, d.material, 0, MeshTopology.Triangles, 3, 1, d.properties));
+                }
+            }
             if (active == 0 && !drawMarkers) return;
 
             RenderTextureDescriptor descriptor = DepthDescriptor(cameraData.cameraTargetDescriptor);
@@ -314,11 +358,24 @@ public class UnitOutlineFeature : ScriptableRendererFeature
         {
             uint active = _activeOutlines;
             bool drawMarkers = DrawMarkers;
-            if (active == 0 && !drawMarkers) return;
+            if (active == 0 && !drawMarkers && !_focusGuide) return;
 
             ScriptableRenderer renderer = renderingData.cameraData.renderer;
             RenderTextureDescriptor descriptor = renderingData.cameraData.cameraTargetDescriptor;
             CommandBuffer cmd = CommandBufferPool.Get("Unit Outline");
+
+            if (_focusGuide)
+            {
+                BindCameraTargets(cmd, renderer);
+                cmd.DrawProcedural(Matrix4x4.identity, _focusGuideMaterial, 0, MeshTopology.Triangles, 3, 1, _focusGuideProperties);
+                context.ExecuteCommandBuffer(cmd);
+                cmd.Clear();
+            }
+            if (active == 0 && !drawMarkers)
+            {
+                CommandBufferPool.Release(cmd);
+                return;
+            }
 
             cmd.SetGlobalFloat(GrassHeightId, _grassHeight);
             CoreUtils.SetRenderTarget(cmd, _compatModelDepth, ClearFlag.Depth);

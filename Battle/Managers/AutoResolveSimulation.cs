@@ -187,7 +187,7 @@ namespace TJ.Engagement
             q.FormationWidth = DataTypes.GetFormationWidthFromUnitCount(math.max(1, q.maxUnits));
             q.TargetIndex = -1;
             q.ContactIndex = -1;
-            q.ChargeWindow = 0; q.MoveSeconds = 0; q.SprintSeconds = 0; q.WearyTimer = 0; q.HitCarry = 0; q.ShotCarry = 0; q.ThrownModels = 0;
+            q.ChargeWindow = 0; q.MoveSeconds = 0; q.SprintSeconds = 0; q.WearyTimer = q.StartWeary; q.HitCarry = 0; q.ShotCarry = 0; q.ThrownModels = 0;
             q.RetreatingAlliesTimer = 0; q.FireAtWill = false; q.ArmyLosses = false; q.DefensiveStance = false;
             q.SimReady = true;
         }
@@ -583,7 +583,9 @@ namespace TJ.Engagement
                         if (!Standing(ref target)) break;
                         int victim = PickMeleeVictim(ref target, exposed);
                         int damage = MeleeHitDamage(weaponStrength, ref q.squadStats, ref target, flanking, damageBonus);
+                        int dealtBefore = q.DamageDealt;
                         Hit(ref target, victim, damage, ref q, foes);
+                        if (q.squadStats.SquadAttributes.BloodDrinker) DrinkBlood(ref q, q.DamageDealt - dealtBefore);
                         if (flanking) target.FlankedTimer = 2f;
                         if (monster && !IsLarge(ref target) && q.squadStats.ExplosionDamage > 0)
                         {
@@ -724,10 +726,23 @@ namespace TJ.Engagement
             }
         }
 
+        // BloodDrinkerSystem: a share of the melee damage dealt heals the squad; what its living models cannot take is banked.
+        private static void DrinkBlood(ref AutoResolveSquad q, int dealt)
+        {
+            int amount = (int)(dealt * TabletopTavernConstants.BLOOD_DRINKER_LIFESTEAL);
+            if (amount <= 0) return;
+            int before = q.finalHealth;
+            Heal(ref q, amount);
+            q.BloodBank += amount - (q.finalHealth - before);
+        }
+
         private static int ApplyTakenMultiplier(int damage, ref AutoResolveSquad target)
         {
-            if (target.damageTakenMultiplier != 1f && target.damageTakenMultiplier > 0f)
-                damage = math.max(1, (int)(damage * target.damageTakenMultiplier));
+            float multiplier = target.damageTakenMultiplier > 0f ? target.damageTakenMultiplier : 1f;
+            // Ethereal halves every hit live (UnitSetUpSystem), and a mark or brace scales on top of that.
+            if (target.squadStats.SquadAttributes.Ethereal) multiplier *= 0.5f;
+            if (multiplier != 1f)
+                damage = math.max(1, (int)(damage * multiplier));
             return damage;
         }
 
@@ -744,6 +759,8 @@ namespace TJ.Engagement
             target.TickLoss += dealt;
             striker.TickDealt += dealt;
             striker.DamageDealt += dealt;
+            // The share of this model the hit removed, times what one model is worth.
+            if (target.healthPerKill > 0) striker.DamageValue += dealt / (float)target.healthPerKill * target.WorthPerModel;
             if (target.UnitHealth[victim] <= 0)
             {
                 int last = target.UnitsAlive - 1;
@@ -789,7 +806,8 @@ namespace TJ.Engagement
                 float healthShare = math.max(0f, q.finalHealth) / maxHealth;
 
                 bool terrified = false;
-                if (!q.squadStats.SquadAttributes.Stalwart && !q.squadStats.SquadAttributes.Terrifying)
+                bool sanguineImmune = q.Race == Race.SanguineCourt && RaceBonusRuleData.SanguineCourt.ImmuneToTerror;
+                if (!q.squadStats.SquadAttributes.Stalwart && !q.squadStats.SquadAttributes.Terrifying && !sanguineImmune)
                     for (int j = 0; j < foes.Length; j++)
                         if (Standing(ref foes[j]) && foes[j].squadStats.SquadAttributes.Terrifying && Distance(ref q, ref foes[j]) <= TabletopTavernConstants.TERROR_RADIUS) { terrified = true; break; }
 

@@ -1,7 +1,8 @@
 using Unity.Burst;
 using Unity.Entities;
 using Unity.Mathematics;
-using GPUECSAnimationBaker.Engine.AnimatorSystem;
+using Unity.Transforms;
+using TabletopTavern.GpuAnim;
 using ProjectDawn.Navigation;
 
 // Ticks each mage squad's cast cooldown and, when it fires, appends a request to the
@@ -13,6 +14,9 @@ using ProjectDawn.Navigation;
 [UpdateInGroup(typeof(SimulationSystemGroup))]
 partial struct MageCastSystem : ISystem
 {
+    // cos(20 degrees): wider than RotateUnitSystem's stop point, or the turn could stall short of it.
+    private const float MAGE_CAST_FACING_DOT = 0.94f;
+
     private ComponentLookup<MageCast> _mageCastLookup;
     private ComponentLookup<SquadMovementComponent> _squadMovementLookup;
     private ComponentLookup<MageManualCastOrder> _manualCastLookup;
@@ -32,6 +36,8 @@ partial struct MageCastSystem : ISystem
         if (!SystemAPI.TryGetSingletonBuffer(out DynamicBuffer<MageCastRequestBufferElement> requests))
             return;
 
+        // BattlefieldBonusJob writes fog's cut to MageCast.Range on a worker; the lookup below is main-thread.
+        state.EntityManager.CompleteDependencyBeforeRW<MageCast>();
         _mageCastLookup.Update(ref state);
         _squadMovementLookup.Update(ref state);
         _manualCastLookup.Update(ref state);
@@ -39,6 +45,7 @@ partial struct MageCastSystem : ISystem
         EntityManager entityManager = state.EntityManager;
         EntityCommandBuffer entityCommandBuffer = SystemAPI.GetSingleton<EndSimulationEntityCommandBufferSystem.Singleton>().CreateCommandBuffer(state.WorldUnmanaged);
         float deltaTime = SystemAPI.Time.DeltaTime;
+        bool testNoCooldown = SystemAPI.TryGetSingleton(out MageTestOptions testOptions) && testOptions.NoCooldown;
 
         foreach (var (squad, entityBuffer, mageSquad, overrides) in SystemAPI.Query<
             RefRO<SquadEntity>,
@@ -58,6 +65,8 @@ partial struct MageCastSystem : ISystem
             // mid-cycle - the same correction RangedUnitAttackSystem needed for archers, where a
             // resetting idle timer meant waiting out half a reload after acquiring a target.
             mageCast.ValueRW.Timer -= deltaTime;
+            if (testNoCooldown) mageCast.ValueRW.Timer = math.min(mageCast.ValueRO.Timer, testOptions.Cooldown);
+            float resetTimer = testNoCooldown ? testOptions.Cooldown : mageCast.ValueRO.Cooldown;
 
             Entity self = squad.ValueRO.SelfEntity;
             bool manualCastPending = _manualCastLookup.HasComponent(self) && _manualCastLookup.IsComponentEnabled(self);
@@ -102,6 +111,7 @@ partial struct MageCastSystem : ISystem
 
                 // Out of range: the approach order issued with this cast is still walking the squad in.
                 if (math.distance(selfCenter, castPoint) > mageSquad.ValueRO.AttackRange) continue;
+                if (!FaceCastPoint(ref state, entityBuffer, unitEntity, castPoint)) continue;
 
                 requests.Add(new MageCastRequestBufferElement
                 {
@@ -111,7 +121,7 @@ partial struct MageCastSystem : ISystem
                     Position = castPoint,
                     TargetSquadEntity = manualTarget,
                 });
-                mageCast.ValueRW.Timer = mageCast.ValueRO.Cooldown;
+                mageCast.ValueRW.Timer = resetTimer;
                 entityCommandBuffer.AddComponent<AmmuntionSpent>(unitEntity);
                 _manualCastLookup.SetComponentEnabled(self, false);
                 PlayCastAnimation(ref state, unitEntity);
@@ -135,6 +145,7 @@ partial struct MageCastSystem : ISystem
             float3 targetCenter = _squadMovementLookup[targetSquad].SquadCenter;
             float distance = math.distance(selfCenter, targetCenter);
             if (distance > mageSquad.ValueRO.AttackRange) continue;
+            if (!FaceCastPoint(ref state, entityBuffer, unitEntity, targetCenter)) continue;
 
             requests.Add(new MageCastRequestBufferElement
             {
@@ -148,7 +159,7 @@ partial struct MageCastSystem : ISystem
                 TargetSquadEntity = targetSquad,
             });
 
-            mageCast.ValueRW.Timer = mageCast.ValueRO.Cooldown;
+            mageCast.ValueRW.Timer = resetTimer;
 
             // Spend the charge. RangedUnitAttackSystem tags the shooter this way and
             // RangedSquadRemoveAmmunitionSystem decrements the squad's SquadAmmunition off it - a
@@ -160,6 +171,36 @@ partial struct MageCastSystem : ISystem
         }
     }
 
+    // A mage casts only once it faces the cast point, so the spell never leaves its back or side.
+    private bool FaceCastPoint(ref SystemState state, DynamicBuffer<EntityReferenceBufferElement> entityBuffer, Entity unitEntity, float3 castPoint)
+    {
+        if (SystemAPI.HasComponent<ThrowUnit>(unitEntity) || !SystemAPI.HasComponent<RotateUnit>(unitEntity)) return true;
+
+        LocalTransform leader = SystemAPI.GetComponent<LocalTransform>(unitEntity);
+        float3 leaderToPoint = castPoint - leader.Position;
+        leaderToPoint.y = 0f;
+        if (math.lengthsq(leaderToPoint) < 0.0001f) return true;
+        bool facing = math.dot(math.mul(leader.Rotation, new float3(0f, 0f, 1f)), math.normalize(leaderToPoint)) >= MAGE_CAST_FACING_DOT;
+
+        for (int i = 0; i < entityBuffer.Length; i++)
+        {
+            Entity model = entityBuffer[i].Entity;
+            if (!SystemAPI.HasComponent<RotateUnit>(model) || SystemAPI.HasComponent<ThrowUnit>(model)) continue;
+
+            RefRW<LocalTransform> transform = SystemAPI.GetComponentRW<LocalTransform>(model);
+            float3 toPoint = castPoint - transform.ValueRO.Position;
+            toPoint.y = 0f;
+            if (math.lengthsq(toPoint) < 0.0001f) continue;
+            quaternion faceRotation = quaternion.LookRotation(math.normalize(toPoint), math.up());
+
+            SystemAPI.SetComponent(model, new RotateUnit { targetRotation = faceRotation });
+            SystemAPI.SetComponentEnabled<RotateUnit>(model, true);
+            // RotateUnitSystem stops slerping about 16 degrees short, so the release snaps the rest.
+            if (facing) transform.ValueRW.Rotation = faceRotation;
+        }
+        return facing;
+    }
+
     // The animator indexes its clip buffer by slot, so a baked set without the cast slot must be skipped.
     private void PlayCastAnimation(ref SystemState state, Entity unitEntity)
     {
@@ -167,14 +208,14 @@ partial struct MageCastSystem : ISystem
         if (!SystemAPI.HasComponent<AnimationDataHolder>(unitEntity)) return;
 
         Entity animatorEntity = SystemAPI.GetComponent<AnimationDataHolder>(unitEntity).gpuEcsAnimatorEntity;
-        if (!SystemAPI.HasComponent<GpuEcsAnimatorControlComponent>(animatorEntity)) return;
-        if (!SystemAPI.HasBuffer<GpuEcsAnimationDataBufferElement>(animatorEntity)) return;
-        if (SystemAPI.GetBuffer<GpuEcsAnimationDataBufferElement>(animatorEntity).Length <= TabletopTavernConstants.MAGE_CAST_ANIMATION_ID) return;
+        if (!SystemAPI.HasComponent<GpuAnimControl>(animatorEntity)) return;
+        if (!SystemAPI.HasComponent<GpuAnimSlotCount>(animatorEntity)) return;
+        if (SystemAPI.GetComponent<GpuAnimSlotCount>(animatorEntity).Value <= TabletopTavernConstants.MAGE_CAST_ANIMATION_ID) return;
 
-        RefRW<GpuEcsAnimatorControlComponent> controlComp = SystemAPI.GetComponentRW<GpuEcsAnimatorControlComponent>(animatorEntity);
-        controlComp.ValueRW.animatorInfo.animationID = TabletopTavernConstants.MAGE_CAST_ANIMATION_ID;
+        RefRW<GpuAnimControl> controlComp = SystemAPI.GetComponentRW<GpuAnimControl>(animatorEntity);
+        controlComp.ValueRW.Slot = TabletopTavernConstants.MAGE_CAST_ANIMATION_ID;
 
-        if (SystemAPI.HasComponent<GpuEcsAnimatorControlStateComponent>(animatorEntity))
-            SystemAPI.GetComponentRW<GpuEcsAnimatorControlStateComponent>(animatorEntity).ValueRW.state = GpuEcsAnimatorControlStates.Start;
+        if (SystemAPI.HasComponent<GpuAnimRestart>(animatorEntity))
+            SystemAPI.GetComponentRW<GpuAnimRestart>(animatorEntity).ValueRW.Value = true;
     }
 }

@@ -151,7 +151,9 @@ namespace TJ.GuideEditor
                         Key("@SpeedDown / @SpeedUp", T("Guide_camera_Pace", "Slow down or speed up: half speed, normal or triple")),
                         Key("@PauseGame", T("Guide_camera_Pause", "Pause and resume")),
                         Key("@Settings", T("Guide_camera_Menu", "Open the menu. The battle waits while it is open")),
-                        Key("@HideBattleUI", T("Guide_camera_Hide", "Hide the interface, flags and cursor for a clear view")))),
+                        Key("@HideBattleUI", T("Guide_camera_Hide", "Hide the interface, flags and cursor for a clear view")),
+                        Key("@PhotoMode", T("Guide_camera_Photo", "Photo mode: freeze the battle, fly the camera and take pictures")),
+                        Key("@FollowSquad", T("Guide_camera_Follow", "Follow camera: ride behind a squad while the battle runs. Page Up and Page Down switch squads")))),
 
                 Topic("actions", chControls, T("Guide_actions_Title", "Action Buttons"),
                     "The buttons under the squad cards change how the selected squads behave. Each one has a hotkey.",

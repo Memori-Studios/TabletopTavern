@@ -27,7 +27,9 @@ namespace TJ
         private const int GOLD = 60;
         private const int GEAR_COUNT = 3;
         // Lowest share of max health a squad keeps after the final.
-        private const float MIN_HEALTH_LEFT = 0.65f;
+        private const float MIN_HEALTH_LEFT = 0.85f;
+        // The test army is a late March host (MarchRules battle number), so a test run survives several March battles.
+        private const int TEST_ARMY_BATTLE = 20;
         #endregion
 
 #if UNITY_EDITOR
@@ -66,6 +68,9 @@ namespace TJ
         private static void Build()
         {
             if (!DevOverrides.BootIntoActThreeVictory) return;
+            // A first scene without a SceneHandler is a Play Mode test run: Instance would make an empty one that displaces Core's.
+            SceneHandler handler = SceneHandler.InstanceIfExists;
+            if (handler == null) return;
             if (!string.Equals(Path.GetFullPath(SaveDataHandler.SaveRoot).TrimEnd('\\', '/'), Folder.TrimEnd('\\', '/'), StringComparison.OrdinalIgnoreCase))
             {
                 Debug.LogError($"[ActThreeVictoryTestSave] Save root is {SaveDataHandler.SaveRoot}, not the dev folder. Nothing written.");
@@ -75,8 +80,8 @@ namespace TJ
             CampaignSaveData run = WriteRun();
 
             // Only a normal boot passes through the main menu; an open Map or TavernBattle scene boots straight in.
-            if (SceneHandler.Instance.EditorOverride == SceneHandler.EditorOverrides.None)
-                SceneHandler.Instance.OnGameStateChanged += ContinueToMap;
+            if (handler.EditorOverride == SceneHandler.EditorOverrides.None)
+                handler.OnGameStateChanged += ContinueToMap;
 
             Race enemyRace = TabletopTavernData.Instance.GetRaceFromUnitName(run.enemyArmy[0].UnitName);
             Debug.LogWarning($"[ActThreeVictoryTestSave] Act III final won on {DIFFICULTY}: hero {run.heroID}, beat {enemyRace}. Saves in {Folder}");
@@ -103,14 +108,14 @@ namespace TJ
             Race heroRace = HeroData.GetRaceFromHero(heroID);
             System.Random random = new(SEED);
 
-            // An act 3 army of the hero's faction plus one elite (tier 4) squad, built the way the game builds one, battered by the final.
-            SquadToLoad[] recruits = ArmyCreator.GenerateEnemyArmy(3, BATTLES_FOUGHT_IN_ACT, SEED,
-                false, data.GetSquadsWithTiersFromRace(heroRace), false, true, false, eliteGuard: true);
+            // A late March host of the hero's faction, heavily prestiged, plus an elite squad, lightly worn by the final.
+            SquadToLoad[] recruits = ArmyCreator.GenerateMarchArmy(TEST_ARMY_BATTLE, SEED, false, data.GetSquadsWithTiersFromRace(heroRace),
+                true, true, eliteGuard: true, doublePrestigeChance: true);
             SquadToLoad[] playerArmy = new SquadToLoad[13];
             for (int i = 0; i < playerArmy.Length; i++) playerArmy[i].UnitIndex = -1;
             var kills = new List<SquadKillsStored>();
             var losses = new List<SquadLossesStored>();
-            for (int i = 0; i < recruits.Length && i < 10; i++)
+            for (int i = 0; i < recruits.Length && i < playerArmy.Length; i++)
             {
                 SquadToLoad squad = recruits[i];
                 squad.UnitIndex = i;

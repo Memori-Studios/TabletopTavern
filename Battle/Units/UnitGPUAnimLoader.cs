@@ -63,6 +63,8 @@ public class UnitGPUAnimLoader : MonoBehaviour
 
         // Maps request entity → (unitName, variantIndex)  where variantIndex 0-2 = anim, 3 = rider
         var requestMap = new Dictionary<Entity, (UnitName unitName, int variantIndex)>();
+        // Mod-built prefabs, finished once the built-in variant 0 and rider they are checked against have loaded.
+        var modBuilt = new Dictionary<UnitName, Entity[]>();
 
         for (int i = 0; i < allRefs.Length; i++)
         {
@@ -70,8 +72,13 @@ public class UnitGPUAnimLoader : MonoBehaviour
             if (!unitNamesSet.Contains(refs.unitName)) continue;
             if (!_requestedUnits.Add(refs.unitName)) continue; // already requested this battle
 
+            // A mod's visual folder replaces the baked prefabs for this battle; the spawn code never knows.
+            // Built-in variant 0 still loads for a modded unit: it decides the bow-and-sword rule and is the fallback.
+            bool modded = UnitVisualOverrideRuntime.TryBuild(entityManager, refs.unitName, refs.riderGPUAnim.IsReferenceValid, out Entity[] built);
+            if (modded) modBuilt[refs.unitName] = built;
+
             // Load the three anim variants
-            for (int v = 0; v < 3; v++)
+            for (int v = 0; v < (modded ? 1 : 3); v++)
             {
                 Entity reqEntity = entityManager.CreateEntity();
                 entityManager.AddComponentData(reqEntity, new RequestEntityPrefabLoaded { Prefab = refs.Get(v) });
@@ -121,6 +128,24 @@ public class UnitGPUAnimLoader : MonoBehaviour
         // Create a UnitGPUAnimPrefabs entity for each unit so SpawnManager can query them.
         foreach (var (unitName, entities) in resultsByUnit)
         {
+            if (modBuilt.TryGetValue(unitName, out Entity[] built))
+            {
+                Entity builtInRider = entities[RiderVariantIndex];
+                if (FitsWeaponRule(entityManager, unitName, built, entities[0]))
+                {
+                    entities[0] = built[0];
+                    entities[1] = built[1];
+                    entities[2] = built[2];
+                    entities[RiderVariantIndex] = built[RiderVariantIndex] != Entity.Null ? built[RiderVariantIndex] : builtInRider;
+                }
+                else
+                {
+                    entities[1] = entities[0];
+                    entities[2] = entities[0];
+                }
+            }
+            // Game systems write GpuAnimControl on every visual; the old bakes get it on the prefab so every instance carries it.
+            foreach (Entity prefab in entities) GpuAnimLegacy.Attach(entityManager, prefab);
             Entity e = entityManager.CreateEntity();
             entityManager.AddComponentData(e, new UnitGPUAnimPrefabs
             {
@@ -134,6 +159,31 @@ public class UnitGPUAnimLoader : MonoBehaviour
         }
 
         onComplete?.Invoke();
+    }
+
+    // The bow-to-sword swap is gameplay (it stops shooting in melee), so a mod visual must swap exactly when the built-in one does.
+    private static bool FitsWeaponRule(EntityManager em, UnitName unitName, Entity[] modVariants, Entity builtInVariant)
+    {
+        bool builtInSwaps = HasWeaponSwap(em, builtInVariant);
+        for (int v = 0; v < 3; v++)
+        {
+            if (HasWeaponSwap(em, modVariants[v]) == builtInSwaps) continue;
+            Debug.LogError($"[UnitVisualOverride] {unitName}: the built-in unit {(builtInSwaps ? "swaps bow for sword in melee, so every variant needs one 'bow' and one 'sword'" : "has no bow and sword pair, so no variant may have both")}. The built-in visual loads instead.");
+            return false;
+        }
+        return true;
+    }
+
+    private static bool HasWeaponSwap(EntityManager em, Entity prefab)
+    {
+        if (prefab == Entity.Null || !em.HasBuffer<LinkedEntityGroup>(prefab)) return false;
+        bool bow = false, sword = false;
+        foreach (LinkedEntityGroup linked in em.GetBuffer<LinkedEntityGroup>(prefab))
+        {
+            if (em.HasComponent<BowSetUpEntity>(linked.Value)) bow = true;
+            if (em.HasComponent<SwordSetUpEntity>(linked.Value)) sword = true;
+        }
+        return bow && sword;
     }
 
     /// <summary>

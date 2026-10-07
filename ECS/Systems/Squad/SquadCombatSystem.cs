@@ -4,7 +4,6 @@ using Unity.Entities;
 using Unity.Mathematics;
 using UnityEngine;
 using ProjectDawn.Navigation;
-using GPUECSAnimationBaker.Engine.AnimatorSystem;
 
 partial struct SquadCombatSystem : ISystem
 {

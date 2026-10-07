@@ -32,6 +32,11 @@ namespace TJ
         private EntityQuery _sfxQuery;
         private EntityQuery _bloodQuery;
         private BloodColors _bloodColors;
+        private ClashFeedback _clashFeedback;
+        private readonly HashSet<int> _sprintingSquadIds = new();
+        private readonly List<int> _sprintEnded = new();
+        // Recent impact sounds as (x, z, unscaled time), so a wide front does not stack into noise.
+        private readonly List<Vector3> _recentImpacts = new();
         private EntityQuery _dustCloudQuery;
         private EntityQuery _battlefieldBonusAppliedQuery;
         private EntityQuery _mageCastRequestQuery;
@@ -86,6 +91,8 @@ namespace TJ
             _bloodQuery = _entityManager.CreateEntityQuery(ComponentType.ReadOnly<BloodBufferElement>());
             _bloodColors = Resources.Load<BloodColors>("BloodColors");
             if (_bloodColors == null) Debug.LogError("EntityWatcher: Resources/BloodColors is missing; every splat falls back to red.");
+            _clashFeedback = Resources.Load<ClashFeedback>("ClashFeedback");
+            if (_clashFeedback == null) Debug.LogError("EntityWatcher: Resources/ClashFeedback is missing; clashes play no impact sound.");
             _dustCloudQuery = _entityManager.CreateEntityQuery(ComponentType.ReadOnly<DustCloudBufferElement>());
             _battlefieldBonusAppliedQuery = _entityManager.CreateEntityQuery(ComponentType.ReadOnly<BattlefieldBonusAppliedBufferElement>());
             _mageCastRequestQuery = _entityManager.CreateEntityQuery(ComponentType.ReadOnly<MageCastRequestBufferElement>());
@@ -136,6 +143,8 @@ namespace TJ
             _queryBattlePhase.Dispose();
             BattleManager.Instance.OnGateDestroyed -= OnGateDestroyed;
             _squadSFXManagers.Clear();
+            _sprintingSquadIds.Clear();
+            _recentImpacts.Clear();
             _barkCounts.Clear();
             _brokenCommandLogged.Clear();
             if (SFXManager.Instance != null) SFXManager.Instance.StopAll();
@@ -784,8 +793,7 @@ namespace TJ
             foreach (Entity entity in queryOnFormationsCollideEntities)
             {
                 OnFormationsCollide onFormationsCollide = _entityManager.GetComponentData<OnFormationsCollide>(entity);
-                if (onFormationsCollide.Kind != ChargeImpactKind.Blocked)
-                    BattleManager.Instance.CameraShaker.ChargeShake(onFormationsCollide.Position);
+                HandleClash(onFormationsCollide);
                 ecb.RemoveComponent<OnFormationsCollide>(entity);
             }
             queryOnFormationsCollideEntities.Dispose();
@@ -828,7 +836,22 @@ namespace TJ
             foreach (Entity entity in queryGetChargingSquadsEntities)
             {
                 if (!_entityManager.HasComponent<SquadEntity>(entity)) continue;
-                chargingSquadIds.Add(_entityManager.GetComponentData<SquadEntity>(entity).SquadId);
+                int sprintingId = _entityManager.GetComponentData<SquadEntity>(entity).SquadId;
+                chargingSquadIds.Add(sprintingId);
+                if (_sprintingSquadIds.Add(sprintingId)
+                    && _squadSFXManagers.TryGetValue(sprintingId, out SquadSFXManager roarManager) && roarManager != null)
+                {
+                    roarManager.StartSprintRoar(_entityManager.GetBuffer<EntityReferenceBufferElement>(entity).Length);
+                }
+            }
+            _sprintEnded.Clear();
+            foreach (int id in _sprintingSquadIds)
+                if (!chargingSquadIds.Contains(id)) _sprintEnded.Add(id);
+            foreach (int id in _sprintEnded)
+            {
+                _sprintingSquadIds.Remove(id);
+                if (_squadSFXManagers.TryGetValue(id, out SquadSFXManager roarManager) && roarManager != null)
+                    roarManager.StopSprintRoar();
             }
             BattleManager.Instance.SquadManager.ChargingSquads(chargingSquadIds);
             queryGetChargingSquadsEntities.Dispose();
@@ -854,10 +877,7 @@ namespace TJ
                 {
                     if (isActive && !wasActive)
                     {
-                        Vector3 squadCenter = _entityManager.HasComponent<SquadMovementComponent>(entity)
-                            ? (Vector3)_entityManager.GetComponentData<SquadMovementComponent>(entity).SquadCenter
-                            : sfxManager.transform.position;
-                        sfxManager.StartChargeSound(squadCenter);
+                        sfxManager.StartChargeSound();
                     }
                     else if (!isActive && wasActive)
                     {
@@ -958,6 +978,59 @@ namespace TJ
                 ecb.Playback(_entityManager);
             }
         }
+        #region Clash feedback
+        // Sound, camera shake, music dip and dust for the frame two squads meet in melee.
+        private void HandleClash(OnFormationsCollide clash)
+        {
+            bool landedCharge = clash.Kind == ChargeImpactKind.Charge || clash.Kind == ChargeImpactKind.FlankCharge;
+            Vector3 position = clash.Position;
+
+            if (landedCharge)
+                BattleManager.Instance.CameraShaker.ChargeShake(clash.Position, ClashFeedback.ShakeForce(clash.Size, clash.Count));
+
+            if (_clashFeedback == null) return;
+
+            float now = Time.unscaledTime;
+            bool repeat = false;
+            for (int i = _recentImpacts.Count - 1; i >= 0; i--)
+            {
+                Vector3 recent = _recentImpacts[i];
+                if (now - recent.y > _clashFeedback.repeatWindowSeconds) { _recentImpacts.RemoveAt(i); continue; }
+                float dx = recent.x - position.x, dz = recent.z - position.z;
+                if (dx * dx + dz * dz < _clashFeedback.repeatRadius * _clashFeedback.repeatRadius) repeat = true;
+            }
+            _recentImpacts.Add(new Vector3(position.x, now, position.z));
+
+            // Two squads that walk into each other both raise Contact; the second one stays silent.
+            bool silent = repeat && clash.Kind == ChargeImpactKind.Contact;
+            SFXCue cue = _clashFeedback.ImpactFor(clash.Kind, clash.Size);
+            if (!silent && cue != null && SFXManager.Instance != null && Time.timeScale != 0f)
+            {
+                float volume = Mathf.Lerp(_clashFeedback.minCountVolume, 1f, clash.Count / (float)_clashFeedback.fullVolumeCount);
+                if (repeat) volume *= _clashFeedback.repeatVolume;
+                SFXManager.Instance.Play(cue, position, volume);
+                // Any charge, landed or blocked, lets the charger's mount cry out; a walk-in contact does not.
+                if (clash.Kind != ChargeImpactKind.Contact
+                    && _squadSFXManagers.TryGetValue(clash.SquadId, out SquadSFXManager chargerSFX) && chargerSFX != null)
+                    chargerSFX.PlayMountCall(position);
+            }
+
+            if (!landedCharge) return;
+
+            Vector3 camera = BattleManager.Instance.CameraShaker.CameraPosition;
+            if (Vector3.Distance(camera, position) <= _clashFeedback.musicDipRange)
+                IAudioRequester.Instance.DipMusic(_clashFeedback.musicDipDepth, _clashFeedback.musicDipSeconds);
+
+            int clouds = Mathf.Clamp(Mathf.RoundToInt(clash.HalfWidth * 2f / _clashFeedback.dustSpacing) + 1, 3, _clashFeedback.dustMax);
+            Vector3 right = clash.Right;
+            for (int i = 0; i < clouds; i++)
+            {
+                float along = Mathf.Lerp(-clash.HalfWidth, clash.HalfWidth, i / (float)(clouds - 1));
+                BattleManager.Instance.MeshTextureUpdater.SpawnDustCloudAt(position + right * along);
+            }
+        }
+        #endregion
+
         private void OnGateDestroyed(int gateIndex)
         {
             if (!setup) return;

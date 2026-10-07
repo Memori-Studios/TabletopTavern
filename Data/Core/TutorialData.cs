@@ -41,7 +41,8 @@ namespace TJ
         FreeCamera,
         CeaseFire,
         RenownCarriesOver,
-        RenameSquad
+        RenameSquad,
+        MarkRoute
     }
     public static class TutorialData
     {
@@ -218,6 +219,12 @@ namespace TJ
         {
             tutorialStepEnum = TutorialStepEnum.RenameSquad,
             stepID = 38,
+        };
+        // Map, from the second node of an act on: right-click a node to mark a route. Marking one completes it.
+        public static TutorialStep MarkRoute = new()
+        {
+            tutorialStepEnum = TutorialStepEnum.MarkRoute,
+            stepID = 39,
         };
     }
 }

@@ -9,7 +9,6 @@ partial struct ChargingUnitDustSystem : ISystem
     private float _timer;
     private Random _random;
     private const float Interval = 0.5f;
-    private const float SpawnChance = 0.1f;
 
     [BurstCompile]
     public void OnCreate(ref SystemState state)
@@ -30,7 +29,9 @@ partial struct ChargingUnitDustSystem : ISystem
             SystemAPI.Query<RefRO<Unit>, RefRO<LocalTransform>>())
         {
             if (unit.ValueRO.unitState != UnitState.Charge) continue;
-            if (_random.NextFloat() > SpawnChance) continue;
+            bool sprinting = SystemAPI.HasComponent<SprintingTag>(unit.ValueRO.squadEntity);
+            float chance = sprinting ? TabletopTavernConstants.DUST_CHANCE_SPRINT : TabletopTavernConstants.DUST_CHANCE_APPROACH;
+            if (_random.NextFloat() > chance) continue;
 
             dustBuffer.Add(new DustCloudBufferElement { Position = transform.ValueRO.Position });
         }

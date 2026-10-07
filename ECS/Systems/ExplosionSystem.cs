@@ -2,7 +2,7 @@ using System.Collections.Generic;
 using Unity.Burst;
 using Unity.Entities;
 using ProjectDawn.Navigation;
-using GPUECSAnimationBaker.Engine.AnimatorSystem;
+using TabletopTavern.GpuAnim;
 using UnityEngine;
 using Unity.Mathematics;
 using Unity.Physics;
@@ -117,7 +117,7 @@ partial struct ExplosionSystem : ISystem
                         HittingEntitySquad = Explosion.ValueRO.KnockbackSquadID,
                         HittingEntityTeam = Explosion.ValueRO.KnockbackSquadTeam,
                         Damage = Explosion.ValueRO.KnockbackInitialDamage,
-                        RemainingTime = THROW_LIFETIME, 
+                        RemainingTime = THROW_LIFETIME,
                         TotalTime = THROW_TOTAL_TIME
                     });
 
@@ -140,9 +140,9 @@ partial struct ExplosionSystem : ISystem
 
                     if (childEntity == Entity.Null) continue;
 
-                    GpuEcsAnimatorControlComponent controlComp = entityManager.GetComponentData<GpuEcsAnimatorControlComponent>(animationDataHolder.gpuEcsAnimatorEntity);
-                    controlComp.transitionSpeed = 0f;
-                    controlComp.animatorInfo.animationID = animationDataHolder.thrownAnimationId;
+                    GpuAnimControl controlComp = entityManager.GetComponentData<GpuAnimControl>(animationDataHolder.gpuEcsAnimatorEntity);
+                    controlComp.TransitionSeconds = 0f;
+                    controlComp.Slot = animationDataHolder.thrownAnimationId;
 
                     RefRW<AgentBody> agentBody = SystemAPI.GetComponentRW<AgentBody>(distanceHit.Entity);
                     agentBody.ValueRW.IsStopped = true;

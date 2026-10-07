@@ -43,6 +43,7 @@ namespace TJ.MainMenu
         [SerializeField] private Image unitSpellIcon;
         [SerializeField] private TMP_Text unitSpellLabel;
         [SerializeField] private TMP_Text unitSpellName;
+        [SerializeField] private MemoriTooltipTrigger unitSpellTooltip;
         [SerializeField] private TMP_Text unitFactionLabel;
         [SerializeField] private TMP_Text unitFactionText;
         [SerializeField] private MemoriTooltipTrigger unitFactionTooltip;
@@ -67,6 +68,7 @@ namespace TJ.MainMenu
         [SerializeField] private Image heroSpellIcon;
         [SerializeField] private TMP_Text heroSpellLabel;
         [SerializeField] private TMP_Text heroSpellName;
+        [SerializeField] private MemoriTooltipTrigger heroSpellTooltip;
         [SerializeField] private TMP_Text heroArmyLabel;
         [SerializeField] private Transform heroArmy;
 
@@ -209,6 +211,7 @@ namespace TJ.MainMenu
             {
                 unitSpellIcon.sprite = spell.SpellSprite;
                 unitSpellName.text = T(spell.Spell.ToString());
+                unitSpellTooltip.SetContentProvider(() => TJ.Spells.SpellTooltip.Build(spell));
             }
 
             string passive = T(race + "PassiveName");
@@ -351,6 +354,7 @@ namespace TJ.MainMenu
             {
                 heroSpellIcon.sprite = spell.SpellSprite;
                 heroSpellName.text = T(spell.Spell.ToString());
+                heroSpellTooltip.SetContentProvider(() => TJ.Spells.SpellTooltip.Build(spell, new TJ.Spells.SpellTooltip.Context { Pinned = true }));
             }
 #else
             heroSpellRow.SetActive(false);

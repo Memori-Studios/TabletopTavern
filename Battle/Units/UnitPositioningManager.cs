@@ -180,6 +180,11 @@ public class UnitPositioningManager : MonoBehaviour
                 Debug.LogError($"QueueSquadCommand: Could not find squad entity for squad id {kvp.Key}");
                 continue;
             }
+
+            // A player order replaces a pending mage cast, or the mage later casts at a stale point or waits on it forever.
+            if (entityManager.HasComponent<MageManualCastOrder>(squadEntity.SelfEntity))
+                entityManager.SetComponentEnabled<MageManualCastOrder>(squadEntity.SelfEntity, false);
+
             QueuedOrder queuedOrder = new ();
 
             if(_squadCommand == SquadCommand.Move)
@@ -410,6 +415,12 @@ public class UnitPositioningManager : MonoBehaviour
 
             int[] assignments = HungarianAlgorithm.AssignPositions(currentPositions, movePositionArrayForSquad);
 
+            // Short repositions shuffle into place without the turn.
+            float2 travel = (_squadDestination.DestinationPosition - SquadMovementComponent.SquadCenter).xz;
+            bool turnFirst = math.lengthsq(travel) >=
+                TabletopTavernConstants.MARCH_TURN_MIN_DISTANCE * TabletopTavernConstants.MARCH_TURN_MIN_DISTANCE;
+            float2 turnDirection = turnFirst ? math.normalize(travel) : float2.zero;
+
             for (int i = 0; i < unitCount; i++)
             {
                 random = new Unity.Mathematics.Random(random.NextUInt());
@@ -423,7 +434,13 @@ public class UnitPositioningManager : MonoBehaviour
                     destinationPosition = newPosition,
                     squadPosition = newPosition,
                     delayRemaining = random.NextFloat(0.1f, 0.3f)
+                        + (turnFirst ? random.NextFloat(0f, TabletopTavernConstants.MARCH_TURN_START_JITTER) : 0f),
+                    turnDirection = turnDirection,
+                    turnTimeLeft = turnFirst ? TabletopTavernConstants.MARCH_TURN_TIMEOUT : 0f
                 });
+                // A unit still easing to its old facing would fight the turn.
+                if (turnFirst)
+                    entityCommandBuffer.SetComponentEnabled<RotateUnit>(entity, false);
                 newCenterPosition += newPosition;
 
                 entityCommandBuffer.SetComponent(entity, new UnitPosition
@@ -434,6 +451,7 @@ public class UnitPositioningManager : MonoBehaviour
                 entityCommandBuffer.SetComponent(entity, new RotateUnit
                 {
                     targetRotation = _squadDestination.DestinationRotation,
+                    steadyTurn = true,
                 });
 
                 entityManager.SetComponentEnabled<MoveOverride>(entity, true);
@@ -610,6 +628,13 @@ public class UnitPositioningManager : MonoBehaviour
             if(entityManager.Exists(entity) == false) continue;
 
             entityManager.SetComponentData(entity, new Target { targetEntity = Entity.Null });
+            // A withdrawing unit leaves at once, even if a Move order's turn was still running.
+            if (entityManager.HasComponent<SetDestination>(entity))
+            {
+                SetDestination setDestination = entityManager.GetComponentData<SetDestination>(entity);
+                setDestination.turnTimeLeft = 0f;
+                entityManager.SetComponentData(entity, setDestination);
+            }
             ecb.SetComponentEnabled<MoveOverride>(entity, true);
             if(!skirmishRetreat)
                 ecb.SetComponentEnabled<RetreatingUnit>(entity, true);

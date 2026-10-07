@@ -14,13 +14,18 @@ namespace TJ
         private const int ELITE_GUARD_SEED_OFFSET = 7727;
         // The spell stopgap squad draws on its own stream too, so the rest of the army is unchanged.
         private const int SPELLS_EXTRA_SQUAD_SEED_OFFSET = 3571;
+        // Mage-cap swaps draw on their own stream, so an army within the cap is the same as before.
+        private const int MAGE_CAP_SEED_OFFSET = 9931;
 
         // DifficultyMod 10 / DifficultyMod 14: gives enemy squads a chance to spawn already prestiged, scaling with Act and difficulty
         private static SquadToLoad[] ApplyEnemyPrestige(SquadToLoad[] _squads, int _actNumber, int _seed, bool _enhanced, bool _doubleChance = false)
         {
+            return ApplyEnemyPrestige(_squads, ArmyGenerationRuleData.ResolveEnemyPrestigeProfile(_actNumber, _enhanced), _seed, _doubleChance);
+        }
+        private static SquadToLoad[] ApplyEnemyPrestige(SquadToLoad[] _squads, EnemyPrestigeRule profile, int _seed, bool _doubleChance)
+        {
             if (_squads.Length == 0) return _squads;
 
-            EnemyPrestigeRule profile = ArmyGenerationRuleData.ResolveEnemyPrestigeProfile(_actNumber, _enhanced);
             // Veteran Hosts on a level that already runs the enhanced table.
             if (_doubleChance)
                 profile.ChancePerSquad = Mathf.Min(TabletopTavernConstants.ENDLESS_PRESTIGE_CHANCE_CAP, profile.ChancePerSquad * 2f);
@@ -57,7 +62,7 @@ namespace TJ
             return _squads;
         }
 
-        public static SquadToLoad[] GenerateTownGarrison(TownSize _townSize, int _seed, List<UnitTier> unitsPool, bool difficultyImperator, int _bookNumber, bool enemyPrestigeEligible, bool enemyPrestigeEnhanced, bool eliteGuard = false, bool doublePrestigeChance = false)
+        public static SquadToLoad[] GenerateTownGarrison(TownSize _townSize, int _seed, List<UnitTier> unitsPool, bool difficultyImperator, int _bookNumber, bool enemyPrestigeEligible, bool enemyPrestigeEnhanced, bool eliteGuard = false, bool doublePrestigeChance = false, bool smallerGarrison = false)
         {
             // Garrisons don't field cavalry or outriders — filter them out before picking units
             unitsPool = unitsPool.FindAll(u =>
@@ -67,7 +72,10 @@ namespace TJ
             TierCount[] tierCounts = ArmyGenerationRuleData.ResolveTownGarrisonTierCounts(_townSize, _bookNumber, difficultyImperator);
 
             SquadToLoad[] garrison = CreateArmyFromUnitsByTier(tierCounts, unitsPool, _seed);
+            // Drops the last squad, the highest tier, so the rest match the full garrison draw for draw.
+            if (smallerGarrison && garrison.Length > 1) System.Array.Resize(ref garrison, garrison.Length - 1);
             if (eliteGuard) garrison = AddEliteSquad(garrison, unitsPool, _seed);
+            garrison = CapMages(garrison, unitsPool, _seed);
             if (enemyPrestigeEligible) garrison = ApplyEnemyPrestige(garrison, _bookNumber, _seed, enemyPrestigeEnhanced, doublePrestigeChance);
             return garrison;
         }
@@ -152,8 +160,40 @@ namespace TJ
             SquadToLoad[] army = CreateArmyFromUnitsByTier(tierCounts, unitsPool, _seed);
             if (spellsExtraSquad) army = AddSpellsExtraSquad(army, _boardNumber, unitsPool, _seed);
             if (eliteGuard) army = AddEliteSquad(army, unitsPool, _seed);
+            army = CapMages(army, unitsPool, _seed);
             if (enemyPrestigeEligible) army = ApplyEnemyPrestige(army, _boardNumber, _seed, enemyPrestigeEnhanced, doublePrestigeChance);
             return army;
+        }
+
+        /// <summary>
+        /// A rogue host on the March. Size and quality come from the battle number (MarchRules), not the act, and the
+        /// same extras as any enemy army go on top. scheduleBattle is the battle number after difficulty and Ordeals.
+        /// </summary>
+        public static SquadToLoad[] GenerateMarchArmy(int scheduleBattle, int _seed, bool warlord, List<UnitTier> unitsPool, bool enemyPrestigeEligible, bool enemyPrestigeEnhanced, bool eliteGuard = false, bool doublePrestigeChance = false, bool spellsExtraSquad = false, int extraSquads = 0)
+        {
+            TierCount[] tierCounts = FoldMissingTiers(MarchRules.ArmyTierCounts(scheduleBattle, warlord, extraSquads), unitsPool);
+
+            SquadToLoad[] army = CreateArmyFromUnitsByTier(tierCounts, unitsPool, _seed);
+            if (spellsExtraSquad) army = AddSpellsExtraSquad(army, TabletopTavernConstants.FINAL_STORY_ACT, unitsPool, _seed);
+            if (eliteGuard) army = AddEliteSquad(army, unitsPool, _seed);
+            army = CapMages(army, unitsPool, _seed);
+            if (enemyPrestigeEligible) army = ApplyEnemyPrestige(army, MarchRules.PrestigeProfile(scheduleBattle, enemyPrestigeEnhanced), _seed, doublePrestigeChance);
+            return army;
+        }
+        // A faction with no unit of a tier fields the next tier down, so a host never comes up short.
+        private static TierCount[] FoldMissingTiers(TierCount[] _tierCounts, List<UnitTier> _unitsPool)
+        {
+            Dictionary<int, int> counts = new();
+            foreach (TierCount entry in _tierCounts)
+            {
+                int tier = entry.Tier;
+                while (tier > 1 && !_unitsPool.Exists(u => u.tier == tier)) tier--;
+                counts[tier] = counts.TryGetValue(tier, out int held) ? held + entry.Count : entry.Count;
+            }
+            List<TierCount> folded = new();
+            foreach (KeyValuePair<int, int> entry in counts) folded.Add(new TierCount { Tier = entry.Key, Count = entry.Value });
+            folded.Sort((a, b) => a.Tier.CompareTo(b.Tier));
+            return folded.ToArray();
         }
 
         public static SquadToLoad[] ReplaceMonsterUnits(SquadToLoad[] _squadsToLoad, int _seed, List<UnitTier> unitsPool)
@@ -192,7 +232,29 @@ namespace TJ
                     newSquads.Add(squad);
                 }
             }
-            return newSquads.ToArray();
+            return CapMages(newSquads.ToArray(), unitsPool, _seed);
+        }
+
+        /// <summary>Swaps every mage past ENEMY_MAGE_SQUAD_CAP for a non-mage of the same tier, or the nearest tier below.</summary>
+        private static SquadToLoad[] CapMages(SquadToLoad[] _army, List<UnitTier> _unitsPool, int _seed)
+        {
+            TabletopTavernData data = TabletopTavernData.Instance;
+            System.Random random = null;
+            int mages = 0;
+            for (int i = 0; i < _army.Length; i++)
+            {
+                if (_army[i].isEmptySquad || !TabletopTavernConstants.Casts(data.GetUnitTypeFromUnitName(_army[i].UnitName))) continue;
+                if (++mages <= TabletopTavernConstants.ENEMY_MAGE_SQUAD_CAP) continue;
+
+                List<UnitTier> candidates = new();
+                for (int tier = data.GetUnitTierFromUnitName(_army[i].UnitName); tier >= 1 && candidates.Count == 0; tier--)
+                    candidates = _unitsPool.FindAll(u => u.tier == tier && !TabletopTavernConstants.Casts(data.GetUnitTypeFromUnitName(u.unitName)));
+                if (candidates.Count == 0) continue;
+
+                random ??= new System.Random(_seed + MAGE_CAP_SEED_OFFSET);
+                _army[i] = new SquadToLoad(candidates[random.Next(candidates.Count)].unitName);
+            }
+            return _army;
         }
     }
 }

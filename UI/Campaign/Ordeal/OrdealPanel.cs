@@ -12,7 +12,7 @@ using UnityEngine;
 
 namespace TJ.Ordeals
 {
-    /// <summary>The pick-one-of-three screen at the start of each endless act. There is no reroll and no skip.</summary>
+    /// <summary>The pick-one-of-three screen a beaten warlord brings on the March. There is no reroll and no skip.</summary>
     public class OrdealPanel : MapPanel
     {
         [SerializeField] private ChoicePanelView view;
@@ -37,14 +37,14 @@ namespace TJ.Ordeals
             memoriCanvasGroup = GetComponent<MemoriCanvasGroup>();
             memoriCanvasGroup.CGDisable();
         }
-        public void Open(List<OrdealId> offer, int bookNumber, Action<OrdealId> _onTaken)
+        public void Open(List<OrdealId> offer, int nextBattle, Action<OrdealId> _onTaken)
         {
             onTaken = _onTaken;
             picked = false;
             CampaignSaveData run = CampaignManager.Instance.CampaignSaveManager.SaveData;
 
             view.Clear();
-            view.SetTitle(Text("OrdealPickTitle"), string.Format(Text("OrdealPickSubtitle"), MemoriUI.ConvertNumberToRomanNumeral(bookNumber)));
+            view.SetTitle(Text("OrdealPickTitle"), string.Format(Text("OrdealPickSubtitle"), nextBattle));
             int held = run.ordeals != null ? run.ordeals.Count : 0;
             view.SetInfo(string.Format(Text("ordealRenownLine"), Multiplier(held), Multiplier(held + 1)), run);
 

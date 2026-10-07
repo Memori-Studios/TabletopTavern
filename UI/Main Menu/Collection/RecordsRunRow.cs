@@ -51,7 +51,7 @@ namespace TJ.MainMenu
             Hero hero = HeroData.GetHeroByID(record.heroID);
             heroName.text = loc.GetText(hero.HeroName);
             string date = record.EndedAtUtc.ToLocalTime().ToString("d", CultureInfo.CurrentCulture);
-            meta.text = $"{RecordsFormat.Difficulty(record.difficulty)} · {string.Format(loc.GetText("RunHistoryActReached"), record.actReached)} · {date}";
+            meta.text = $"{RecordsFormat.Difficulty(record.difficulty)} · {RecordsFormat.Reached(record)} · {date}";
             time.text = RecordsFormat.Time(record.playTimeSeconds);
             gold.text = $"{record.goldAtEnd}";
             outcome.text = RecordsFormat.Outcome(record.outcome);

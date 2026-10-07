@@ -56,6 +56,9 @@ public enum MageTargetPriority
 
     /// <summary>Nearest enemy squad that can shoot, any enemy only when none can. For accuracy debuffs (Taelindor's Veil Mist).</summary>
     RangedEnemyFirst,
+
+    /// <summary>Densest Monstrous enemy squad, the densest of any kind when none stands. For Smite.</summary>
+    MonstrousFirst,
 }
 
 /// <summary>
@@ -91,6 +94,26 @@ public struct MageManualCastOrder : IComponentData, IEnableableComponent
 
 #endregion
 
+#region Test options
+
+/// <summary>
+/// Custom battle mage test switches, one singleton created in BattleManager.StartBattle and rewritten
+/// when a toggle changes. Absent in campaign battles, so the real numbers always apply there.
+/// </summary>
+public struct MageTestOptions : IComponentData
+{
+    /// <summary>Caps every mage's cast timer at Cooldown so it recasts as soon as it can act.</summary>
+    public bool NoCooldown;
+
+    /// <summary>The cap NoCooldown applies. Above zero, so a mage in range does not cast every frame.</summary>
+    public float Cooldown;
+
+    /// <summary>A cast spends no charge, so a mage never runs dry or converts to melee.</summary>
+    public bool UnlimitedCharges;
+}
+
+#endregion
+
 #region Event stream
 
 /// <summary>
@@ -119,8 +142,8 @@ public struct MageCastRequestBufferElement : IBufferElementData
     /// <summary>World position to cast at, resolved at request time.</summary>
     public float3 Position;
 
-    /// <summary>Target squad for SpellTargetingType.Squad spells, so the effect tracks the squad
-    /// through warmup. Entity.Null for World-targeted spells.</summary>
+    /// <summary>Target squad for SpellTargetingType.Squad spells; a mark, brace or aura follows it through
+    /// warm-up. Entity.Null for World-targeted spells.</summary>
     public Entity TargetSquadEntity;
 }
 

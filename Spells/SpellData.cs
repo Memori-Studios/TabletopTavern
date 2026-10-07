@@ -25,7 +25,9 @@ namespace TJ.Spells
         // SpellRegistry and in SpellLoadout.AlwaysAvailableSpells.
         LesserMending, LesserEmbers,
         // Edric's signature.
-        IronRain }
+        IronRain,
+        // Bertha's signature, replacing ArtilleryBombardment.
+        Barricade }
     // World: raycast ground point, stays fixed. Squad: follows the target squad's live
     // position through warmup and damage resolution.
     public enum SpellTargetingType { World, Squad }
@@ -70,6 +72,8 @@ namespace TJ.Spells
         // strike point, rather than on every unit inside SpellRadius. Author the full per-hit damage in
         // SpellModifierValue; the 0.25 melee modifier still applies like every other spell.
         public bool HitsSingleUnit;
+        // Against a squad carrying MonsterousSquadTag, each hit deals this percent of the model's max health instead of SpellModifierValue; 0 means off.
+        public float MonstrousPercentOfMaxHealth;
         public SFXCue warmupSound;
         public SFXCue hitSound;
         // The hit cue re-fires this many seconds apart after the first play; 0 plays it once.
@@ -129,6 +133,12 @@ namespace TJ.Spells
         // Reads the live selection: the player selects a squad, picks the spell, then clicks a destination.
         public bool TeleportsSquad;
 
+        [Header("Barricades")]
+        // The player draws a line; a row of pieces rises along it and carves the NavMesh so every unit paths around (author as SpellTargetingType.World).
+        public bool PlacesBarricade;
+        public BarricadePiece BarricadePiecePrefab;
+        public int BarricadeMaxPieces = 6;
+
         [Header("Race Theming")]
         // Optional. When set, the pre-battle browse menu tints each spell's background with a gradient
         // built from this race's PrimaryColor -> SecondaryColor, to visually group spells by race.
@@ -163,12 +173,16 @@ namespace TJ.Spells
         /// <summary>SpellModifierValue as a caster with this potency lands it.</summary>
         public float ScaledModifierValue(float potency) => SpellModifierValue * potency;
 
+        /// <summary>MonstrousPercentOfMaxHealth as a caster with this potency lands it.</summary>
+        public float ScaledMonstrousPercent(float potency) => MonstrousPercentOfMaxHealth * potency;
+
         /// <summary>The formatted description, keyword tags still raw: draw it through KeywordText.</summary>
         public string GetLocalizedSpellDescription(float potency = 1f)
         {
             string localizedSpellDescription = LocalizationManager.Instance.GetText(Spell.ToString() + "_Desc");
             if(string.IsNullOrEmpty(localizedSpellDescription)) return Spell.ToString();
-            return string.Format(localizedSpellDescription, SpellType, Mathf.RoundToInt(ScaledModifierValue(potency)), SpellDuration);
+            return string.Format(localizedSpellDescription, SpellType, Mathf.RoundToInt(ScaledModifierValue(potency)), SpellDuration,
+                Mathf.RoundToInt(ScaledMonstrousPercent(potency)));
         }
     }
 }

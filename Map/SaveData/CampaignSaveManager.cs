@@ -94,9 +94,15 @@ namespace TJ
             // renders the troops panel before Load() runs. Resolve it and expand a save array that predates
             // the third-reserve-slot unlock, otherwise RefreshTroopsPanel (which only draws
             // min(playerArmy.Length, 10 + MaxReserveSlots) slots) never creates the third reserve slot.
-            maxReserveSlots = SaveDataHandler.IsMetaprogressionNodeUnlocked(_thirdReserveSlotMetaprogressionModel) ? 3 : 2;
+            maxReserveSlots = ResolveMaxReserveSlots();
             EnsureArmyCapacity();
             RemoveDuplicateSquads();
+        }
+        // Burn the Wagons gives the reserve up for good.
+        private int ResolveMaxReserveSlots()
+        {
+            if (saveData != null && saveData.HasOrdeal(OrdealId.BurnTheWagons)) return 0;
+            return SaveDataHandler.IsMetaprogressionNodeUnlocked(_thirdReserveSlotMetaprogressionModel) ? 3 : 2;
         }
         // Every lookup assumes a UniqueID is unique; a copy made the prestige trait prompt repeat forever.
         private void RemoveDuplicateSquads()
@@ -147,7 +153,7 @@ namespace TJ
             }
 
             reservesHealMultiplier = SaveDataHandler.IsMetaprogressionNodeUnlocked(_reservesHealMetaprogressionModel) ? 2 : 1;
-            maxReserveSlots = SaveDataHandler.IsMetaprogressionNodeUnlocked(_thirdReserveSlotMetaprogressionModel) ? 3 : 2;
+            maxReserveSlots = ResolveMaxReserveSlots();
         }
         public void SaveCampaign()
         {
@@ -268,6 +274,8 @@ namespace TJ
         }
         public bool CheckForRoomToRecruit()
         {
+            // No Reinforcements: the March takes no new squads, so every recruit path reads the army as full.
+            if (saveData.InMarch) return false;
             // Third reserve slot may have been unlocked mid-run; army array hasn't expanded yet
             if (saveData.playerArmy.Length < 10 + MaxReserveSlots) return true;
 
@@ -359,6 +367,11 @@ namespace TJ
         {
             // Debug.Log($"Completing chapter {_selectedNodeIndex}");
             saveData.nodeResume = default;
+            // Counted here, with the layer, so the battle number of every layer ahead never shifts mid-turn.
+            if (saveData.InMarch && saveData.wonBattleThisTurn) saveData.marchBattlesWon++;
+            saveData.activeTwists?.Clear();
+            saveData.twistsStruckHere?.Clear();
+            saveData.wonBattleThisTurn = false;
             saveData.SetSelectedNodeIndex(-1);
             saveData.activeMapLayer++;
             saveData.RunStats.chaptersCompleted++;
@@ -378,6 +391,8 @@ namespace TJ
         }
         public void CompleteBook()
         {
+            // March On: the last heal the army gets, taken before the laws begin.
+            if (saveData.bookNumber == TabletopTavernConstants.FINAL_STORY_ACT) HealArmyToFull();
             saveData.bookNumber++;
             if (saveData.bookNumber >= AchievementRules.MARCH_ON_ACT) SteamAchievements.Unlock(AchievementId.MarchOn);
             if (saveData.bookNumber >= AchievementRules.BEYOND_THE_MAPS_EDGE_ACT) SteamAchievements.Unlock(AchievementId.BeyondTheMapsEdge);
@@ -474,8 +489,15 @@ namespace TJ
             }
             CampaignManager.Instance.MapSceneUIManager.HUDPanel.HideZeroHealthSquads();
         }
+        public const int DRAVEN_HERO_ID = 10;
         public void HandleSpecialSquadsOnChapterEnd()
         {
+            // Thirst for Blood (Draven): a battle won this turn heals every Common unit to full health.
+            if (saveData.heroID == DRAVEN_HERO_ID && saveData.wonBattleThisTurn)
+            {
+                ModifyTroopHealth(1f, UnitRarity.Common);
+            }
+
             for (int i = 0; i < saveData.playerArmy.Length; i++)
             {
                 if (saveData.playerArmy[i].UnitIndex == -1) continue;
@@ -551,11 +573,29 @@ namespace TJ
             return modifiedHealAmount;
         }
         // Serendael (hero 8): every heal is doubled here, so no caller may double it as well.
+        // No Respite: on the March a heal is worth nothing, and the previews that read this show it.
         public static float ApplyHealingBonus(float _modificationAmount)
         {
+            if (_modificationAmount > 0 && HealingBlocked()) return 0f;
             if (_modificationAmount > 0 && HeroBonusManager.Instance.ActiveHeroID == 8)
                 return _modificationAmount * 2f;
             return _modificationAmount;
+        }
+        public static bool HealingBlocked()
+        {
+            CampaignManager campaign = CampaignManager.InstanceIfExists;
+            if (campaign == null) return false;
+            CampaignSaveData run = campaign.CampaignSaveManager.SaveData;
+            return run != null && run.InMarch;
+        }
+        private void HealArmyToFull()
+        {
+            for (int i = 0; i < saveData.playerArmy.Length; i++)
+            {
+                if (saveData.playerArmy[i].UnitIndex == -1 || saveData.playerArmy[i].SquadCurrentHealth == 0) continue;
+                saveData.playerArmy[i].SquadCurrentHealth = saveData.playerArmy[i].SquadMaxHealth;
+            }
+            OnUnitHealthChanged?.Invoke();
         }
         /// <summary>
         /// Modifies the health of all troops in the player's army by total health * _modificationAmount.
@@ -618,6 +658,21 @@ namespace TJ
                 } 
             OnUnitHealthChanged?.Invoke();
         }
+        public void ModifyTroopHealth(float _modificationAmount, UnitRarity _rarity)
+        {
+            float modificationAmount = ApplyHealingBonus(_modificationAmount);
+            for (int i = 0; i < saveData.playerArmy.Length; i++)
+            {
+                if (saveData.playerArmy[i].UnitIndex == -1) continue;
+                if (saveData.playerArmy[i].SquadCurrentHealth == 0) continue;
+                if (TabletopTavernData.Instance.GetSquadStats(saveData.playerArmy[i].UnitName).RarityTier != _rarity) continue;
+
+                int troopsToHeal = (int)(saveData.playerArmy[i].SquadMaxHealth * modificationAmount);
+                int clampedHealth = math.clamp(saveData.playerArmy[i].SquadCurrentHealth + troopsToHeal, 0, saveData.playerArmy[i].SquadMaxHealth);
+                saveData.playerArmy[i].SquadCurrentHealth = clampedHealth;
+            }
+            OnUnitHealthChanged?.Invoke();
+        }
             public void ModifySpecificUnitHealth(float _modificationAmount, string _uniqueID)
             {
                 SquadToLoad squadToModify = Array.Find(saveData.playerArmy, x => x.UniqueID == _uniqueID);
@@ -641,14 +696,19 @@ namespace TJ
             }
         // Sole path for gaining a unit mid-run. _viaRaiseDead flags the Sanguine Court post-battle
         // reward so everything else can disqualify DeadShallServe.
-        public void RecruitSquad(SquadStats _squadsStats, float healthOfSquad = 1f, bool _viaRaiseDead = false, bool _conscripted = false)
+        public void RecruitSquad(SquadStats _squadsStats, float healthOfSquad = 1f, bool _viaRaiseDead = false, bool _conscripted = false, int _prestige = 0)
         {
+            if (saveData.InMarch)
+            {
+                Debug.LogWarning($"[Unit] {_squadsStats.unitName} not recruited: the March takes no new squads.");
+                return;
+            }
             if (saveData.HasOrdeal(OrdealId.GreenRecruits)) healthOfSquad *= OrdealRegistry.GREEN_RECRUITS_HEALTH;
             EnsureArmyCapacity();
             int nextEmptyUnitIndex = GetNextEmptyUnitIndex(saveData.playerArmy);
             SquadToLoad newSquad = new (
                 _squadsStats.unitName,
-                0, 
+                _prestige, 
                 _unitIndex: nextEmptyUnitIndex,
                 _modifiedHealthValueByAmount: healthOfSquad
             );
@@ -1019,7 +1079,8 @@ namespace TJ
         }
         private SquadToLoad PrestigeUnit(SquadToLoad _squadToPrestige)
         {
-            _squadToPrestige.SquadCurrentHealth = _squadToPrestige.SquadMaxHealth;
+            // No Respite: a prestige on the March keeps the squad's wounds.
+            if (!saveData.InMarch) _squadToPrestige.SquadCurrentHealth = _squadToPrestige.SquadMaxHealth;
             _squadToPrestige.UnitPrestige++;
             Debug.Log($"[Unit] Prestiged {_squadToPrestige.UnitName} to prestige {_squadToPrestige.UnitPrestige}");
 
@@ -1070,6 +1131,7 @@ namespace TJ
         public List<UnitAttribute> GetEligiblePrestigeTraitsForUnit(UnitName _unitName) =>
             TabletopTavernData.Instance.GetUsablePrestigeTraits(_unitName)
                 .Where(trait => !HeroBonusManager.HeroAlwaysGrants(_unitName, saveData.heroID, trait))
+                .Where(trait => trait != UnitAttribute.Stalwart || !HeroBonusManager.HeroAlwaysGrants(_unitName, saveData.heroID, UnitAttribute.Terrifying))
                 .ToList();
 
         /// <summary>The traits offered to this squad: the saved deal when it still fits, otherwise a new one that is saved.</summary>
@@ -1101,9 +1163,13 @@ namespace TJ
         }
 
         // Stores the deal without saving; the caller's save writes it with the rest of the change.
+        // Seeded, because Continue loads the snapshot, which never holds a mid-node offer: a random deal was a free reroll.
         private List<UnitAttribute> DealPrestigeTraitOffer(SquadToLoad _squad, List<UnitAttribute> _pool, IReadOnlyCollection<UnitAttribute> _exclude)
         {
-            List<UnitAttribute> offer = PrestigeTraitOffer.Deal(_pool, _exclude, count => UnityEngine.Random.Range(0, count));
+            int earlierPicks = saveData.playerArmy.Count(squad =>
+                squad.UnitIndex != -1 && squad.UnitName == _squad.UnitName && squad.PrestigeTrait != UnitAttribute.None);
+            System.Random random = new System.Random(PrestigeTraitOffer.Seed(saveData.seed, _squad.UnitName, earlierPicks, _exclude));
+            List<UnitAttribute> offer = PrestigeTraitOffer.Deal(_pool, _exclude, random.Next);
             saveData.prestigeOfferSquadId = _squad.UniqueID;
             saveData.prestigeOffer = new List<UnitAttribute>(offer);
             return offer;
@@ -1256,6 +1322,7 @@ namespace TJ
             }
             public string HealRandomUnitToFull()
             {
+                if (saveData.InMarch) return string.Empty;
                 List<int> eligibleIndices = new();
                 for (int i = 0; i < saveData.playerArmy.Length; i++)
                 {
@@ -1486,6 +1553,8 @@ namespace TJ
         #region Gear
         public bool CanAquireGear()
         {
+            // The build is locked on the March: no new gear.
+            if (saveData.InMarch) return false;
             return saveData.Gear.Count < maxGear;
         }
         public void AquireGear(GearID _gearName)
@@ -1564,9 +1633,9 @@ namespace TJ
 
         #region Ordeals
         /// <summary>
-        /// Starts an endless act's Ordeals: adds the card taken (None when nothing was left to offer), applies its
-        /// one-off effect, then the per-act cards, in one save and snapshot write so Continue can never apply them twice.
-        /// Returns the notices to show the player.
+        /// Settles the Ordeal pick a beaten warlord brings: adds the card taken (None when nothing was left to offer),
+        /// applies its one-off effect, then the cards that fire on every pick, in one save and snapshot write so
+        /// Continue can never apply them twice. Returns the notices to show the player.
         /// </summary>
         public List<string> BeginOrdealAct(OrdealId taken, List<OrdealId> offered)
         {
@@ -1577,7 +1646,7 @@ namespace TJ
                 GameEventTracker.OrdealPicked(saveData, offered, taken);
             }
             ApplyActStartOrdeals(notices);
-            saveData.ordealActStarted = saveData.bookNumber;
+            saveData.marchOrdealPicks++;
 
             SaveCampaign();
             SaveCampaignSnapshot();
@@ -1611,9 +1680,20 @@ namespace TJ
                     // The last slot Renown opened; the draw only offers the card with two or more, so never the signature.
                     saveData.sealedSpellSlot = Mathf.Max(1, TJ.Spells.SpellLoadout.GetUnlockedSlotCount() - 1);
                     break;
+                case OrdealId.BurnTheWagons:
+                    for (int i = 10; i < saveData.playerArmy.Length; i++)
+                    {
+                        if (saveData.playerArmy[i].UnitIndex == -1) continue;
+                        LogDisband(saveData.playerArmy[i]);
+                        saveData.playerArmy[i].UnitIndex = -1;
+                    }
+                    maxReserveSlots = 0;
+                    Array.Resize(ref saveData.playerArmy, Mathf.Min(saveData.playerArmy.Length, 10));
+                    ReorderUnits();
+                    break;
             }
         }
-        // Deserters and Rusted Arms fire at the start of every endless act, the act they are taken in included.
+        // Deserters and Rusted Arms fire at every Ordeal pick, the one they are taken at included.
         private void ApplyActStartOrdeals(List<string> notices)
         {
             if (saveData.HasOrdeal(OrdealId.Deserters) && GetArmySize() > 2)
@@ -1765,9 +1845,8 @@ namespace TJ
         {
             int seed = GetSeededRandom();
             int bookNumber = saveData.bookNumber;
-            List<GearID> gearLooted = DrawRandomGear(1);
-
             TownSize townSize = TownSaveData.GenerateTownSize(level);
+            List<GearID> gearLooted = DrawRandomGear(TownSaveData.LootGearChoices(townSize));
             Race townRace = GenerateTownRace(_selectedNodeIndex, bookNumber);
             int bountyAmount = TownSaveData.GenerateBountyAmount(townSize, seed);
 
@@ -1792,7 +1871,7 @@ namespace TJ
             bool enemyPrestigeEnhanced = OrdealRegistry.EnemyPrestigeEnhanced(saveData);
             bool eliteGuard = saveData.HasOrdeal(OrdealId.EliteGuard);
             SquadToLoad[] townGarrison = ArmyCreator.GenerateTownGarrison(townSize, seed, unitsPool, isImperator, bookNumber, enemyPrestigeEligible, enemyPrestigeEnhanced,
-                eliteGuard, OrdealRegistry.DoubleEnemyPrestigeChance(saveData));
+                eliteGuard, OrdealRegistry.DoubleEnemyPrestigeChance(saveData), DifficultyRules.SmallerGarrison(difficulty, bookNumber));
             if (CampaignManager.Instance.GearManager.CheckForGear(GearID.AuraFarming))
             {
                 // Drops the last squad; under Elite Guard that is the elite, so the one before it goes instead.
@@ -1878,6 +1957,11 @@ namespace TJ
             saveData.enemyArmy = _enemySquads;
             saveData.battleCompleted = true;
             saveData.playerWonBattle = _playerWon;
+            if (_playerWon)
+            {
+                saveData.wonBattleThisTurn = true;
+                saveData.RunStats.battlesWon++;
+            }
             saveData.spoilsTaken = null;
             // Auto-resolve has no mana pool, so event mana waits for a fought battle, like a Mana Draught.
             saveData.eventBattleEffects = new EventBattleEffects { mana = saveData.eventBattleEffects.mana };
@@ -2208,6 +2292,41 @@ namespace TJ
         }
 
         #region devtools
+        /// <summary>Takes a gear item away without selling it, so it gives no gold and stays in the draw pool.</summary>
+        public bool DevRemoveGear(GearID _gear)
+        {
+            if (!saveData.Gear.Remove(_gear)) return false;
+            saveData.brokenGear?.Remove(_gear);
+            CampaignManager.Instance.GearManager.UnAquireGear(_gear);
+            SaveCampaign();
+            SaveCampaignSnapshot();
+            OnGearChanged?.Invoke();
+            return true;
+        }
+        /// <summary>Drops a held Ordeal. What the card already did (gold paid, squads disbanded, gear broken) stays done.</summary>
+        public bool DevRemoveOrdeal(OrdealId _id)
+        {
+            if (saveData.ordeals == null || !saveData.ordeals.Remove(_id)) return false;
+            switch (_id)
+            {
+                case OrdealId.LongNight:
+                    saveData.ordealWeather = Weather.ClearSkies;
+                    break;
+                case OrdealId.SealedPage:
+                    saveData.sealedSpellSlot = 0;
+                    break;
+                case OrdealId.BurnTheWagons:
+                    maxReserveSlots = ResolveMaxReserveSlots();
+                    EnsureArmyCapacity();
+                    ReorderUnits();
+                    break;
+            }
+            // GearManager reloads from disk, so the save comes first.
+            SaveCampaign();
+            SaveCampaignSnapshot();
+            RefreshAfterOrdealChange();
+            return true;
+        }
         [ContextMenu("Open Campaign Save Folder")]
         public void OpenCampaignSaveFolder()
         {

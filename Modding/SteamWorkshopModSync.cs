@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using System.Threading.Tasks;
 using UnityEngine;
 using Memori.Steamworks;
@@ -26,10 +27,9 @@ namespace TJ
 
         // Mirrors every subscribed+installed Workshop item's content into Mods/workshop_<id>/, so
         // the existing local-folder mod loader (ModLoadOrder/ModListManager) picks them up with no
-        // changes on its end. Steam Workshop querying is inherently async, but
-        // TabletopTavernData.Awake()'s mod loading is synchronous - so this must be awaited to
-        // completion during a boot/loading step *before* TabletopTavernData.Instance is first
-        // touched, not called from within Awake() itself.
+        // changes on its end. TabletopTavernData.Awake has already loaded mods by the time this runs
+        // (Core.unity awakes before SceneHandler.Start); TabletopTavernData reloads them once
+        // SceneHandler.OnBeforeFirstLoadComplete fires after this sync.
         public static async Task SyncSubscribedItemsToModsFolderAsync()
         {
             List<UgcItem> items = await SteamWorkshop.GetSubscribedItemsAsync();
@@ -93,13 +93,30 @@ namespace TJ
             }
         }
 
+        // A true mirror: subfolders included, unchanged files skipped, files the author removed deleted.
         private static void CopyModContent(string sourceDir, string targetDir)
         {
             Directory.CreateDirectory(targetDir);
-            foreach (string filePath in Directory.GetFiles(sourceDir))
+            var wanted = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (string sourcePath in Directory.GetFiles(sourceDir, "*", SearchOption.AllDirectories))
             {
-                string destPath = Path.Combine(targetDir, Path.GetFileName(filePath));
-                File.Copy(filePath, destPath, overwrite: true);
+                string destPath = Path.Combine(targetDir, Path.GetRelativePath(sourceDir, sourcePath));
+                wanted.Add(Path.GetFullPath(destPath));
+                var source = new FileInfo(sourcePath);
+                var dest = new FileInfo(destPath);
+                if (dest.Exists && dest.Length == source.Length && dest.LastWriteTimeUtc == source.LastWriteTimeUtc) continue;
+                Directory.CreateDirectory(Path.GetDirectoryName(destPath));
+                File.Copy(sourcePath, destPath, overwrite: true);
+                File.SetLastWriteTimeUtc(destPath, source.LastWriteTimeUtc);
+            }
+            foreach (string localPath in Directory.GetFiles(targetDir, "*", SearchOption.AllDirectories))
+            {
+                if (!wanted.Contains(Path.GetFullPath(localPath))) File.Delete(localPath);
+            }
+            // Deepest first, so an emptied tree collapses in one pass.
+            foreach (string dir in Directory.GetDirectories(targetDir, "*", SearchOption.AllDirectories).OrderByDescending(d => d.Length))
+            {
+                if (!Directory.EnumerateFileSystemEntries(dir).Any()) Directory.Delete(dir);
             }
         }
 

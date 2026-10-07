@@ -95,6 +95,8 @@ public class GraphicsPanel : MonoBehaviour
             dropdown.onValueChanged.AddListener(delegate { RefreshApplyState(); });
         foreach (var toggle in new[] { fullscreenToggle, vsyncToggle, fpsToggle, ambientOcclusionToggle, bloomToggle })
             toggle.onValueChanged.AddListener(delegate { RefreshApplyState(); });
+        vsyncToggle.onValueChanged.AddListener(delegate { ApplyFrameRateNow(); });
+        fpsLimitDropdown.onValueChanged.AddListener(delegate { ApplyFrameRateNow(); });
         appliedState = CurrentState();
         RefreshApplyState();
 
@@ -348,11 +350,21 @@ public class GraphicsPanel : MonoBehaviour
         SaveSettings();
     }
 
+    // VSync and FPS Limit are left out: they apply the moment they change.
     private string CurrentState()
     {
-        return string.Join(",", vsyncToggle.isOn, fullscreenToggle.isOn, fpsToggle.isOn, ambientOcclusionToggle.isOn, bloomToggle.isOn,
+        return string.Join(",", fullscreenToggle.isOn, fpsToggle.isOn, ambientOcclusionToggle.isOn, bloomToggle.isOn,
             resolutionDropdown.value, refreshRateDropdown.value, graphicsQualityDropdown.value, antiAliasingDropdown.value,
-            shadowQualityDropdown.value, renderScaleDropdown.value, textureQualityDropdown.value, fpsLimitDropdown.value);
+            shadowQualityDropdown.value, renderScaleDropdown.value, textureQualityDropdown.value);
+    }
+
+    // The page must never show a frame cap the game is not using, so these two skip the Apply button.
+    private void ApplyFrameRateNow()
+    {
+        ApplyVSyncAndFpsLimit(vsyncToggle.isOn, fpsLimitDropdown.value);
+        PlayerPrefs.SetInt("VSync", vsyncToggle.isOn ? 1 : 0);
+        PlayerPrefs.SetInt("FPSLimit", fpsLimitDropdown.value);
+        PlayerPrefs.Save();
     }
 
     // VSync on overrides the frame cap, so the cap reads as disabled while it is ticked.

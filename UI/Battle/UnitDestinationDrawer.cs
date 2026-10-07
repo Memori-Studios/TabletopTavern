@@ -26,8 +26,9 @@ namespace TJ
 
         private void Update()
         {
-            if (_isDisplaying)
-                RefreshUnitDestinations();
+            if (!_isDisplaying) return;
+            if (BattleMarkers.Hidden) TurnOffAllUnitDestinations();
+            else RefreshUnitDestinations();
         }
 
         private void DisplayUnitDestinations()

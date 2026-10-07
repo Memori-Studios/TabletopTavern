@@ -96,6 +96,7 @@ public static class HeroBonusRuleData
 
     public static readonly List<HeroAttributeBonusRule> BaseAttributeRules = new()
     {
+        new() { HeroID = 3, LocalizationKey = "heroBonusTitle6", Condition = Tag("Goblin"), GrantedAttribute = UnitAttribute.BackStabbers },
         new() { HeroID = 4, LocalizationKey = "heroBonusTitle7", Condition = Units(UnitName.OrcRavagers), GrantedAttribute = UnitAttribute.Terrifying },
         new() { HeroID = 6, LocalizationKey = "heroBonusTitle12", Condition = Unconditional(), GrantedAttribute = UnitAttribute.Stalwart },
         new() { HeroID = 9, LocalizationKey = "heroBonusTitle18", Condition = Unconditional(), GrantedAttribute = UnitAttribute.Outrider },

@@ -48,6 +48,10 @@ namespace TJ
         [SerializeField] private MemoriButtonV2 generateBattlefieldButton;
         [SerializeField] private Toggle useRandomSeedToggle;
         [SerializeField] private Toggle spellTestModeToggle;
+        [SerializeField] private Toggle mageNoCooldownToggle;
+        [SerializeField] private Toggle mageUnlimitedChargesToggle;
+        // Shown under the two mage rows: both options also apply to enemy mages.
+        [SerializeField] private TextMeshProUGUI mageTestWarningText;
         [SerializeField] private TMP_InputField seedInputField;
         [SerializeField] private Biome biome;
         [SerializeField] private Weather weather;
@@ -65,6 +69,9 @@ namespace TJ
                 customBattlePanel.SetActive(false);
                 // The row sits under Start Battle, outside the custom battle panel, and test mode never applies in campaign.
                 if (spellTestModeToggle != null) spellTestModeToggle.transform.parent.gameObject.SetActive(false);
+                if (mageNoCooldownToggle != null) mageNoCooldownToggle.transform.parent.gameObject.SetActive(false);
+                if (mageUnlimitedChargesToggle != null) mageUnlimitedChargesToggle.transform.parent.gameObject.SetActive(false);
+                if (mageTestWarningText != null) mageTestWarningText.gameObject.SetActive(false);
                 return;
             }
             customBattlePanel.SetActive(true);
@@ -166,6 +173,7 @@ namespace TJ
 
             useRandomSeedToggle.onValueChanged.AddListener(ChangeRandomSeedToggle);
             SetUpSpellTestModeToggle();
+            SetUpMageTestToggles();
             seedInputField.text = _seed.ToString();
             seedInputField.onValueChanged.AddListener((string value) =>
             {
@@ -314,6 +322,8 @@ namespace TJ
             mapRegionDropdown.onValueChanged.RemoveAllListeners();
 
             if (spellTestModeToggle != null) spellTestModeToggle.onValueChanged.RemoveAllListeners();
+            if (mageNoCooldownToggle != null) mageNoCooldownToggle.onValueChanged.RemoveAllListeners();
+            if (mageUnlimitedChargesToggle != null) mageUnlimitedChargesToggle.onValueChanged.RemoveAllListeners();
 
             if (BattleManager.HasInstance)
             {
@@ -351,6 +361,48 @@ namespace TJ
         private void LockSpellTestModeToggle(GamePhase phase)
         {
             if (spellTestModeToggle != null) spellTestModeToggle.interactable = phase == GamePhase.Deployment;
+        }
+        #endregion
+
+        #region Mage test options
+        private void SetUpMageTestToggles()
+        {
+            LocalizationManager loc = LocalizationManager.Instance;
+            SetUpMageTestToggle(mageNoCooldownToggle, Spells.SpellTestMode.MageNoCooldown,
+                on => Spells.SpellTestMode.MageNoCooldown = on,
+                loc.GetText("MageNoCooldownLabel"),
+                string.Format(loc.GetText("MageNoCooldownDesc"), Spells.SpellTestMode.CooldownSeconds));
+            SetUpMageTestToggle(mageUnlimitedChargesToggle, Spells.SpellTestMode.MageUnlimitedCharges,
+                on => Spells.SpellTestMode.MageUnlimitedCharges = on,
+                loc.GetText("MageUnlimitedChargesLabel"),
+                loc.GetText("MageUnlimitedChargesDesc"));
+
+            if (mageTestWarningText == null) return;
+#if !SPELLS || !TESTING
+            mageTestWarningText.gameObject.SetActive(false);
+            return;
+#endif
+            mageTestWarningText.gameObject.SetActive(true);
+            mageTestWarningText.color = (Color)ColorData.HexToRgba(ColorData.Error);
+        }
+
+        // Same gate as Spell Test Mode. The options apply live, so unlike that toggle these never lock.
+        private void SetUpMageTestToggle(Toggle toggle, bool isOn, UnityEngine.Events.UnityAction<bool> onChanged, string title, string description)
+        {
+            if (toggle == null) return;
+
+#if !SPELLS || !TESTING
+            toggle.transform.parent.gameObject.SetActive(false);
+            return;
+#endif
+            toggle.transform.parent.gameObject.SetActive(true);
+            toggle.SetIsOnWithoutNotify(isOn);
+            toggle.onValueChanged.RemoveAllListeners();
+            toggle.onValueChanged.AddListener(onChanged);
+
+            MemoriTooltipTrigger tooltip = toggle.transform.parent.GetComponent<MemoriTooltipTrigger>();
+            if (tooltip == null) tooltip = toggle.transform.parent.gameObject.AddComponent<MemoriTooltipTrigger>();
+            tooltip.SetUpToolTip(title, description);
         }
         #endregion
         private async void RegenerateBattlefield()

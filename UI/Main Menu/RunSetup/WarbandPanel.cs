@@ -51,7 +51,6 @@ namespace TJ.MainMenu
 
         [Header("Army Heading")]
         [SerializeField] private TMP_Text armyHeadingText;
-        [SerializeField] private TMP_Text armyHintText;
 
         // One per loadout block, each authored with its own WarbandSection. A click focuses the
         // block; hover only shows its highlight faintly. Each highlight carries a CanvasGroup for that.
@@ -163,7 +162,6 @@ namespace TJ.MainMenu
             spellTab.SetLabel(LocalizationManager.Instance.GetText("WarbandTabGrimoire"));
             armyHeadingText.text = string.Format(LocalizationManager.Instance.GetText("WarbandRecruitHeading"),
                                                  LocalizationManager.Instance.GetText(hero.Race.ToString()));
-            armyHintText.text = LocalizationManager.Instance.GetText("WarbandRecruitHint");
         }
 
         /// <summary>

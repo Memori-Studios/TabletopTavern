@@ -94,6 +94,8 @@ public class TutorialManager : Memori.Utilities.Singleton<TutorialManager>
         completeStepButton.gameObject.SetActive(false);
 
         activeTutorialSteps = _tutorialSteps;
+        // Until LoadStep runs, the old step's action must not complete a step of the new chain.
+        activeStepEnum = TutorialStepEnum.Blank;
         _stepPanelOpen = true;
         tutorialPanelAnimator.gameObject.SetActive(true);
         tutorialPanelAnimator.SetBool("Active", true);

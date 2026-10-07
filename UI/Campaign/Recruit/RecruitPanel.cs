@@ -51,6 +51,8 @@ namespace TJ.Recruit
         CancellationTokenSource _cardLoadCts;
         public enum RecruitmentType { Shop, Town, Battle, Conscription }
         RecruitmentType recruitmentType = RecruitmentType.Shop;
+        // The prestige a town recruit joins at; only a sacked City sets it above 0.
+        int townRecruitPrestige;
         // One picker opening for the node log: where it came from, what it showed, what was taken. Sent when the panel closes.
         Dictionary<string, object> offerLog;
         // Louder than the battle bark (0.2): nothing on the map screen competes with it.
@@ -76,9 +78,10 @@ namespace TJ.Recruit
             campaignSaveManager.IncrementRerollCount(3);
             skipButton.gameObject.SetActive(true);
         }
-        public void LoadRecruitPanelFromTown(Race _townRace, TownSize townsize)
+        public void LoadRecruitPanelFromTown(Race _townRace, TownSize townsize, int _recruitPrestige = 0)
         {
             recruitmentType = RecruitmentType.Town;
+            townRecruitPrestige = _recruitPrestige;
             hasSelectedRecruitCard = false;
             // chooseACardPopupPrefab.SetBool("Active", true);
             recruitCards = new();
@@ -314,7 +317,8 @@ namespace TJ.Recruit
 
                 hasSelectedRecruitCard = true;
                 LogPick(_squadStats.unitName.ToString(), false);
-                campaignSaveManager.RecruitSquad(_squadStats, conscriptedHealth, _conscripted: recruitmentType == RecruitmentType.Conscription);
+                campaignSaveManager.RecruitSquad(_squadStats, conscriptedHealth, _conscripted: recruitmentType == RecruitmentType.Conscription,
+                    _prestige: recruitmentType == RecruitmentType.Town ? townRecruitPrestige : 0);
             }
 
             IAudioRequester.Instance.PlaySFX(SFXData.RecruitUnit);

@@ -253,6 +253,8 @@ namespace TJ
             {
                 targetCamera.cullingMask |= (1 << layerToToggle); // Disable the layer by setting the corresponding bit to 0
             }
+            // The unit outline and ground chevrons are a render feature, not a layer, so they follow this flag.
+            BattleMarkers.Hidden = !IsLayerEnabled();
             SquadFlagGameObjectTag[] flagGameObjectTags = FindObjectsByType<SquadFlagGameObjectTag>(FindObjectsSortMode.None);
 
             foreach (SquadFlagGameObjectTag flag in flagGameObjectTags)
@@ -1063,7 +1065,12 @@ namespace TJ
                     }
                     break;
                 case GamePhase.Battle:
-                    if (BattleManager.Instance.UnitSelectionManager.SelectedSquadIds.Count > 1) 
+                    if (BattleManager.Instance.SquadManager.OrdealActive(OrdealId.NoRetreat))
+                    {
+                        NotificationManager.Instance.DisplayNotification(LocalizationManager.Instance.GetText("OrdealNoRetreatBlocked"));
+                        break;
+                    }
+                    if (BattleManager.Instance.UnitSelectionManager.SelectedSquadIds.Count > 1)
                     {
                         NotificationManager.Instance.DisplayNotification(LocalizationManager.Instance.GetText("CannotWithdrawMultipleSquadsAtOnce"));
                         break;
@@ -1090,13 +1097,14 @@ namespace TJ
             UnitName? yourFirst = null, enemyFirst = null;
             foreach (ArmySpawnManager.EndBattleSquad squad in results)
             {
-                var row = new DamageReportRow { Unit = squad.Unit, Damage = squad.Damage, Kills = squad.Kills, Lost = squad.Lost };
+                var row = new DamageReportRow { Unit = squad.Unit, Damage = squad.Damage, Value = squad.Value, Kills = squad.Kills, Lost = squad.Lost };
                 if (squad.IsPlayer)
                 {
+                    row.Fallen = squad.UnitsLeft <= 0;
                     yours.Add(row);
                     slain += squad.Kills;
                     troopsLost += squad.Lost;
-                    if (squad.UnitsLeft <= 0) squadsLost++;
+                    if (row.Fallen) squadsLost++;
                     yourFirst ??= squad.Unit;
                 }
                 else
@@ -1105,8 +1113,8 @@ namespace TJ
                     enemyFirst ??= squad.Unit;
                 }
             }
-            yours.Sort((a, b) => b.Damage.CompareTo(a.Damage));
-            enemy.Sort((a, b) => b.Damage.CompareTo(a.Damage));
+            yours.Sort(DamageReportTooltip.ByValue);
+            enemy.Sort(DamageReportTooltip.ByValue);
             TabletopTavernData data = TabletopTavernData.Instance;
             Race yourRace = yourFirst.HasValue ? data.GetRaceFromUnitName(yourFirst.Value) : Race.IronLegion;
             Race enemyRace = enemyFirst.HasValue ? data.GetRaceFromUnitName(enemyFirst.Value) : Race.IronLegion;
@@ -1119,7 +1127,7 @@ namespace TJ
             // A lost campaign battle ends the run; the map's result says so again with the run summary.
             string defeatLine = !playerWon && !isCustomBattle ? GetText("engagementDefeatLine") : null;
             endBattleStats = DamageReportTooltip.Build(yours, enemy, string.Format(GetText("engagementResultSub"), outcome, caption),
-                endBattleView.DamageIcon, yourRace, slain, troopsLost, squadsLost);
+                endBattleView.DamageIcon, yourRace, slain, troopsLost, squadsLost, pinned: true);
 
             endBattleView.ClearBadges();
             endBattleView.Show(playerWon, title, outcome, caption, GetText(enemyRace.ToString()), slain.ToString("N0"), losses, defeatLine, isCustomBattle);

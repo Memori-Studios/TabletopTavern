@@ -110,7 +110,8 @@ namespace TJ
             bool heavyArmor = (sizeClass == UnitSize.Infantry || sizeClass == UnitSize.Cavalry)
                 && TabletopTavernData.Instance.GetSquadStats(unitName).Armor >= SquadSFXManager.HeavyArmorThreshold;
             Weather weather = battleManager.BattlefieldEnvManager.CurrentWeather;
-            squadSFXManager.Initialize(squadAssets.voiceSFX, isInfantry, squadAssets.mountSFX, heavyArmor, weather);
+            bool singleModel = TabletopTavernData.Instance.GetSquadStats(unitName).baseUnitCount == 1;
+            squadSFXManager.Initialize(squadAssets.voiceSFX, isInfantry, squadAssets.mountSFX, heavyArmor, weather, singleModel);
             flagMeshRenderer.material = _flagMaterial;
             squadId = _squadId;
             unitSize = _unitSize;

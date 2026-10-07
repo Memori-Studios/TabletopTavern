@@ -66,6 +66,10 @@ namespace TJ.Map
         [SerializeField] private CanvasGroup weatherHoverPanel;
         [SerializeField] private TMP_Text weatherHoverTitle;
         [SerializeField] private TMP_Text weatherHoverDescription;
+        // A March node's host and Twists, above the army at the lower centre. Null on an older scene.
+        [SerializeField] private CanvasGroup rogueHostHoverPanel;
+        [SerializeField] private TMP_Text rogueHostHoverTitle;
+        [SerializeField] private TMP_Text rogueHostHoverDescription;
 
         [Header("Gold")]
         [SerializeField] private TMP_Text goldAmountText;
@@ -120,7 +124,6 @@ namespace TJ.Map
         [SerializeField] private MapLabel unknownLabel;
         [SerializeField] private MapLabel tavernLabel;
         [SerializeField] private MapLabel campfireLabel;
-        [SerializeField] private TMP_Text routeHintText;
         // public MapLabel SkirmishLabel => skirmishLabel;
         // public MapLabel EventLabel => eventLabel;
         // public MapLabel ShopLabel => shopLabel;
@@ -170,8 +173,6 @@ namespace TJ.Map
             campaignSaveManager.OnOrdealsChanged += OrdealsChanged;
             InputHandler.Instance.SecondaryActionPressed += SecondaryAction;
             InputHandler.Instance.OnToggleFreeCameraMode += ToggleFreeCameraMode;
-            if (routeHintText != null)
-                routeHintText.text = string.Format(LocalizationManager.Instance.GetText("MapRouteHint"), SecondaryKey());
 
             ReloadGear();
             ReloadConsumables();
@@ -191,8 +192,7 @@ namespace TJ.Map
             UpdateHeroNameAndRace();
             legendGO.SetActive(true);
 
-            chapterText.text = $"{campaignSaveManager.SaveData.bookNumber} - {campaignSaveManager.SaveData.activeMapLayer + 1}";
-            chapterTooltipTrigger.SetUpToolTip(_title: GetChapterTooltipTitle(campaignSaveManager.SaveData.bookNumber, campaignSaveManager.SaveData.activeMapLayer));
+            ShowChapter(campaignSaveManager.SaveData.activeMapLayer);
 
             settingsTooltipTrigger.SetUpToolTip(_title: LocalizationManager.Instance.GetText("Settings"));
             string freeCamKey = FreeCameraKey();
@@ -257,7 +257,7 @@ namespace TJ.Map
             }
             heroNameTooltipTrigger.SetUpToolTip(_title: heroNameLocalized, _description: KeywordText.ForTooltip(heroBonusText1string));
 
-            OrdealId countering = OrdealRegistry.CounteringOrdeal(campaignSaveManager.SaveData.ordeals, hero.Race);
+            OrdealId countering = OrdealRegistry.CounteringOrdeal(campaignSaveManager.SaveData.ActiveOrdeals, hero.Race);
             heroRaceText.alpha = countering != OrdealId.None ? 0.5f : 1f;
             heroRaceTooltipTrigger.SetUpToolTip(new TooltipContent
             {
@@ -466,19 +466,33 @@ namespace TJ.Map
         }
         public void UpdateChapterText(int _chapter)
         {
-            chapterText.text = $"{campaignSaveManager.SaveData.bookNumber} - {_chapter + 1}";
-            chapterTooltipTrigger.SetUpToolTip(_title: GetChapterTooltipTitle(campaignSaveManager.SaveData.bookNumber, _chapter));
+            ShowChapter(_chapter);
             chapterMMFeedback.PlayFeedbacks();
+        }
+        // Story acts read "act - chapter". The March has no acts: it reads the battle the player is on.
+        private void ShowChapter(int _chapter)
+        {
+            Memori.SaveData.CampaignSaveData run = campaignSaveManager.SaveData;
+            if (run.InMarch)
+            {
+                int battle = MarchRules.CurrentBattle(run);
+                int untilWarlord = MarchRules.WARLORD_EVERY - (battle - 1) % MarchRules.WARLORD_EVERY - 1;
+                string title = string.Format(LocalizationManager.Instance.GetText("marchBattle"), battle);
+                title += "\n" + (untilWarlord == 0
+                    ? LocalizationManager.Instance.GetText("marchWarlordNow")
+                    : string.Format(LocalizationManager.Instance.GetText("marchWarlordIn"), untilWarlord));
+                chapterText.text = battle.ToString();
+                chapterTooltipTrigger.SetUpToolTip(_title: title);
+                return;
+            }
+            chapterText.text = $"{run.bookNumber} - {_chapter + 1}";
+            chapterTooltipTrigger.SetUpToolTip(_title: GetChapterTooltipTitle(run.bookNumber, _chapter));
         }
         private string GetChapterTooltipTitle(int bookNumber, int chapter)
         {
             string actLocalized = LocalizationManager.Instance.GetText("Act");
             string chapterLocalized = LocalizationManager.Instance.GetText("Chapter");
-            string title = $"{actLocalized} {bookNumber} - {chapterLocalized} {chapter + 1}";
-            int endlessActs = TabletopTavernConstants.EndlessActs(bookNumber);
-            if (endlessActs > 0)
-                title += "\n" + string.Format(LocalizationManager.Instance.GetText("EndlessActBonus"), endlessActs);
-            return title;
+            return $"{actLocalized} {bookNumber} - {chapterLocalized} {chapter + 1}";
         }
         private void ReloadGear()
         {
@@ -842,10 +856,6 @@ namespace TJ.Map
             InputHandler.Instance.GameControls.Battle.ToggleFreeCameraMode.bindings[0].effectivePath,
             InputControlPath.HumanReadableStringOptions.OmitDevice);
 
-        private static string SecondaryKey() => InputControlPath.ToHumanReadableString(
-            InputHandler.Instance.GameControls.Battle.Secondary.bindings[0].effectivePath,
-            InputControlPath.HumanReadableStringOptions.OmitDevice);
-
         public void ShowFreeCameraTip()
         {
             TutorialManager.Instance.LoadTooltip(TutorialData.FreeCamera, freeCameraButton.transform, CalloutSide.TowardCenter, FreeCameraKey());
@@ -978,6 +988,31 @@ namespace TJ.Map
             weatherHoverTitle.text = title;
             weatherHoverDescription.text = $"<color={ColorData.Tier1}>{WeatherInfo.GetDescription(weather)}</color>";
             weatherHoverPanel.CGEnable();
+        }
+        /// <summary>A March node on hover: the host's faction and what each Twist does, in its own panel above the army.</summary>
+        public void ShowRogueHostHover(Race race, bool warlord, List<OrdealId> twists, bool show)
+        {
+            if (rogueHostHoverPanel == null) return;
+            if (!show)
+            {
+                rogueHostHoverPanel.CGDisable();
+                return;
+            }
+
+            string host = LocalizationManager.Instance.GetText(warlord ? "marchWarlord" : "marchRogueHost");
+            rogueHostHoverTitle.text = $"<color={ColorData.Primary}>{host}</color> {LocalizationManager.Instance.GetText(race.ToString())}";
+
+            List<string> lines = new();
+            foreach (OrdealId twist in twists)
+            {
+                OrdealDefinition definition = OrdealRegistry.Get(twist);
+                string description = KeywordText.Render(LocalizationManager.Instance.GetText(definition.TwistDescriptionKey), false);
+                lines.Add($"<color={ColorData.Error}>{LocalizationManager.Instance.GetText(definition.NameKey)}</color> <color={ColorData.Tier1}>{description}</color>");
+            }
+            rogueHostHoverDescription.text = string.Join("\n", lines);
+            // The panel sizes to its text through layout; rebuild now so it never shows a frame at the last node's size.
+            LayoutRebuilder.ForceRebuildLayoutImmediate((RectTransform)rogueHostHoverPanel.transform);
+            rogueHostHoverPanel.CGEnable();
         }
         public void DisplayJuiceOnSquad(ArmyJuice _armyJuice)
         {

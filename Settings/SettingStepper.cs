@@ -17,11 +17,20 @@ namespace TJ.Settings
 
         private bool _drawn, _shownInteractable;
         private int _shownValue, _shownCount;
+        private bool _arrowsWired;
 
         protected override void Awake()
         {
             base.Awake();
-            if (!Application.isPlaying) return;
+            WireArrows();
+        }
+
+        // Also called from LateUpdate: with Enter Play Mode scene reload off, a stepper in a scene open in the Editor
+        // ran Awake in Edit Mode and never gets a Play Mode Awake.
+        private void WireArrows()
+        {
+            if (_arrowsWired || !Application.isPlaying) return;
+            _arrowsWired = true;
             if (previousButton != null) previousButton.onClick.AddListener(() => Step(-1, false));
             if (nextButton != null) nextButton.onClick.AddListener(() => Step(1, false));
         }
@@ -58,6 +67,7 @@ namespace TJ.Settings
         // Polled so SetValueWithoutNotify and a refill of the options also update the arrows.
         private void LateUpdate()
         {
+            WireArrows();
             bool interactable = IsInteractable();
             int count = options.Count;
             if (_drawn && value == _shownValue && count == _shownCount && interactable == _shownInteractable) return;

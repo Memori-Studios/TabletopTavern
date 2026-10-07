@@ -847,6 +847,11 @@ namespace TJ.Town.EditorTools
             RectTransform fightLines = Rect("Fight Lines", lines);
             VLayout(fightLines, 4f, new RectOffset());
             Localize(Line(fightLines, "Rewards Line", chestIcon, Positive, Positive, 16f), "townFightRewards");
+            TMP_Text gearLine = Line(fightLines, "Gear Line", chestIcon, Coin, Cream, 16f);
+            gearLine.raycastTarget = true;
+            Ref(so, "gearLine", gearLine.transform.parent.gameObject);
+            Ref(so, "gearLineText", gearLine);
+            Ref(so, "gearLineTooltip", gearLine.gameObject.AddComponent<MemoriTooltipTrigger>());
             Localize(Line(fightLines, "Reserves Line", heartIcon, Negative, Negative, 16f), "sackTownNoHeal");
             Ref(so, "fightLines", fightLines.gameObject);
 
@@ -873,8 +878,25 @@ namespace TJ.Town.EditorTools
             RectTransform action = Action(column);
             GameObject fight = Instance(primaryButton, action, "Fight Garrison");
             Fixed(fight, 250f, 90f);
-            Localize(Child<TMP_Text>(fight.transform, "Button Label"), "FightGarrison");
+            TMP_Text fightLabel = Child<TMP_Text>(fight.transform, "Button Label");
+            Localize(fightLabel, "FightGarrison");
+            // One line that shrinks, so a long label (German) never wraps into the prediction below it.
+            fightLabel.textWrappingMode = TextWrappingModes.NoWrap;
+            fightLabel.enableAutoSizing = true;
+            fightLabel.fontSizeMin = 14f;
+            fightLabel.fontSizeMax = fightLabel.fontSize;
             RedButton(fight);
+            // Filled at runtime, so it must not keep a localizer that a locale change would reset.
+            TMP_Text prediction = Child<TMP_Text>(fight.transform, "Secondary Label");
+            foreach (LocalizeStringEvent localizer in prediction.GetComponents<LocalizeStringEvent>()) Object.DestroyImmediate(localizer);
+            prediction.gameObject.SetActive(true);
+            prediction.text = "";
+            prediction.font = display;
+            prediction.fontSize = 15f;
+            prediction.color = Cream;
+            prediction.margin = new Vector4(20f, 42f, 70f, 0f);
+            prediction.richText = true;
+            Ref(so, "fightPrediction", prediction);
             TMP_Text notTaken = NotTaken(action, "townEnteredInstead");
             Ref(so, "fightButton", fight.GetComponent<Button>());
             Ref(so, "fightNotTaken", notTaken.gameObject);
@@ -957,7 +979,15 @@ namespace TJ.Town.EditorTools
             GameObject row = Instance(spoilRowPart, parent, name);
             Image image = Child<Image>(row.transform, "Pop/Button/Content/Mount/Icon");
             image.sprite = icon;
-            return row.GetComponent<TownSpoilRow>();
+            TownSpoilRow spoil = row.GetComponent<TownSpoilRow>();
+            // Wired on the instance, so an existing part prefab needs no reset to gain them.
+            MemoriTooltipTrigger tooltip = GetOrAdd<MemoriTooltipTrigger>(row.transform.Find("Pop/Button").gameObject);
+            tooltip.enabled = false;
+            var rowSo = new SerializedObject(spoil);
+            Ref(rowSo, "icon", image);
+            Ref(rowSo, "tooltip", tooltip);
+            rowSo.ApplyModifiedPropertiesWithoutUndo();
+            return spoil;
         }
 
         static TMP_Text CapLabel(RectTransform parent, string name)

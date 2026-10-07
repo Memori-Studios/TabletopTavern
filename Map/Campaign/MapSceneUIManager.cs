@@ -30,6 +30,7 @@ namespace TJ.Map
         [SerializeField] private CampfirePanel campfirePanel;
         [SerializeField] private PrestigeTraitPanel prestigeTraitPanel;
         [SerializeField] private OrdealPanel ordealPanel;
+        [SerializeField] private TJ.March.MarchGuidePanel marchGuidePanel;
 
         [Header("Other Panels")]
         [SerializeField] private HUDPanel hudPanel;
@@ -46,6 +47,7 @@ namespace TJ.Map
         public GameOverPanel GameOverPanel => gameOverPanel;
         public TreasurePanel TreasurePanel => treasurePanel;
         public OrdealPanel OrdealPanel => ordealPanel;
+        public TJ.March.MarchGuidePanel MarchGuidePanel => marchGuidePanel;
         public CampfirePanel CampfirePanel => campfirePanel;
 
         [Header("Other")]

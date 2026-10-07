@@ -89,6 +89,7 @@ namespace TJ
         public override void DrawShapes(Camera cam)
         {
             if (line == null || _alphas == null || !line.gameObject.activeInHierarchy) return;
+            if (BattleMarkers.Hidden) return;
             if (cam.cameraType != CameraType.SceneView && cam != BattleManager.Instance.BattleCamera) return;
 
             Color baseColor = line.Color;

@@ -1,0 +1,25 @@
+{
+    "name": "TabletopTavern.GpuAnim.Editor",
+    "rootNamespace": "",
+    "references": [
+        "MemoriStudios.TJBake",
+        "MemoriStudios.TJBake.Editor",
+        "TabletopTavern.GpuAnim",
+        "TabletopTavern.Core.Authoring",
+        "Unity.Entities",
+        "Unity.Mathematics",
+        "Unity.Collections",
+        "Unity.Burst"
+    ],
+    "includePlatforms": [
+        "Editor"
+    ],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": false,
+    "precompiledReferences": [],
+    "autoReferenced": false,
+    "defineConstraints": [],
+    "versionDefines": [],
+    "noEngineReferences": false
+}

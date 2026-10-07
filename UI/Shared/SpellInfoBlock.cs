@@ -7,8 +7,8 @@ using UnityEngine.UI;
 namespace TJ
 {
     /// <summary>
-    /// The faction-coloured "what this unit casts" block: race rail, gradient wash, tinted spell
-    /// icon, spell name and description.
+    /// The faction-coloured "what this unit casts" block: race rail, gradient wash, spell icon on a
+    /// faction badge, spell name and description.
     ///
     /// Shared so a mage's spell paints identically wherever it appears. Every field is optional, so
     /// a surface that only wants part of it (no icon, no tooltip) simply leaves those unassigned
@@ -17,9 +17,11 @@ namespace TJ
     public class SpellInfoBlock : MonoBehaviour
     {
         [SerializeField] private TMP_Text titleText;
+        [Tooltip("Optional small \"Spell\" label beside the name. When unset, the title carries the label instead.")]
+        [SerializeField] private TMP_Text captionText;
         [SerializeField] private TMP_Text descriptionText;
         [SerializeField] private Image icon;
-        [Tooltip("The glow disc behind the icon. Tinted to the faction, not left on its authored colour.")]
+        [Tooltip("The badge behind the icon. Tinted to the faction, not left on its authored colour.")]
         [SerializeField] private Image accentImage;
         [SerializeField] private Image raceRailImage;
         [SerializeField] private Image raceGradientImage;
@@ -28,6 +30,9 @@ namespace TJ
         // Matches SpellLoadoutSlot / SpellBrowseSlot, so a spell reads the same here, in the
         // grimoire, in its loadout slot and on the battle hotbar.
         private const float RAIL_ALPHA = 0.9f;
+
+        // Deepens the light faction colours enough for the white glyph to read on the badge.
+        private const float BADGE_SHADE = 0.3f;
 
         /// <summary>Localized spell name from the last successful <see cref="Load"/>.</summary>
         public string SpellName { get; private set; }
@@ -55,20 +60,21 @@ namespace TJ
             // The block has its own spell tooltip, which lists the keywords, so the text is not hoverable.
             string description = KeywordText.Render(spell.GetLocalizedSpellDescription(), false);
 
+            string spellLabel = LocalizationManager.Instance.GetText("Spell");
+            if (captionText != null) captionText.text = spellLabel;
             if (titleText != null)
-                titleText.text = $"{LocalizationManager.Instance.GetText("Spell")} - {SpellName}";
+                titleText.text = captionText != null ? SpellName : $"{spellLabel} - {SpellName}";
             if (descriptionText != null) descriptionText.text = description;
 
-            // Display pair, not the passive pair: the icons are white sprites and the passive
-            // colours are banner fills, four of which are too dark to read as a glyph.
             Color factionColour = ColorData.GetRaceDisplayColor(spell.Race);
 
+            // The faction rides on the badge, so the glyph stays the primary UI colour.
             if (icon != null)
             {
                 icon.sprite = spell.SpellSprite;
-                icon.color = factionColour;
+                icon.color = (Color)ColorData.HexToRgba(ColorData.Primary);
             }
-            if (accentImage != null) accentImage.color = factionColour;
+            if (accentImage != null) accentImage.color = Color.Lerp(factionColour, Color.black, BADGE_SHADE);
             if (raceRailImage != null)
                 raceRailImage.color = ColorData.WithAlpha255(factionColour, RAIL_ALPHA * 255f);
             if (raceGradientImage != null)

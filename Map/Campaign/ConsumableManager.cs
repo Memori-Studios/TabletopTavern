@@ -138,7 +138,7 @@ namespace TJ.Map
         public bool AttemptToUseConsumable(ConsumableEnum _consumable, int _targetUnitIndex)
         {
             // Debug.Log($"ConsumableManager.AttemptToUseConsumable({_consumable}, {_targetUnitIndex})");
-            OrdealId countering = OrdealRegistry.CounteringOrdeal(CampaignManager.Instance.CampaignSaveManager.SaveData.ordeals, _consumable);
+            OrdealId countering = OrdealRegistry.CounteringOrdeal(CampaignManager.Instance.CampaignSaveManager.SaveData.ActiveOrdeals, _consumable);
             if (countering != OrdealId.None) {
                 string ordealName = LocalizationManager.Instance.GetText(OrdealRegistry.Get(countering).NameKey);
                 NotificationManager.Instance.ErrorNotification(string.Format(LocalizationManager.Instance.GetText("OrdealItemInactive"), ordealName));

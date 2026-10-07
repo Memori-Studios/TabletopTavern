@@ -1,6 +1,6 @@
 using Unity.Burst;
 using Unity.Entities;
-using GPUECSAnimationBaker.Engine.AnimatorSystem;
+using TabletopTavern.GpuAnim;
 using Unity.Transforms;
 using Unity.Mathematics;
 using ProjectDawn.Navigation;
@@ -40,20 +40,20 @@ partial struct UnitIdleSystem : ISystem
             if (random.NextFloat() >= animFrequency)
                 continue;
 
-            if (!SystemAPI.HasComponent<GpuEcsAnimatorControlComponent>(idleAnimation.ValueRO.gpuEcsAnimatorEntity))
+            if (!SystemAPI.HasComponent<GpuAnimControl>(idleAnimation.ValueRO.gpuEcsAnimatorEntity))
                 continue;
 
-            RefRW<GpuEcsAnimatorControlComponent> controlComp = SystemAPI.GetComponentRW<GpuEcsAnimatorControlComponent>(
+            RefRW<GpuAnimControl> controlComp = SystemAPI.GetComponentRW<GpuAnimControl>(
                 idleAnimation.ValueRO.gpuEcsAnimatorEntity);
 
-            if (controlComp.ValueRO.animatorInfo.animationID != idleAnimation.ValueRO.currentIdleAnimationId)
+            if (controlComp.ValueRO.Slot != idleAnimation.ValueRO.currentIdleAnimationId)
                 continue;
 
             if (unit.ValueRO.unitType == UnitType.Ranged && unit.ValueRO.unitState == UnitState.InCombat)
                 continue;
 
-            controlComp.ValueRW.animatorInfo.animationID = idleAnimation.ValueRO.idleAnimationIds[random.NextInt(0, 3)];
-            controlComp.ValueRW.transitionSpeed = 0.5f;
+            controlComp.ValueRW.Slot = idleAnimation.ValueRO.idleAnimationIds[random.NextInt(0, 3)];
+            controlComp.ValueRW.TransitionSeconds = 0.5f;
 
             if (random.NextFloat() < 0.05f && entityManager.HasBuffer<SFXBufferElement>(entity))
             {
@@ -61,47 +61,5 @@ partial struct UnitIdleSystem : ISystem
                 sfxBuffer.Add(new SFXBufferElement { UnitName = unit.ValueRO.unitName, SFXEntityType = Memori.Audio.SFXEntityType.Idle, MaxDistance = 30f });
             }
         }
-    }
-}
-
-[BurstCompile]
-public partial class ReturnToIdleEventHandlerSystem : SystemBase
-{
-    const int CavalryReturnToIdleEventId = 20;
-
-    [BurstCompile]
-    protected override void OnUpdate()
-    {
-        EntityManager entityManager = World.EntityManager;
-        Entities.ForEach((in DynamicBuffer<GpuEcsAnimatorEventBufferElement> gpuEcsAnimatorEventBuffer, in Entity eventEntity) =>
-        {
-            foreach (GpuEcsAnimatorEventBufferElement animatorEvent in gpuEcsAnimatorEventBuffer)
-            {
-                if (animatorEvent.eventId == CavalryReturnToIdleEventId)
-                {
-                    GpuEcsAnimatorControlComponent controlComp = entityManager.GetComponentData<GpuEcsAnimatorControlComponent>(eventEntity);
-                    controlComp.animatorInfo.animationID = 0;
-                    controlComp.transitionSpeed = 0.5f;
-                    entityManager.SetComponentData(eventEntity, controlComp);
-                    continue;
-                }
-
-                if (!entityManager.HasComponent<Parent>(eventEntity))
-                    continue;
-
-                Parent parent = SystemAPI.GetComponent<Parent>(eventEntity);
-
-                // Parent entity was destroyed (unit died and was cleaned up by KillUnitSystem)
-                if (!entityManager.HasComponent<AnimationDataHolder>(parent.Value))
-                    continue;
-
-                AnimationDataHolder animDataHolder = entityManager.GetComponentData<AnimationDataHolder>(parent.Value);
-                GpuEcsAnimatorControlComponent parentControlComp = entityManager.GetComponentData<GpuEcsAnimatorControlComponent>(
-                    animDataHolder.gpuEcsAnimatorEntity);
-                parentControlComp.animatorInfo.animationID = animDataHolder.currentIdleAnimationId;
-                parentControlComp.transitionSpeed = 0.5f;
-                entityManager.SetComponentData(animDataHolder.gpuEcsAnimatorEntity, parentControlComp);
-            }
-        }).Run();
     }
 }

@@ -73,10 +73,15 @@ public struct SetDestination : IComponentData
     public float3 destinationPosition;
     public float3 squadPosition;
     public float delayRemaining;
+    // XZ heading a standing unit turns to before it steps off; ignored while turnTimeLeft is 0.
+    public float2 turnDirection;
+    public float turnTimeLeft;
 }
 public struct RotateUnit : IComponentData, IEnableableComponent
 {
     public quaternion targetRotation;
+    // Turn at the fixed march rate instead of easing; set by Move orders for the facing taken on arrival.
+    public bool steadyTurn;
 }
 public struct MeleeUnitTag : IComponentData { }
 public struct RangedUnitTag : IComponentData { }
@@ -91,9 +96,44 @@ public struct WearyTag : IComponentData { public float Remaining; }
 public struct ChargeSquad : IComponentData { public float ChargeTime; }
 // The squad's units carry the sprint speed multiplier; ChargeSprintSystem divides it back out when this goes.
 public struct SprintingTag : IComponentData { }
+// Keeps the sprint speed on for a moment after contact so the ranks arrive at speed.
+public struct SprintFollowThrough : IComponentData { public float Remaining; }
+// A stationary squad a sprinting enemy is about to hit; its models hold the melee stance.
+public struct BraceStanceTag : IComponentData { }
+// A large model driving into an infantry line after a landed charge. Direction is the charge heading.
+public struct ChargePenetration : IComponentData, IEnableableComponent
+{
+    public float3 Direction;
+    public float DistanceLeft;
+    public float TimeLeft;
+}
+// A short visual shove on the model only: the animator child moves, the unit and its collision do not.
+public struct UnitRecoil : IComponentData
+{
+    public float3 Offset;
+    public float Tilt;
+    public float Timer;
+    public float Duration;
+    public float3 BasePosition;
+    public quaternion BaseRotation;
+    public bool HasBase;
+    // Seconds until a queued swing lunge starts, so it lands with the blow in the attack clip; 0 = none queued.
+    public float LungeIn;
+
+    // A stronger kick replaces a weaker one in progress; a weaker one is dropped.
+    public void Kick(float3 offset, float tilt, float duration)
+    {
+        if (Timer > 0f && math.lengthsq(offset) < math.lengthsq(Offset)) return;
+        Offset = offset;
+        Tilt = tilt;
+        Duration = duration;
+        Timer = duration;
+    }
+}
 public struct ChargeBonus : IComponentData { public float ChargeTime; }
 public struct ApplyChargeBonusTag : IComponentData { public float Multiplier; public float FlatBonus; }
-public enum ChargeImpactKind : byte { Charge, FlankCharge, Blocked }
+// Contact is two squads meeting in melee with no charge.
+public enum ChargeImpactKind : byte { Charge, FlankCharge, Blocked, Contact }
 public struct ChargeBonusReductionTag : IComponentData { public float ReductionPercent; }
 public struct MonsterTag : IComponentData { public float KnockbackRange; public int KnockbackInitialDamage; }
 public struct RetreatingUnit : IComponentData, IEnableableComponent { }
@@ -126,7 +166,7 @@ public struct ThrowUnit : IComponentData {
     public int Damage; 
     public int HittingEntitySquad; 
     public Team HittingEntityTeam;
-    public float RemainingTime; 
+    public float RemainingTime;
     public float TotalTime;
 }
 #endregion
@@ -152,8 +192,18 @@ public struct RangedMeleeConverter : IComponentData, IEnableableComponent
 }
 public struct FormationNeedsToBeProcessed : IComponentData { public int indexRemoved; public float3 squadPosition; }
 public struct FormationEngagedInCombat : IComponentData { public Entity EngagementEntity; public bool WasCharging; }
-// One-shot event on the charging squad: a charge just made contact.
-public struct OnFormationsCollide : IComponentData { public float3 Position; public ChargeImpactKind Kind; }
+// One-shot event on a squad that just made melee contact. Right and HalfWidth describe its front line.
+public struct OnFormationsCollide : IComponentData
+{
+    public float3 Position;
+    public ChargeImpactKind Kind;
+    public UnitSize Size;
+    public int Count;
+    public float3 Right;
+    public float HalfWidth;
+    // The charging squad, so the impact can play that squad's own mount call.
+    public int SquadId;
+}
 public struct OnExplosionShake : IComponentData { public float3 Position; }
 public struct FormationEngagedInRangedCombat : IComponentData { }
 public struct FormationShapeChanged : IComponentData { }
@@ -225,6 +275,7 @@ public struct AntiInfantryTag : IComponentData { }
 public struct AntiLargeTag : IComponentData { }
 public struct BracedTag : IComponentData, IEnableableComponent { }
 public struct BackStabbersTag : IComponentData { }
+public struct BloodDrinkerTag : IComponentData { }
 /// <summary> Steady Aim: waives the Fire-at-Will accuracy penalty in RangedUnitAttackSystem. </summary>
 public struct SteadyAimTag : IComponentData { }
 
@@ -307,6 +358,8 @@ public struct SpellEntity : IComponentData {
     // Iaijutsu Flash: the blast hits exactly ONE unit - the one nearest the strike point - instead of
     // everything inside SpellRadius. The radius then only decides how far the strike may reach.
     public bool HitsSingleUnit;
+    // Against a squad carrying MonsterousSquadTag, each hit deals this percent of the model's max health; 0 means off.
+    public float MonstrousPercentOfMaxHealth;
     // Spell ordinal to write into SpellStatusBufferElement on each squad hit; 0 = no status icon.
     public int StatusSpellId;
     // Knockback-only blast (a Bombardment shell): throws the units in its radius but adds no damage.
@@ -336,11 +389,29 @@ public struct BattleOver : IComponentData {public bool PlayerWon; }
     // Uncapped, as morale reads it. Credited is the same hit capped at the model's remaining health.
     public int DamageAmount;
     public int Credited;
+    // Credited as a share of the model's max health, times what one model of the target is worth. Zero for a hit on the source's own side.
+    public float Value;
+}
+// Melee damage a Blood Drinker squad dealt this frame, before the lifesteal share is taken.
+[System.Serializable] public struct BloodDrinkerHealElement : IBufferElementData {
+    public int SquadId;
+    public int Amount;
+}
+// Lifesteal a squad could not spend on its living models; it restores lost models after the battle.
+[System.Serializable] public struct BloodBankElement : IBufferElementData {
+    public int SquadId;
+    public int Banked;
 }
 // Damage dealt per squad this battle, on a singleton so a squad that dies or withdraws keeps its total.
 [System.Serializable] public struct SquadDamageTotalElement : IBufferElementData {
     public int SquadId;
     public int Total;
+    // The worth of the enemy troops that damage destroyed, in unit value points.
+    public float Value;
+}
+// What one model of this squad is worth, in unit value points. On the squad entity; damage to its models pays out against it.
+public struct SquadWorth : IComponentData {
+    public float PerModel;
 }
 
 [InternalBufferCapacity(1)]
@@ -356,6 +427,8 @@ public struct BattleOver : IComponentData {public bool PlayerWon; }
     public bool SourceIsArtillery;
     // A Healing element whose AttackStrength is a percent of the receiver's max health.
     public bool HealIsPercentOfMax;
+    // The striking unit drinks blood: the damage this hit lands heals its own squad.
+    public bool Lifesteal;
 }
 #endregion
 public struct CavalryFlankingTag : IComponentData { }

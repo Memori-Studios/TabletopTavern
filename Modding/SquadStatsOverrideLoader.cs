@@ -99,7 +99,13 @@ namespace TJ
         private static void ApplyJson(string json, string modLabel, Dictionary<UnitName, SquadStats> squadStatsDictionary,
             Dictionary<UnitName, SquadAssets> squadAssetsDictionary, Dictionary<Race, List<UnitName>> unitsOfRaceDictionary, int activeHeroID)
         {
-            var file = JsonUtility.FromJson<SquadStatsOverrideFile>(json);
+            ApplyFile(JsonUtility.FromJson<SquadStatsOverrideFile>(json), modLabel, squadStatsDictionary, squadAssetsDictionary, unitsOfRaceDictionary, activeHeroID);
+        }
+
+        // Remote balance applies its downloaded stats through here, the same path as a mod's file.
+        public static void ApplyFile(SquadStatsOverrideFile file, string modLabel, Dictionary<UnitName, SquadStats> squadStatsDictionary,
+            Dictionary<UnitName, SquadAssets> squadAssetsDictionary, Dictionary<Race, List<UnitName>> unitsOfRaceDictionary, int activeHeroID = -1)
+        {
             if (file?.overrides == null) return;
 
             if (file.overrides.Count > MaxEntries)

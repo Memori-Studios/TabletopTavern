@@ -51,6 +51,7 @@ public class ActiveSpell : MonoBehaviour
     private float potency = 1f;
     private float radiusScale = 1f;
     private float Radius => spellData.SpellRadius * radiusScale;
+    public float AreaRadius => Radius;
     private float Magnitude => spellData.ScaledModifierValue(potency);
 
     // Placement spells (Starstep, Raise Dead): the formation the player drew before confirming.
@@ -58,6 +59,11 @@ public class ActiveSpell : MonoBehaviour
     // been applied by SpellManager at placement time and only plays the visuals here.
     private SpellPlacement placement;
     private bool effectHandledByCaster;
+
+    // An enemy mage's hostile cast: its ring shows ENEMY_MAGE_CAST_WARNING seconds before it lands.
+    private bool warned;
+    // A mark, a brace, an aura or a single-unit strike follows its squad; an area damage spell lands where it was aimed.
+    private bool followsTarget;
 
     // Snare Trap: the cast visuals wait for SnareTrapSystem to spring the trap. The entity vanishing
     // before its armed time is up means it sprung; the spell then lingers TrapSprungLinger seconds.
@@ -84,11 +90,14 @@ public class ActiveSpell : MonoBehaviour
     public void Load(SpellData _spellData, float3 position, Entity _targetSquadEntity = default,
                      Team _sourceTeam = Team.Player, int _sourceSquadId = 0,
                      SpellPlacement _placement = null, bool _effectHandledByCaster = false,
-                     float _potency = 1f, float _radiusScale = 1f)
+                     float _potency = 1f, float _radiusScale = 1f, bool _warned = false)
     {
         spellData = _spellData;
         potency = _potency;
         radiusScale = _radiusScale;
+        warned = _warned;
+        followsTarget = spellData.SpellTargetingType == SpellTargetingType.Squad
+            && (spellData.MarksTarget || spellData.BracesTarget || spellData.GrantsBattlefieldBonus || spellData.HitsSingleUnit);
         // A mage's auto-cast always names the squad it aimed at; a ground spell stays where it landed instead of following it.
         targetSquadEntity = spellData.SpellTargetingType == SpellTargetingType.World ? Entity.Null : _targetSquadEntity;
         sourceTeam = _sourceTeam;
@@ -112,6 +121,13 @@ public class ActiveSpell : MonoBehaviour
             }
         }
         SetAreaDisplay(Radius);
+        // The red warning ring replaces the area display and is gone the moment the spell lands.
+        if (warned)
+        {
+            if (areaDisc != null) areaDisc.enabled = false;
+            if (areaScaleRoot != null) areaScaleRoot.gameObject.SetActive(false);
+            TJ.Shapes.ShapesDrawingManager.AddCastWarning(this);
+        }
 
         StartCoroutine(WarmUpSpell());
     }
@@ -210,7 +226,7 @@ public class ActiveSpell : MonoBehaviour
     {
         if(spellData == null) return;
 
-        if(spellData.SpellTargetingType == SpellTargetingType.Squad && targetSquadEntity != Entity.Null) {
+        if(followsTarget && targetSquadEntity != Entity.Null) {
             EntityManager entityManager = World.DefaultGameObjectInjectionWorld.EntityManager;
             if(entityManager.Exists(targetSquadEntity) && entityManager.HasComponent<SquadMovementComponent>(targetSquadEntity)) {
                 transform.position = entityManager.GetComponentData<SquadMovementComponent>(targetSquadEntity).SquadCenter;
@@ -230,14 +246,25 @@ public class ActiveSpell : MonoBehaviour
     }
     private IEnumerator WarmUpSpell()
     {
+        // The ring alone fills the extra warning time, so the authored warm-up art still ends on the cast.
+        if (warned)
+        {
+            float extraWarning = TabletopTavernConstants.ENEMY_MAGE_CAST_WARNING - spellData.SpellWarmUpDuration;
+            if (extraWarning > 0f) yield return new WaitForSeconds(extraWarning);
+        }
         IAudioRequester.Instance.Play(spellData.warmupSound, transform.position, ignoreDucking: true);
         if (visualAddon != null && visualAddon.warmupEffect != null) visualAddon.warmupEffect.SetActive(true);
         yield return new WaitForSeconds(spellData.SpellWarmUpDuration);
 
         CastSpell();
     }
+    private void OnDestroy()
+    {
+        if (warned) TJ.Shapes.ShapesDrawingManager.RemoveCastWarning(this);
+    }
     private void CastSpell()
     {
+        if (warned) TJ.Shapes.ShapesDrawingManager.RemoveCastWarning(this);
         // Debug.Log($"ActiveSpell: {spellData.name} applying effect at {transform.position} (radius={spellData.SpellRadius}, force={spellData.SpellForce}, oneOff={spellData.IsOneOff})");
 
         if (!spellData.PlacesTrap) ShowCastVisuals();
@@ -353,6 +380,11 @@ public class ActiveSpell : MonoBehaviour
                 break;
             }
         }
+        else if (spellData.PlacesBarricade)
+        {
+            // Barricades - one piece per drawn point; no SpellEntity, the carved NavMesh is the whole effect.
+            RaiseBarricades();
+        }
         else if (spellData.GrantsBattlefieldBonus)
         {
             // Pure buff spell - no damage pipeline at all, just a battlefield-bonus aura
@@ -447,10 +479,11 @@ public class ActiveSpell : MonoBehaviour
             IsOneOff = spellData.IsOneOff,
             SpellForce = force,
             RemainingDuration = spellData.SpellDuration,
-            TargetSquadEntity = targetSquadEntity, // Entity.Null unless this is a Squad-targeted cast
+            TargetSquadEntity = followsTarget ? targetSquadEntity : Entity.Null,
             TickInterval = spellData.TickInterval,
             TickTimer = 0f, // first tick fires immediately, then every TickInterval seconds
             HitsSingleUnit = spellData.HitsSingleUnit,
+            MonstrousPercentOfMaxHealth = spellData.ScaledMonstrousPercent(potency),
             StatusSpellId = statusSpellId
         });
     }
@@ -507,6 +540,26 @@ public class ActiveSpell : MonoBehaviour
                 SkipsDamage = true
             });
         }
+    }
+    // Pieces are children of this object, so they fall with its end warning and die with it. A piece over a unit is skipped: its carve would pop the unit to either side.
+    private void RaiseBarricades()
+    {
+        BarricadePiece prefab = spellData.BarricadePiecePrefab;
+        if (placement == null || placement.Positions == null || prefab == null)
+        {
+            Debug.LogError($"ActiveSpell: '{spellData.name}' places barricades but has no drawn line or no piece prefab - cast ignored.", spellData);
+            return;
+        }
+        var positions = new List<Vector3>(placement.Positions.Count);
+        foreach (float3 point in placement.Positions) positions.Add(point);
+        var occupied = new List<bool>(positions.Count);
+        BarricadeLine.MarkOccupied(positions, placement.Rotation, prefab.Length, prefab.Depth, occupied);
+        for (int i = 0; i < positions.Count; i++)
+        {
+            if (occupied[i]) continue;
+            Instantiate(prefab, positions[i], placement.Rotation, transform).Raise();
+        }
+        BattleManager.Instance.SquadManager.stuffToDestroy.Add(gameObject);
     }
     // Matches SpellSystem's overlap sphere, which catches a unit whose body edge is inside the radius.
     private List<Entity> UnitsInSpellRadius()
@@ -572,6 +625,8 @@ public class ActiveSpell : MonoBehaviour
             foreach (SpellAddonRise risen in visualAddon.GetComponentsInChildren<SpellAddonRise>())
                 if (!risen.SinksWithArea) risen.Sink(flashWarningDuration);
         }
+        foreach (BarricadePiece piece in GetComponentsInChildren<BarricadePiece>())
+            piece.Fall(flashWarningDuration);
 
         yield return new WaitForSeconds(duration - leadTime);
 

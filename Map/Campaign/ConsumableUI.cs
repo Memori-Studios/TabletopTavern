@@ -55,7 +55,7 @@ namespace TJ.Map
             hudPanel = CampaignManager.Instance.MapSceneUIManager.HUDPanel;
             string localizedConsumableName = LocalizationManager.Instance.GetText(consumable.ConsumableEnum.ToString() + "Name");
             string localizedConsumableDescription = CampaignManager.Instance.ConsumableManager.GetConsumableDescription(consumable.ConsumableEnum);
-            OrdealId countering = OrdealRegistry.CounteringOrdeal(CampaignManager.Instance.CampaignSaveManager.SaveData.ordeals, _consumableEnum);
+            OrdealId countering = OrdealRegistry.CounteringOrdeal(CampaignManager.Instance.CampaignSaveManager.SaveData.ActiveOrdeals, _consumableEnum);
             consumableIcon.color = countering != OrdealId.None ? iconColor * InactiveIconColor : iconColor;
             memoriTooltipTrigger.SetUpToolTip(new TooltipContent
             {

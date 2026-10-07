@@ -264,6 +264,9 @@ namespace TJ
         }
         public void UnloadSubscene()
         {
+            // Before the world is disposed: photo mode and the follow camera hold Core canvases and the input block.
+            PhotoMode.ForceExitForSceneClose();
+            FollowCamera.ForceExitForSceneClose();
             battleManager.EntityWatcher.TearDown();
             battleManager.EnemyGeneral.TearDown();
 
@@ -297,6 +300,9 @@ namespace TJ
 
                 // Unload subscene BEFORE any world disposal
                 SceneSystem.UnloadScene(world.Unmanaged, subscene.SceneGUID, SceneSystem.UnloadParameters.DestroyMetaEntities);
+
+                // Mod-built unit visuals own meshes, textures and blobs the world does not; they go before it does.
+                UnitVisualOverrideRuntime.DisposeAll(world.EntityManager);
 
                 world.Dispose();
 

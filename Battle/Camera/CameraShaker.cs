@@ -103,19 +103,26 @@ namespace TJ
                 }
             }
         }
-        public void ChargeShake(float3 _chargePosition)
+        // Distance is measured from the ground point the camera looks at, so an overview camera still feels a
+        // charge it is watching. A higher camera gets a smaller shake.
+        public void ChargeShake(float3 _chargePosition, float force)
         {
             if (battleEnded) return;
-            float distance = math.distance(_chargePosition, cameraTransform.position);
 
-            // Debug.Log($"Charge shake triggered at position {_chargePosition}, distance from camera: {distance}");
-            if(distance > 50f) return;
+            Vector3 cameraPosition = cameraTransform.position;
+            Vector3 forward = cameraTransform.forward;
+            float reach = forward.y < -0.05f ? Mathf.Min(cameraPosition.y / -forward.y, 150f) : 150f;
+            Vector3 focus = cameraPosition + forward * reach;
+            float distance = Vector2.Distance(new Vector2(focus.x, focus.z), new Vector2(_chargePosition.x, _chargePosition.z));
 
-            if(shakeDuration > 0f) {
-                shakeDuration = 0f;
-                objectToShake.localPosition = originalPosition;
-            }
-            ShakeCamera(0.5f, 0.7f, 5f);
+            float falloff = 1f - Mathf.Clamp01((distance - 20f) / 90f);
+            float height = Mathf.Lerp(1f, 0.4f, Mathf.Clamp01((cameraPosition.y - 15f) / 85f));
+            float scaled = force * falloff * height;
+            if (scaled <= 0.04f) return;
+
+            if (shakeDuration > 0f && scaled < shakeForce) return;
+            if (shakeDuration > 0f) objectToShake.localPosition = originalPosition;
+            ShakeCamera(scaled, 0.7f, 5f);
         }
         public void ExplosionShake(float3 position)
         {

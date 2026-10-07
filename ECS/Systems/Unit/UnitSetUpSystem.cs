@@ -304,6 +304,8 @@ partial struct UnitSetUpSystem : ISystem
                 }
                 if(squadStats.unitType != UnitType.Structure) {
                     entityCommandBuffer.AddComponent<LargeTag>(entity);
+                    entityCommandBuffer.AddComponent<ChargePenetration>(entity);
+                    entityCommandBuffer.SetComponentEnabled<ChargePenetration>(entity, false);
                 }
             }
             if(squadStats.unitSize == UnitSize.Infantry || squadStats.unitSize == UnitSize.Artillery) {
@@ -395,6 +397,8 @@ partial struct UnitSetUpSystem : ISystem
             if(squadStats.SquadAttributes.BackStabbers) {
                 entityCommandBuffer.AddComponent<BackStabbersTag>(entity);
             }
+            if (squadStats.SquadAttributes.BloodDrinker)
+                entityCommandBuffer.AddComponent<BloodDrinkerTag>(entity);
             if (unitAttributes.Armored)
             {
                 entityCommandBuffer.AddComponent(entity, new ArmoredTag
@@ -476,6 +480,7 @@ partial struct UnitSetUpSystem : ISystem
             {
                 ReturnsLeft = TabletopTavernConstants.RETURN_TO_SLOT_BUDGET,
             });
+            entityCommandBuffer.AddComponent<UnitRecoil>(entity);
             entityCommandBuffer.SetComponent(entity, separation);
             entityCommandBuffer.AddComponent(entity, new BaseSeparationWeight { Value = separation.Weight });
             // AgentSonarAvoid.Radius on the prefab is 0.25 — smaller than AgentShape.Radius (0.75),

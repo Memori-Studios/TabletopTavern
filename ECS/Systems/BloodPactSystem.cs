@@ -2,7 +2,7 @@ using Unity.Burst;
 using Unity.Entities;
 using Unity.Mathematics;
 
-// Blood Pact: the player's squads deal and take more damage. A pre-ApplyDamage modifier like HuntersMarkSystem,
+// Blood Pact and Death Wish: the player's squads deal and take more damage. A pre-ApplyDamage modifier like HuntersMarkSystem,
 // ordered after the other two so each hit is scaled once, on top of the spell and mark scaling.
 [UpdateInGroup(typeof(SimulationSystemGroup))]
 [UpdateBefore(typeof(TJ.ApplyDamageSystem))]
@@ -21,7 +21,9 @@ partial struct BloodPactSystem : ISystem
     public void OnUpdate(ref SystemState state)
     {
         CampaignSaveDataHolder holder = SystemAPI.GetSingleton<CampaignSaveDataHolder>();
-        if (holder.IsCustomBattle || !OrdealMask.Has(holder.OrdealMask, OrdealId.BloodPact)) return;
+        if (holder.IsCustomBattle) return;
+        float scale = OrdealMask.DamageScale(holder.OrdealMask);
+        if (scale == 1f) return;
 
         foreach (var (damageBuffer, entityTeam) in SystemAPI.Query<DynamicBuffer<DamageBufferElement>, EntityTeam>())
         {
@@ -36,8 +38,8 @@ partial struct BloodPactSystem : ISystem
                 bool taken = entityTeam.Value == Team.Player && element.TeamOfSource == Team.Enemy;
                 if (!dealt && !taken) continue;
 
-                // Rounded, so a small hit still gains its 10%.
-                element.AttackStrength = (int)math.round(element.AttackStrength * OrdealMask.BLOOD_PACT_DAMAGE);
+                // Rounded, so a small hit still gains its share.
+                element.AttackStrength = (int)math.round(element.AttackStrength * scale);
             }
         }
     }

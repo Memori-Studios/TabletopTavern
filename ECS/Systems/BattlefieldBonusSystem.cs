@@ -31,6 +31,7 @@ partial struct BattlefieldBonusSystem : ISystem
     private ComponentLookup<MeleeAttack> _meleeAttackLookup;
     private ComponentLookup<MeleeDefense> _meleeDefenseLookup;
     private ComponentLookup<ShootAttack> _shootAttackLookup;
+    private ComponentLookup<MageCast> _mageCastLookup;
     private ComponentLookup<ArmoredTag> _armoredTagLookup;
     private ComponentLookup<MoraleComponent> _moraleComponentLookup;
 
@@ -58,7 +59,8 @@ partial struct BattlefieldBonusSystem : ISystem
         _meleeAttackLookup       = state.GetComponentLookup<MeleeAttack>(false);
         _meleeDefenseLookup      = state.GetComponentLookup<MeleeDefense>(false);
         _shootAttackLookup       = state.GetComponentLookup<ShootAttack>(false);
-        _armoredTagLookup        = state.GetComponentLookup<ArmoredTag>(false);
+        _mageCastLookup          = state.GetComponentLookup<MageCast>(false);
+        _armoredTagLookup       = state.GetComponentLookup<ArmoredTag>(false);
         _moraleComponentLookup   = state.GetComponentLookup<MoraleComponent>(false);
     }
 
@@ -86,6 +88,7 @@ partial struct BattlefieldBonusSystem : ISystem
         _meleeAttackLookup.Update(ref state);
         _meleeDefenseLookup.Update(ref state);
         _shootAttackLookup.Update(ref state);
+        _mageCastLookup.Update(ref state);
         _armoredTagLookup.Update(ref state);
         _moraleComponentLookup.Update(ref state);
 
@@ -121,7 +124,8 @@ partial struct BattlefieldBonusSystem : ISystem
             MeleeAttackLookup       = _meleeAttackLookup,
             MeleeDefenseLookup      = _meleeDefenseLookup,
             ShootAttackLookup       = _shootAttackLookup,
-            ArmoredTagLookup        = _armoredTagLookup,
+            MageCastLookup          = _mageCastLookup,
+            ArmoredTagLookup       = _armoredTagLookup,
             MoraleComponentLookup   = _moraleComponentLookup,
             Ecb                     = ecb
         }.ScheduleParallel(state.Dependency);
@@ -156,6 +160,7 @@ partial struct BattlefieldBonusJob : IJobEntity
     [NativeDisableParallelForRestriction] public ComponentLookup<MeleeAttack>     MeleeAttackLookup;
     [NativeDisableParallelForRestriction] public ComponentLookup<MeleeDefense>    MeleeDefenseLookup;
     [NativeDisableParallelForRestriction] public ComponentLookup<ShootAttack>     ShootAttackLookup;
+    [NativeDisableParallelForRestriction] public ComponentLookup<MageCast>        MageCastLookup;
     [NativeDisableParallelForRestriction] public ComponentLookup<ArmoredTag>      ArmoredTagLookup;
     [NativeDisableParallelForRestriction] public ComponentLookup<MoraleComponent> MoraleComponentLookup;
     [ReadOnly] public double ElapsedTime;
@@ -261,6 +266,12 @@ partial struct BattlefieldBonusJob : IJobEntity
                                 var sa = ShootAttackLookup[unitEntity];
                                 sa.Range += (int)bonus.Value;
                                 ShootAttackLookup[unitEntity] = sa;
+                            }
+                            else if (MageCastLookup.HasComponent(unitEntity))
+                            {
+                                var mc = MageCastLookup[unitEntity];
+                                mc.Range += (int)bonus.Value;
+                                MageCastLookup[unitEntity] = mc;
                             }
                             break;
                     }
@@ -504,6 +515,15 @@ partial struct BattlefieldBonusJob : IJobEntity
                                     bonus.Value = reduction;
                                     sa.Range -= reduction;
                                     ShootAttackLookup[unitEntity] = sa;
+                                }
+                                // A mage loses cast range in fog too, or every mage outranges every bow there.
+                                else if (MageCastLookup.HasComponent(unitEntity))
+                                {
+                                    var mc = MageCastLookup[unitEntity];
+                                    int reduction = (int)mc.Range - (int)(mc.Range * FogRangeModifier);
+                                    bonus.Value = reduction;
+                                    mc.Range -= reduction;
+                                    MageCastLookup[unitEntity] = mc;
                                 }
                                 break;
                         }

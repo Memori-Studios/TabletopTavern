@@ -2,6 +2,7 @@ using System.Collections.Generic;
 using System.Linq;
 using Memori.Audio;
 using Memori.Tooltip;
+using TJ.Settings;
 using TMPro;
 using UnityEditor;
 using UnityEditor.SceneManagement;
@@ -22,6 +23,8 @@ namespace TJ.MainMenu.EditorTools
         public const string PartFolder = "Assets/Data/Prefabs/UI/Collection";
         public const string ScenePath = "Assets/Scenes/Collection.unity";
         public const string RenderTexturePath = "Assets/Data/Render Textures/CollectionUnitPreviewTexture.renderTexture";
+        // TJ's spinning ring behind the page; its look is edited in this prefab, not in code.
+        public const string RingPath = "Assets/Data/Prefabs/UI/Menu/Collection Ring.prefab";
         const string SheetPath = "Assets/Scripts/Memori.Tooltip/Art/TooltipSheet.png";
 
         // The stage is wide, so the render texture matches its shape instead of the old square.
@@ -53,8 +56,10 @@ namespace TJ.MainMenu.EditorTools
 
         static TMP_FontAsset displayDrop, display, body;
         static Sprite panel, shadow, keyCap, fadeRule, roundedFill, roundedOutline, edgeFade, lockIcon, arrow, gearIcon, potionIcon;
-        static Sprite circle, questsIcon, runsIcon, boardsIcon, fleur, lineLeft, lineRight;
+        static Sprite circle, questsIcon, runsIcon, boardsIcon, fleur, lineLeft, lineRight, flatShadow, crestBrackets;
+        static Sprite closeFill, closeFrame, closeKeyFrame;
         static QuestCatalogSO questCatalog;
+        static GameObject basicBackground, ring, settingStepper;
 
         static void LoadAssets()
         {
@@ -73,6 +78,11 @@ namespace TJ.MainMenu.EditorTools
             roundedFill = Load<Sprite>("Assets/ImportedPackages/ModernUIPack/Textures/Border/Rounded/256px/Rounded Filled 256px.png");
             roundedOutline = Load<Sprite>("Assets/ImportedPackages/ModernUIPack/Textures/Border/Rounded/256px/Rounded Outline 256px - 2x.png");
             edgeFade = Load<Sprite>("Assets/ImportedPackages/ModernUIPack/Textures/Shadow/Vertical Shadow.png");
+            flatShadow = Load<Sprite>("Assets/ImportedPackages/ModernUIPack/Textures/Shadow/Flat Shadow.png");
+            basicBackground = Load<GameObject>("Assets/Data/Prefabs/UI/Reuseable/Basic Background.prefab");
+            settingStepper = Load<GameObject>("Assets/Data/Prefabs/UI/Settings/Setting Stepper.prefab");
+            ring = Load<GameObject>(RingPath);
+            crestBrackets = Load<Sprite>("Assets/Synty/InterfaceFantasyMenus/Sprites/Crests/SPR_FantasyMenus_Crest_Brackets_10_Greyscale.png");
             lockIcon = Load<Sprite>("Assets/Art/Icons/UI/LockClosedGold.png");
             arrow = Load<Sprite>("Assets/ImportedPackages/InterfaceFantasyWarriorHUD/Sprites/HUD/SPR_HUD_FantasyWarrior_Arrow02.png");
             gearIcon = Load<Sprite>("Assets/Art/Icons/UnitTypes/Melee.png");
@@ -84,6 +94,9 @@ namespace TJ.MainMenu.EditorTools
             fleur = Load<Sprite>("Assets/ImportedPackages/InterfaceFantasyWarriorHUD/Sprites/HUD/SPR_HUD_FantasyWarrior_Symbol_FleurDeLis01.png");
             lineLeft = Load<Sprite>("Assets/ImportedPackages/InterfaceFantasyWarriorHUD/Sprites/HUD/SPR_HUD_FantasyWarrior_Line03_Left.png");
             lineRight = Load<Sprite>("Assets/ImportedPackages/InterfaceFantasyWarriorHUD/Sprites/HUD/SPR_HUD_FantasyWarrior_Line03_Right.png");
+            closeFill = Load<Sprite>("Assets/ImportedPackages/InterfaceFantasyWarriorHUD/Sprites/HUD/SPR_HUD_FantasyWarrior_Gradient_Vertical_Solid01.png");
+            closeFrame = Load<Sprite>("Assets/ImportedPackages/InterfaceFantasyWarriorHUD/Sprites/FantasyWarrior/SPR_FantasyWarrior_Frame_Box_Small03.png");
+            closeKeyFrame = Load<Sprite>("Assets/ImportedPackages/InterfaceFantasyWarriorHUD/Sprites/HUD/SPR_HUD_FantasyWarrior_Frame_Box_Medium01.png");
             questCatalog = Load<QuestCatalogSO>("Assets/Data/SOs/Achievements/QuestCatalog.asset");
         }
 
@@ -113,23 +126,22 @@ namespace TJ.MainMenu.EditorTools
         [MenuItem("Tabletop Tavern/Collection/Rebuild Prefab")]
         public static void BuildPrefab()
         {
+            if (!EditorUtility.DisplayDialog("Rebuild Collection codex",
+                    $"{PrefabPath} is rebuilt from code, which discards your hand edits to it. Component prefabs are kept.",
+                    "Rebuild", "Cancel"))
+                return;
             LoadAssets();
             EnsureParts(false);
             BuildCodex();
         }
 
         [MenuItem("Tabletop Tavern/Collection/Reset Component Prefabs")]
-        static void ResetPartsMenu()
+        public static void ResetParts()
         {
             if (!EditorUtility.DisplayDialog("Reset Collection components",
                     $"Every prefab in {PartFolder} is rebuilt from code, which discards your edits to them. The codex is rebuilt after.",
                     "Reset", "Cancel"))
                 return;
-            ResetParts();
-        }
-
-        public static void ResetParts()
-        {
             LoadAssets();
             EnsureParts(true);
             BuildCodex();
@@ -873,23 +885,39 @@ namespace TJ.MainMenu.EditorTools
         static void CloseButtonPart(GameObject go)
         {
             RectTransform rect = (RectTransform)go.transform;
-            Image frame = Img(Stretch(Rect("Frame", rect)), panel, Color.white, Image.Type.Sliced, 1f);
+            // TJ's hand-styled look: the Ink and Brass frame and key cap stay, switched off, under the Button Base fill and frame.
+            Image inkFrame = Img(Stretch(Rect("Frame", rect)), panel, Color.white, Image.Type.Sliced, 1f);
+            inkFrame.raycastTarget = true;
+            inkFrame.enabled = false;
+            Image fill = Img(Stretch(Rect("SPR_Background", inkFrame.transform)), closeFill, Hex("1C2A33"));
+            fill.rectTransform.localRotation = Quaternion.Euler(0f, 0f, 180f);
+            Shadow fillShadow = fill.gameObject.AddComponent<Shadow>();
+            fillShadow.effectDistance = new Vector2(5f, 5f);
+            fillShadow.enabled = false;
+            Image frame = Img(Stretch(Rect("frame", inkFrame.transform)), closeFrame, Color.white, Image.Type.Sliced, 8f);
+            // A switched-off Image takes no clicks, so the visible frame is the click area.
             frame.raycastTarget = true;
             Button button = go.AddComponent<Button>();
-            button.targetGraphic = frame;
+            button.targetGraphic = inkFrame;
             TintColours(button);
             HoverSound(go, button);
             rect.sizeDelta = new Vector2(130f, 44f);
             HorizontalLayoutGroup row = HLayout(rect, 10f, TextAnchor.MiddleCenter, new RectOffset(16, 12, 6, 6));
             row.childForceExpandWidth = false;
-            frame.gameObject.AddComponent<LayoutElement>().ignoreLayout = true;
+            inkFrame.gameObject.AddComponent<LayoutElement>().ignoreLayout = true;
             Text("Label", rect, displayDrop, 18f, Cream, "Close");
             RectTransform cap = Rect("Key", rect);
-            Img(cap, keyCap, Color.white, Image.Type.Sliced, 1f);
+            Img(cap, keyCap, Color.white, Image.Type.Sliced, 1f).enabled = false;
             HorizontalLayoutGroup capRow = HLayout(cap, 0f, TextAnchor.MiddleCenter, new RectOffset(8, 8, 2, 4));
             capRow.childForceExpandWidth = false;
             TMP_Text capText = Text("Text", cap, body, 13f, Cream, "Esc");
             capText.alignment = TextAlignmentOptions.Center;
+            capText.enableAutoSizing = true;
+            capText.fontSizeMin = 10f;
+            capText.fontSizeMax = 13f;
+            // A child of the text, so the key frame follows the label's width.
+            Image capFrame = Img(Rect("frame_1", capText.transform), closeKeyFrame, Color.white, Image.Type.Sliced, 2f);
+            Anchor(capFrame.rectTransform, Vector2.zero, Vector2.one, new Vector2(-8f, -4f), new Vector2(8f, -1f));
         }
 
         static void QuestRowPart(GameObject go)
@@ -1146,6 +1174,8 @@ namespace TJ.MainMenu.EditorTools
 
             // The page is opaque: nothing of the menu, map or battle behind it may show or take clicks.
             Img(Stretch(Rect("Backdrop", root)), null, Ground).raycastTarget = true;
+            var ringInstance = (GameObject)PrefabUtility.InstantiatePrefab(ring, root);
+            ringInstance.name = "Ring_Large";
             EdgeShade(root);
 
             // Header
@@ -1376,7 +1406,12 @@ namespace TJ.MainMenu.EditorTools
             Anchor(frame, new Vector2(1f, 0f), new Vector2(1f, 1f), new Vector2(-440f, 0f), Vector2.zero);
             Image frameShadow = Img(Rect("Shadow", frame), shadow, A(Color.white, 0.8f), Image.Type.Sliced, 1f);
             Stretch(frameShadow.rectTransform, -30f, -30f, -18f, -42f);
-            Img(Stretch(Rect("Panel", frame)), panel, Color.white, Image.Type.Sliced, 1f).raycastTarget = true;
+            var background = (GameObject)PrefabUtility.InstantiatePrefab(basicBackground, frame);
+            background.name = "Basic Background";
+            Stretch((RectTransform)background.transform);
+            Image inkPanel = Img(Stretch(Rect("Panel", frame)), panel, Color.white, Image.Type.Sliced, 1f);
+            inkPanel.raycastTarget = true;
+            inkPanel.gameObject.SetActive(false);
             CollectionDetailPanel detail = frame.gameObject.AddComponent<CollectionDetailPanel>();
 
             ScrollRect scroll = Scroll(frame, "Scroll", out RectTransform content);
@@ -1396,7 +1431,7 @@ namespace TJ.MainMenu.EditorTools
             RectTransform item = View(content, "Item View", 12f, TextAnchor.UpperCenter);
             RectTransform mount = Rect("Mount", item);
             Fixed(mount.gameObject, -1f, 230f);
-            Image glow = Img(Rect("Glow", mount), null, A(Gold, 0.3f));
+            Image glow = Img(Rect("Glow", mount), flatShadow, A(Gold, 0.3f), Image.Type.Sliced, 1f);
             Centre(glow.rectTransform, 176f, 176f);
             glow.rectTransform.localEulerAngles = new Vector3(0f, 0f, 45f);
             Image diamond = Img(Rect("Diamond", mount), panel, Color.white, Image.Type.Sliced, 1f);
@@ -1414,6 +1449,11 @@ namespace TJ.MainMenu.EditorTools
             Part<RectTransform>("Rule", item);
             TMP_Text itemBody = Text("Body", item, body, 19f, Cream, "Effect");
             Wrap(itemBody, TextAlignmentOptions.Center);
+            Image crest = Img(Rect("Image", itemBody.transform), crestBrackets, A(Color.white, 10f / 255f), Image.Type.Sliced, 1f);
+            crest.raycastTarget = true;
+            crest.rectTransform.anchorMin = crest.rectTransform.anchorMax = new Vector2(0.5f, 1f);
+            crest.rectTransform.sizeDelta = new Vector2(300f, 300f);
+            crest.rectTransform.anchoredPosition = new Vector2(0f, -150f);
             TMP_Text itemFlavour = Text("Flavour", item, display, 16f, Flavour, "Flavour");
             itemFlavour.fontStyle = FontStyles.Italic;
             Wrap(itemFlavour, TextAlignmentOptions.Center);
@@ -1444,7 +1484,7 @@ namespace TJ.MainMenu.EditorTools
             TMP_Text statsLabel = SectionLabel(unit, "Stats");
             RectTransform stats = Rect("Stats", unit);
             VLayout(stats, 6f, new RectOffset()).childForceExpandWidth = true;
-            RectTransform unitSpell = SpellRow(unit, "Spell Row", 0f, out Image unitSpellIcon, out TMP_Text unitSpellLabel, out TMP_Text unitSpellName);
+            RectTransform unitSpell = SpellRow(unit, "Spell Row", 0f, out Image unitSpellIcon, out TMP_Text unitSpellLabel, out TMP_Text unitSpellName, out MemoriTooltipTrigger unitSpellTooltip);
             Part<RectTransform>("Rule", unit);
             TMP_Text factionLabel = SectionLabel(unit, "Faction Effect");
             TMP_Text factionText = Text("Faction Text", unit, display, 16f, Parchment, "Effect");
@@ -1466,6 +1506,7 @@ namespace TJ.MainMenu.EditorTools
             Ref(so, "unitSpellIcon", unitSpellIcon);
             Ref(so, "unitSpellLabel", unitSpellLabel);
             Ref(so, "unitSpellName", unitSpellName);
+            Ref(so, "unitSpellTooltip", unitSpellTooltip);
             Ref(so, "unitFactionLabel", factionLabel);
             Ref(so, "unitFactionText", factionText);
             Ref(so, "unitFactionTooltip", factionTooltip);
@@ -1497,7 +1538,7 @@ namespace TJ.MainMenu.EditorTools
             TMP_Text signatureName = Text("Name", signatureText, displayDrop, 19f, Cream, "Unit");
             Button link = LinkButton(signatureText, out TMP_Text linkText);
             // Hero spells get a larger tile than a mage's spell.
-            RectTransform heroSpell = SpellRow(hero, "Signature Spell", 64f, out Image heroSpellIcon, out TMP_Text heroSpellLabel, out TMP_Text heroSpellName);
+            RectTransform heroSpell = SpellRow(hero, "Signature Spell", 64f, out Image heroSpellIcon, out TMP_Text heroSpellLabel, out TMP_Text heroSpellName, out MemoriTooltipTrigger heroSpellTooltip);
             TMP_Text armyLabel = SectionLabel(hero, "Starting Army");
             RectTransform army = Rect("Army", hero);
             HLayout(army, 10f, TextAnchor.MiddleLeft, new RectOffset()).childForceExpandWidth = false;
@@ -1520,6 +1561,7 @@ namespace TJ.MainMenu.EditorTools
             Ref(so, "heroSpellIcon", heroSpellIcon);
             Ref(so, "heroSpellLabel", heroSpellLabel);
             Ref(so, "heroSpellName", heroSpellName);
+            Ref(so, "heroSpellTooltip", heroSpellTooltip);
             Ref(so, "heroArmyLabel", armyLabel);
             Ref(so, "heroArmy", army);
 
@@ -1579,7 +1621,8 @@ namespace TJ.MainMenu.EditorTools
             return strip;
         }
 
-        static RectTransform SpellRow(Transform parent, string name, float tileSize, out Image icon, out TMP_Text label, out TMP_Text spellName)
+        static RectTransform SpellRow(Transform parent, string name, float tileSize, out Image icon, out TMP_Text label, out TMP_Text spellName,
+            out MemoriTooltipTrigger tooltip)
         {
             RectTransform row = Part<RectTransform>("Spell Row", parent, name);
             LayoutElement tile = Child<LayoutElement>(row, "Tile");
@@ -1587,6 +1630,10 @@ namespace TJ.MainMenu.EditorTools
             icon = Child<Image>(row, "Tile/Icon");
             label = Child<TMP_Text>(row, "Text/Label");
             spellName = Child<TMP_Text>(row, "Text/Name");
+            // The trigger sits on the row, so the tile frame and the name are what catch the cursor.
+            Child<Image>(row, "Tile/Frame").raycastTarget = true;
+            spellName.raycastTarget = true;
+            tooltip = row.gameObject.AddComponent<MemoriTooltipTrigger>();
             return row;
         }
         #endregion
@@ -1652,6 +1699,13 @@ namespace TJ.MainMenu.EditorTools
             TMP_Text boardSubtitle = Text("Subtitle", boardContent, body, 16f, Sub, "Subtitle");
             Wrap(boardSubtitle, TextAlignmentOptions.TopLeft);
             boardSubtitle.margin = new Vector4(0f, 0f, 0f, 10f);
+            // The Godking board's hero: the shared Setting Stepper, so its art stays in one prefab.
+            RectTransform heroRow = Rect("Hero Row", boardContent);
+            HLayout(heroRow, 12f, TextAnchor.MiddleLeft, new RectOffset(10, 0, 0, 8));
+            Fixed(heroRow.gameObject, -1f, 46f);
+            var heroPicker = (GameObject)PrefabUtility.InstantiatePrefab(settingStepper, heroRow);
+            heroPicker.name = "Hero Picker";
+            Fixed(heroPicker, 300f, 38f);
             RectTransform boardHeads = Rect("Columns", boardContent);
             HLayout(boardHeads, 16f, TextAnchor.MiddleLeft, new RectOffset(10, 20, 0, 0));
             Fixed(boardHeads.gameObject, -1f, 26f);
@@ -1677,6 +1731,8 @@ namespace TJ.MainMenu.EditorTools
             Ref(so, "boardFilterSlot", filterSlot);
             Ref(so, "godkingTab", godkingTab);
             Ref(so, "deepestTab", deepestTab);
+            Ref(so, "heroPicker", heroPicker.GetComponent<SettingStepper>());
+            Ref(so, "heroPickerRow", heroRow.gameObject);
             Ref(so, "filter", filter);
             Ref(so, "boardSubtitle", boardSubtitle);
             Ref(so, "rankColumn", rankHead);

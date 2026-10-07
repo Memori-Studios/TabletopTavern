@@ -65,6 +65,17 @@ namespace TJ
         private readonly HashSet<int> _processedBreachedGates = new();
         private bool _garrisonCacheBuilt;
 
+        [Header("Garrison Under Fire")]
+        [Tooltip("Share of max health a holding defender must lose before it reacts to being hit from range.")]
+        [SerializeField] private float _underFireHealthLoss = 0.05f;
+        [Tooltip("Extra distance kept beyond an attacker's range when pulling back. An engaged ranged squad keeps firing 10 past its range.")]
+        [SerializeField] private float _garrisonRangeMargin = 20f;
+        [Tooltip("How far inside its own range a defender stops when stepping up to return fire.")]
+        [SerializeField] private float _garrisonStepUpMargin = 10f;
+        [Tooltip("Room kept between a moved defender's centre and the walls or the back edge.")]
+        [SerializeField] private float _garrisonWallMargin = 8f;
+        private readonly Dictionary<Entity, int> _garrisonHealthMarks = new();
+
         #region Lifecycle
 
         private void Awake()
@@ -362,8 +373,128 @@ namespace TJ
                     if (_processedBreachedGates.Contains(gateIndex)) continue;
                     ReleaseGateDefenders(gateIndex);
                 }
+
+                if (_processedBreachedGates.Count == 0)
+                    MoveDefendersUnderFire();
             }
         }
+
+        #region Garrison Under Fire
+
+        // A holding defender never chases, so one hit from beyond its own reach would stand and die.
+        private void MoveDefendersUnderFire()
+        {
+            PositionDrawer positionDrawer = BattleManager.Instance.PositionDrawer;
+            if (!positionDrawer.HasGarrisonZone) return;
+            GarrisonConcaveZone zone = positionDrawer.GarrisonZone;
+
+            NativeArray<Entity> playerEntities = _playerSquadQuery.ToEntityArray(Allocator.Temp);
+            foreach (List<Entity> defenders in _garrisonDefendersByGate.Values)
+            {
+                foreach (Entity defender in defenders)
+                {
+                    if (!_entityManager.Exists(defender)) continue;
+                    if (_entityManager.HasComponent<BrokenSquadTag>(defender)) continue;
+
+                    int health = _entityManager.GetComponentData<SquadStateComponent>(defender).CurrentHealthValue;
+                    if (!_garrisonHealthMarks.TryGetValue(defender, out int mark))
+                    {
+                        _garrisonHealthMarks[defender] = health;
+                        continue;
+                    }
+
+                    // A squad already walking finishes that move before it is judged again.
+                    if (_entityManager.HasComponent<SquadMoveOverrideTag>(defender))
+                    {
+                        _garrisonHealthMarks[defender] = health;
+                        continue;
+                    }
+
+                    int maxHealth = _entityManager.GetComponentData<SquadStateComponent>(defender).MaxHealthValue;
+                    if (mark - health < maxHealth * _underFireHealthLoss) continue;
+                    _garrisonHealthMarks[defender] = health;
+
+                    OrderDefenderOutOfHarm(defender, playerEntities, zone);
+                }
+            }
+            playerEntities.Dispose();
+        }
+
+        private void OrderDefenderOutOfHarm(Entity defender, NativeArray<Entity> playerEntities, GarrisonConcaveZone zone)
+        {
+            SquadMovementComponent movement = _entityManager.GetComponentData<SquadMovementComponent>(defender);
+            float3 center = movement.SquadCenter;
+            float ownRange = GetSquadAttackRange(defender);
+
+            bool   underFire       = false;
+            float  nearestDistance = float.MaxValue;
+            float3 nearestThreat   = default;
+            float  safeZ           = center.z;
+            foreach (Entity playerEntity in playerEntities)
+            {
+                float threatRange = GetSquadAttackRange(playerEntity);
+                if (threatRange <= 0f) continue;
+
+                float3 threat   = _entityManager.GetComponentData<SquadMovementComponent>(playerEntity).SquadCenter;
+                float  distance = math.distance(threat, center);
+                if (distance > threatRange + _garrisonRangeMargin) continue;
+
+                underFire = true;
+                if (distance < nearestDistance)
+                {
+                    nearestDistance = distance;
+                    nearestThreat   = threat;
+                }
+
+                float reach = threatRange + _garrisonRangeMargin;
+                float dx    = center.x - threat.x;
+                safeZ = math.max(safeZ, threat.z + math.sqrt(math.max(0f, reach * reach - dx * dx)));
+            }
+            if (!underFire) return;
+
+            // Already able to answer: its own find-target system returns fire from where it stands.
+            if (ownRange > 0f && nearestDistance <= ownRange) return;
+
+            SquadEntity squadEntity = _entityManager.GetComponentData<SquadEntity>(defender);
+            float3 goal;
+            quaternion facing = movement.SquadRotation;
+
+            float3 advance = nearestThreat + math.normalizesafe(center - nearestThreat) * math.max(0f, ownRange - _garrisonStepUpMargin);
+            if (ownRange > 0f && zone.IsInsideEnemyZone(advance.x, advance.z - _garrisonWallMargin))
+            {
+                goal   = advance;
+                facing = quaternion.LookRotationSafe(nearestThreat - advance, math.up());
+                Debug.Log($"[EnemyGeneral] Garrison squad {squadEntity.SquadId} ({squadEntity.UnitName}) outranged - stepping up to return fire");
+            }
+            else
+            {
+                goal   = center;
+                goal.z = math.min(safeZ, zone.battleMaxZ - _garrisonWallMargin);
+                if (goal.z - center.z < 1f) return;
+                Debug.Log($"[EnemyGeneral] Garrison squad {squadEntity.SquadId} ({squadEntity.UnitName}) under fire - pulling back out of range");
+            }
+
+            DynamicBuffer<QueuedOrder> orders = _entityManager.GetBuffer<QueuedOrder>(defender);
+            orders.Clear();
+            orders.Add(new QueuedOrder
+            {
+                Type          = QueuedOrderType.Move,
+                Goal          = goal,
+                Rotation      = facing,
+                WidthAndDepth = movement.SquadWidthAndDepth
+            });
+        }
+
+        private float GetSquadAttackRange(Entity squad)
+        {
+            if (_entityManager.HasComponent<RangedSquad>(squad) && _entityManager.IsComponentEnabled<RangedSquad>(squad))
+                return _entityManager.GetComponentData<RangedSquad>(squad).AttackRange;
+            if (_entityManager.HasComponent<MageSquad>(squad))
+                return _entityManager.GetComponentData<MageSquad>(squad).AttackRange;
+            return 0f;
+        }
+
+        #endregion
 
         private void BuildGarrisonCache()
         {
@@ -479,6 +610,7 @@ namespace TJ
             _currentState = EnemyGeneralState.Garrison;
             _garrisonDefendersByGate.Clear();
             _processedBreachedGates.Clear();
+            _garrisonHealthMarks.Clear();
             _garrisonCacheBuilt = false;
         }
         private void SetDelayedAggressive() { _delayedAggressiveTimer = 0; _currentState = EnemyGeneralState.DelayedAggressive; }

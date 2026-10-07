@@ -10,10 +10,10 @@ public class BattlefieldBiomeBonus : MonoBehaviour
         EntityManager entityManager = World.DefaultGameObjectInjectionWorld.EntityManager;
         var ecb = new EntityCommandBuffer(Allocator.Temp);
 
-        ecb.AddComponent(squadEntity, new ApplyBiomeBonusTag { BattlefieldBonusEnum = biome, Guid = System.Guid.NewGuid() });
+        bool ignoresSwamp = TabletopTavernData.IgnoresSwamp(BattleAttributes(squadEntity));
+        ecb.AddComponent(squadEntity, new ApplyBiomeBonusTag { BattlefieldBonusEnum = biome, Guid = System.Guid.NewGuid(), IgnoresSwamp = ignoresSwamp });
         if(biome == BattlefieldBonusEnum.Swamp)
         {
-            bool ignoresSwamp = TabletopTavernData.Instance.IgnoresSwamp(entityManager.GetComponentData<SquadEntity>(squadEntity).UnitName);
             if (!ignoresSwamp)
             {
                 BattleManager.Instance.SquadMovementManager.EnteringSwamp(squadEntity, true);
@@ -35,8 +35,7 @@ public class BattlefieldBiomeBonus : MonoBehaviour
         if (biome == BattlefieldBonusEnum.Swamp)
         {
             ecb.AddComponent<RemoveSwampTag>(squadEntity);
-            bool ignoresSwamp = TabletopTavernData.Instance.IgnoresSwamp(entityManager.GetComponentData<SquadEntity>(squadEntity).UnitName);
-            if (!ignoresSwamp)
+            if (!TabletopTavernData.IgnoresSwamp(BattleAttributes(squadEntity)))
             {
                 BattleManager.Instance.SquadMovementManager.EnteringSwamp(squadEntity, false);
             }
@@ -53,7 +52,7 @@ public class BattlefieldBiomeBonus : MonoBehaviour
     public void EnteringForest(Entity entity, bool isEntering)
     {
         EntityManager entityManager = World.DefaultGameObjectInjectionWorld.EntityManager;
-        if (!TabletopTavernData.Instance.IsForestDweller(entityManager.GetComponentData<SquadEntity>(entity).UnitName)) return;
+        if (!BattleAttributes(entity).ForestDweller) return;
 
         var entityBuffer = entityManager.GetBuffer<EntityReferenceBufferElement>(entity);
 
@@ -101,5 +100,10 @@ public class BattlefieldBiomeBonus : MonoBehaviour
                 }
             }
         }
+    }
+    private static SquadAttributes BattleAttributes(Entity squadEntity)
+    {
+        SquadEntity squad = World.DefaultGameObjectInjectionWorld.EntityManager.GetComponentData<SquadEntity>(squadEntity);
+        return BattleManager.Instance.SquadManager.GetBattleSquadAttributes(squad.UnitName, squad.SquadId);
     }
 }

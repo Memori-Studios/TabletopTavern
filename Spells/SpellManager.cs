@@ -106,7 +106,7 @@ public class SpellManager : MonoBehaviour
     public SpellPlacementPhase PlacementPhase => placementPhase;
     private SpellPlacementPhase placementPhase = SpellPlacementPhase.None;
     private int placementSlot = -1;
-    private static bool IsPlacementSpell(SpellData s) => s != null && (s.TeleportsSquad || s.SummonsSquad);
+    private static bool IsPlacementSpell(SpellData s) => s != null && (s.TeleportsSquad || s.SummonsSquad || s.PlacesBarricade);
 
     // Per-battle mana. Granted whole in LoadSpellManager, spent permanently, never regenerated and
     // never carried over - so battle length does not change how many casts a player gets. This
@@ -625,6 +625,15 @@ public class SpellManager : MonoBehaviour
         OnManaChanged?.Invoke(manaRemaining, manaMax);
     }
 
+    /// <summary>Dev Tools: fills the pool back up. Does nothing before the spell bar has loaded.</summary>
+    public void RefillMana()
+    {
+        if(slotStates == null) return;
+        manaRemaining = manaMax;
+        RefreshAffordability();
+        OnManaChanged?.Invoke(manaRemaining, manaMax);
+    }
+
     private void RejectCast(int slotIndex, string reason)
     {
         Debug.Log($"SpellManager: cast rejected for slot {slotIndex} - {reason}");
@@ -770,6 +779,12 @@ public class SpellManager : MonoBehaviour
             placementPhase = SpellPlacementPhase.AwaitingSquad;
             ui.ShowSpellTargetHint(validTargetCursor, LocalizationManager.Instance.GetText("SpellHintSelectSquad"));
         }
+        else if(spell.PlacesBarricade)
+        {
+            placementPhase = SpellPlacementPhase.Placing;
+            BeginBarricadeLine();
+            ui.ShowSpellTargetHint(validTargetCursor, LocalizationManager.Instance.GetText("SpellHintPlaceBarricade"));
+        }
         else
         {
             // A summon knows its squad already: preview its footprint on the cursor straight away.
@@ -875,6 +890,8 @@ public class SpellManager : MonoBehaviour
         if(placementPhase == SpellPlacementPhase.None) return;
         placementPhase = SpellPlacementPhase.None;
         placementSlot = -1;
+        barricadePreview.Clear();
+        barricadePreviewOccupied.Clear();
         BattleManager.Instance.PositionDrawer.TurnOff();
         BattleManager.Instance.UIManager.HideSpellTargetHint();
         if(resetCursor && BattleManager.Instance.CursorMode == CursorMode.CastSpell)
@@ -928,6 +945,91 @@ public class SpellManager : MonoBehaviour
         slotsCastMask |= 1 << slotIndex;
         CheckFullArsenal();
         RecordSpellCast(slot.SpellData);
+    }
+    #endregion
+    #region Barricade placement
+    // The line being drawn, laid out by BarricadeLine each input frame; ShapesDrawingManager draws it.
+    private readonly List<Vector3> barricadePreview = new();
+    private readonly List<bool> barricadePreviewOccupied = new();
+    private Vector3 barricadeCentre;
+    // The line runs along this rotation's local X. Identity runs it across the field, facing the enemy's side.
+    private Quaternion barricadeRotation = Quaternion.identity;
+    private Vector3 barricadeDragStart;
+
+    public bool PlacingBarricade => placementPhase == SpellPlacementPhase.Placing && placementSlot >= 0
+                                    && slotStates[placementSlot].SpellData != null && slotStates[placementSlot].SpellData.PlacesBarricade;
+    public IReadOnlyList<Vector3> BarricadePreview => barricadePreview;
+    public IReadOnlyList<bool> BarricadePreviewOccupied => barricadePreviewOccupied;
+    public Quaternion BarricadeRotation => barricadeRotation;
+    public Vector2 BarricadePieceSize
+    {
+        get
+        {
+            BarricadePiece piece = PlacingBarricade ? slotStates[placementSlot].SpellData.BarricadePiecePrefab : null;
+            return piece == null ? Vector2.zero : new Vector2(piece.Length, piece.Depth);
+        }
+    }
+
+    private void BeginBarricadeLine()
+    {
+        barricadeRotation = Quaternion.identity;
+        MoveBarricadeLine(MouseWorldPosition.Instance.GetWorldPosition());
+    }
+    /// <summary>No button held: the full line follows the cursor at its current facing.</summary>
+    public void MoveBarricadeLine(Vector3 cursor)
+    {
+        if(!PlacingBarricade) return;
+        barricadeCentre = cursor;
+        LayOutBarricadeLine(slotStates[placementSlot].SpellData.BarricadeMaxPieces);
+    }
+    public void StartBarricadeDrag(Vector3 cursor) => barricadeDragStart = cursor;
+    /// <summary>Right button held: the line starts where the drag began and runs toward the cursor, one piece per piece length dragged.</summary>
+    public void DragBarricadeLine(Vector3 cursor)
+    {
+        if(!PlacingBarricade) return;
+        SpellData spell = slotStates[placementSlot].SpellData;
+        float pieceLength = spell.BarricadePiecePrefab.Length;
+        Vector3 offset = cursor - barricadeDragStart;
+        offset.y = 0f;
+        if(offset.magnitude < pieceLength * 0.5f) {
+            barricadeCentre = barricadeDragStart;
+            LayOutBarricadeLine(spell.BarricadeMaxPieces);
+            return;
+        }
+        Vector3 direction = offset.normalized;
+        int count = Mathf.Clamp(Mathf.RoundToInt(offset.magnitude / pieceLength), 1, spell.BarricadeMaxPieces);
+        // LookRotation puts local X on Cross(up, forward), so this forward lays local X along the drag.
+        barricadeRotation = Quaternion.LookRotation(Vector3.Cross(direction, Vector3.up), Vector3.up);
+        barricadeCentre = barricadeDragStart + direction * (count * pieceLength * 0.5f);
+        LayOutBarricadeLine(count);
+    }
+    private void LayOutBarricadeLine(int count)
+    {
+        BarricadePiece piece = slotStates[placementSlot].SpellData.BarricadePiecePrefab;
+        if(piece == null) return;
+        BarricadeLine.Layout(barricadeCentre, barricadeRotation, count, piece.Length, barricadePreview);
+        BarricadeLine.MarkOccupied(barricadePreview, barricadeRotation, piece.Length, piece.Depth, barricadePreviewOccupied);
+    }
+    /// <summary>The right-button release that raises the drawn line. Called by BattleInputManager.HandleSpellPlacementCursorMode.</summary>
+    public void ConfirmBarricadeLine()
+    {
+        if(!PlacingBarricade) return;
+        if(!barricadePreviewOccupied.Contains(false)) {
+            NotificationManager.Instance.ErrorNotification(LocalizationManager.Instance.GetText("BarricadeBlocked"));
+            return;
+        }
+        List<float3> points = new(barricadePreview.Count);
+        foreach(Vector3 point in barricadePreview) points.Add(point);
+        SpellPlacement placement = new SpellPlacement {
+            Positions = points,
+            Rotation = barricadeRotation,
+            Center = barricadeCentre
+        };
+        int slot = placementSlot;
+        CancelPlacement(false);
+        CastPlacedSpell(slot, placement.Center, placement, false);
+        bool squadsStillSelected = BattleManager.Instance.UnitSelectionManager.SelectedSquadIds.Count > 0;
+        BattleManager.Instance.SetCursorMode(squadsStillSelected ? CursorMode.UnitsSelected : CursorMode.Free);
     }
     #endregion
     /// <summary>
@@ -1047,10 +1149,17 @@ public class SpellManager : MonoBehaviour
         SquadMovementComponent movement = entityManager.GetComponentData<SquadMovementComponent>(self);
         float range = entityManager.GetComponentData<MageSquad>(self).AttackRange;
         float distance = math.distance(movement.SquadCenter, castPoint);
+        // Same buffer QueueSquadCommand writes for a right-click order; a fresh order replaces
+        // whatever the squad was doing, as a player order always does.
+        DynamicBuffer<QueuedOrder> orders = entityManager.GetBuffer<QueuedOrder>(self);
+        if(distance <= range && !entityManager.HasComponent<InCombat>(self)) {
+            // A cast waits for the mage to stop, so in range it halts where it stands instead of walking on to an old goal.
+            orders.Clear();
+            QueuedOrder halt = QueuedOrder.Move(new float3(movement.SquadCenter.x, 0f, movement.SquadCenter.z), movement.SquadRotation);
+            halt.WidthAndDepth = movement.SquadWidthAndDepth;
+            orders.Add(halt);
+        }
         if(distance > range) {
-            // Same buffer QueueSquadCommand writes for a right-click order; a fresh order replaces
-            // whatever the squad was doing, as a player order always does.
-            DynamicBuffer<QueuedOrder> orders = entityManager.GetBuffer<QueuedOrder>(self);
             orders.Clear();
             if(target != Entity.Null) {
                 orders.Add(QueuedOrder.Attack(entityManager.GetComponentData<SquadEntity>(target).SquadId));
@@ -1177,7 +1286,7 @@ public class SpellManager : MonoBehaviour
         if(spellWheel == null || slotStates == null || hotbarSlotCount <= 0 || WheelMouse == null) return false;
         GamePhase phase = BattleManager.Instance.GamePhase;
         if(phase != GamePhase.Deployment && phase != GamePhase.Battle) return false;
-        if(SettingsManager.Instance.SettingsPanelOpen) return false;
+        if(SettingsManager.Instance.SettingsPanelOpen || TJ.BattleViewModes.OrdersBlocked) return false;
         // Never over a drag in progress: a box select, a formation drag, a reposition or a spawn.
         CursorMode mode = BattleManager.Instance.CursorMode;
         if(mode == CursorMode.MouseDown || mode == CursorMode.Reposition || mode == CursorMode.SpawnSquad) return false;
@@ -1284,6 +1393,15 @@ public class SpellManager : MonoBehaviour
         spellWheel.Hide();
     }
 
+    /// <summary>Closes the wheel without a pick and disarms any armed spell, for a mode that takes the mouse away.</summary>
+    public void CancelWheelAndCast()
+    {
+        CloseWheel();
+        swallowMouse = false;
+        if(BattleManager.Instance.CursorMode == CursorMode.CastSpell)
+            BattleManager.Instance.SetCursorMode(CursorMode.Free);
+    }
+
     private string WheelLabel(WheelDirection direction)
     {
         if(direction == WheelDirection.Down) return LocalizationManager.Instance.GetText("Cancel");
@@ -1309,14 +1427,17 @@ public class SpellManager : MonoBehaviour
             // would fight it - right-click is "place" there.
             if(placementPhase != SpellPlacementPhase.None) { yield return null; continue; }
 
+            bool overUI = UnityEngine.EventSystems.EventSystem.current.IsPointerOverGameObject();
+
             // A click on the spell wheel picks from it; it must not also cast or cancel the armed spell.
             if(!WheelOwnsMouse && Input.GetMouseButtonDown(1)){
                 BattleManager.Instance.SetCursorMode(CursorMode.Free);
                 yield break;
             }
 
-            // A click on the minimap moves the camera; it must not also cast.
-            if(!WheelOwnsMouse && !MinimapClickToMove.PointerIsOver && Input.GetMouseButtonDown(0)){
+            // A click on UI belongs to the UI (the spell bar re-arms, a unit card casts through CastOnSquadCard);
+            // a click on the minimap moves the camera. Neither may also cast on the ground behind it.
+            if(!WheelOwnsMouse && !overUI && !MinimapClickToMove.PointerIsOver && Input.GetMouseButtonDown(0)){
                 AttemptCastSpell();
             }
 
@@ -1324,40 +1445,26 @@ public class SpellManager : MonoBehaviour
             if(selectedSpellData == null) { yield return null; continue; }
 
             Vector3 castPoint = MouseWorldPosition.Instance.GetWorldPosition() + (Vector3.up*10f);
-            targetedSquadSelfEntity = Entity.Null;
+            bool overSquad;
 
-            if(selectedSpellData.SpellTargetingType == SpellTargetingType.Squad)
+            if(overUI)
+            {
+                // Over a unit card the card's squad is the target, for ground spells too; over other UI nothing is.
+                overSquad = hoveredCardSquadId != 0;
+                validSpellCastPoint = AimAtSquad(selectedSpellData, hoveredCardSquadId);
+                if(!validSpellCastPoint) spellCursorOrigin = MouseWorldPosition.Instance.GetWorldPosition();
+                UpdateTargetHoverAudio(targetedSquadSelfEntity);
+            }
+            else if(selectedSpellData.SpellTargetingType == SpellTargetingType.Squad)
             {
                 int hoveredSquadIndex = BattleManager.Instance.UIManager.HoveredSquadId;
-                bool validTarget = false;
-
-                if(hoveredSquadIndex != 0) {
-                    //positive squadId = player squad, negative = enemy squad (see UnitSelectionManager.IsHoveringEnemySquad)
-                    bool hoveredIsPlayerSquad = hoveredSquadIndex > 0;
-                    validTarget = (selectedSpellData.TargetTeam == Team.Player && hoveredIsPlayerSquad)
-                               || (selectedSpellData.TargetTeam == Team.Enemy && !hoveredIsPlayerSquad)
-                               || selectedSpellData.TargetTeam == Team.Neutral; //Neutral spells can target either team
-
-                    if(validTarget) {
-                        SquadEntity hoveredSquad = BattleManager.Instance.SquadManager.GetSquad(hoveredSquadIndex);
-                        EntityManager entityManager = World.DefaultGameObjectInjectionWorld.EntityManager;
-                        // A broken squad is already leaving the field and cannot be targeted.
-                        if(hoveredSquad.SelfEntity != Entity.Null &&
-                            entityManager.Exists(hoveredSquad.SelfEntity) &&
-                            entityManager.HasComponent<SquadMovementComponent>(hoveredSquad.SelfEntity) &&
-                            !entityManager.HasComponent<BrokenSquadTag>(hoveredSquad.SelfEntity)) {
-                            castPoint = entityManager.GetComponentData<SquadMovementComponent>(hoveredSquad.SelfEntity).SquadCenter;
-                            targetedSquadSelfEntity = hoveredSquad.SelfEntity;
-                        } else {
-                            validTarget = false;
-                        }
-                    }
-                }
-
-                validSpellCastPoint = validTarget;
-                spellCursorOrigin = validTarget ? castPoint : MouseWorldPosition.Instance.GetWorldPosition();
-                UpdateTargetHoverAudio(validTarget ? targetedSquadSelfEntity : Entity.Null);
-            } else if (selectedSpellData.SpellTargetingType == SpellTargetingType.World) {
+                overSquad = hoveredSquadIndex != 0;
+                validSpellCastPoint = AimAtSquad(selectedSpellData, hoveredSquadIndex);
+                if(!validSpellCastPoint) spellCursorOrigin = MouseWorldPosition.Instance.GetWorldPosition();
+                UpdateTargetHoverAudio(targetedSquadSelfEntity);
+            } else {
+                targetedSquadSelfEntity = Entity.Null;
+                overSquad = BattleManager.Instance.UIManager.HoveredSquadId != 0;
                 UpdateTargetHoverAudio(Entity.Null);
 
                 if(Physics.Raycast(castPoint, Vector3.down, 20, validSpellCastLayerMask)) {
@@ -1369,9 +1476,56 @@ public class SpellManager : MonoBehaviour
             }
 
             if(MageSpellArmed) UpdateArmedMageRange();
-            UpdateTargetingFeedback(selectedSpellData, validSpellCastPoint);
+            UpdateTargetingFeedback(selectedSpellData, validSpellCastPoint, overSquad);
             yield return null;
         }
+    }
+    #region Unit card targeting
+    // The battle unit card under the pointer, 0 when none. Card hover never reaches HoveredSquadId reliably over UI.
+    private int hoveredCardSquadId;
+    public void SetHoveredCard(int squadId) => hoveredCardSquadId = squadId;
+    public void ClearHoveredCard(int squadId)
+    {
+        if(hoveredCardSquadId == squadId) hoveredCardSquadId = 0;
+    }
+    /// <summary>
+    /// A unit card clicked while a spell is armed casts on that card's squad. Returns false when nothing
+    /// is armed, so the click selects the squad as usual; an invalid target consumes the click and stays armed.
+    /// </summary>
+    public bool CastOnSquadCard(int squadId)
+    {
+        if(BattleManager.Instance.CursorMode != CursorMode.CastSpell || placementPhase != SpellPlacementPhase.None) return false;
+        SpellData spell = ArmedSpell;
+        if(spell == null) return false;
+        validSpellCastPoint = AimAtSquad(spell, squadId);
+        AttemptCastSpell();
+        return true;
+    }
+    #endregion
+    // Aims at a squad's centre, and takes it as the target when the spell is squad-targeted. False if the spell cannot take it.
+    private bool AimAtSquad(SpellData spell, int squadId)
+    {
+        targetedSquadSelfEntity = Entity.Null;
+        if(squadId == 0) return false;
+
+        //positive squadId = player squad, negative = enemy squad (see UnitSelectionManager.IsHoveringEnemySquad)
+        bool isPlayerSquad = squadId > 0;
+        bool teamMatches = (spell.TargetTeam == Team.Player && isPlayerSquad)
+                        || (spell.TargetTeam == Team.Enemy && !isPlayerSquad)
+                        || spell.TargetTeam == Team.Neutral; //Neutral spells can target either team
+        if(!teamMatches) return false;
+
+        SquadEntity squad = BattleManager.Instance.SquadManager.GetSquad(squadId);
+        EntityManager entityManager = World.DefaultGameObjectInjectionWorld.EntityManager;
+        // A broken squad is already leaving the field and cannot be targeted.
+        if(squad.SelfEntity == Entity.Null ||
+            !entityManager.Exists(squad.SelfEntity) ||
+            !entityManager.HasComponent<SquadMovementComponent>(squad.SelfEntity) ||
+            entityManager.HasComponent<BrokenSquadTag>(squad.SelfEntity)) return false;
+
+        spellCursorOrigin = entityManager.GetComponentData<SquadMovementComponent>(squad.SelfEntity).SquadCenter;
+        if(spell.SpellTargetingType == SpellTargetingType.Squad) targetedSquadSelfEntity = squad.SelfEntity;
+        return true;
     }
     // Where the armed mage stands and whether the cursor point is past its reach. A mage that stopped
     // existing mid-aim (killed, or spent and converted) drops the arm.
@@ -1391,7 +1545,7 @@ public class SpellManager : MonoBehaviour
         ArmedMageOutOfRange = Vector3.Distance(ArmedMageCenter, spellCursorOrigin) > ArmedMageRange;
     }
     // Cursor and the label above the unit cards. Runs every frame in cast mode; only writes on a change.
-    private void UpdateTargetingFeedback(SpellData spell, bool valid)
+    private void UpdateTargetingFeedback(SpellData spell, bool valid, bool overSquad)
     {
         Texture2D cursor = valid ? validTargetCursor : invalidTargetCursor;
         if(cursor != activeCursor) {
@@ -1402,7 +1556,7 @@ public class SpellManager : MonoBehaviour
         // colour, not the hint, says the mage will walk first.
         // "Invalid target" in red only once the cursor is on a squad the spell cannot take; until then the
         // hint just says what to click, so a freshly armed friendly spell does not open on an error.
-        bool overWrongSquad = !valid && BattleManager.Instance.UIManager.HoveredSquadId != 0;
+        bool overWrongSquad = !valid && overSquad;
         if(targetHintSpell == spell && targetHintValid == valid && targetHintOverSquad == overWrongSquad) return;
         targetHintSpell = spell;
         targetHintValid = valid;
@@ -1519,8 +1673,10 @@ public class SpellManager : MonoBehaviour
         }
         ActiveSpell spellInstance = SpawnActiveSpell(position);
         if(spellInstance == null) return;
+        // TargetTeam is authored from the caster's side, so anything but Player hits the player's army.
+        bool warnsPlayer = sourceTeam == Team.Enemy && spellData.TargetTeam != Team.Player;
         spellInstance.Load(spellData, position, targetSquadEntity, sourceTeam, sourceSquadId,
-                           _potency: potency, _radiusScale: radiusScale);
+                           _potency: potency, _radiusScale: radiusScale, _warned: warnsPlayer);
         if(sourceTeam == Team.Player) RecordSpellCast(spellData);
     }
 

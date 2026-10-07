@@ -51,6 +51,8 @@ public class UnitStatsUIContainer : MonoBehaviour
             }
         } else if(unitStats.Count < unitStatUI.Count) {
             for(int i = unitStatUI.Count - 1; i >= unitStats.Count; i--) {
+                // Destroy waits for frame end; inactive, a second Load this frame cannot pick the row back up.
+                unitStatUI[i].gameObject.SetActive(false);
                 Destroy(unitStatUI[i].gameObject);
                 unitStatUI.RemoveAt(i);
             }

@@ -28,7 +28,7 @@ public partial struct DamageDealtListenerSystem : ISystem
             damagePerSquad[element.SquadId] = current + element.DamageAmount;
 
             if (hasTotals && element.Credited > 0)
-                AddToTotal(totals, element.SquadId, element.Credited);
+                AddToTotal(totals, element.SquadId, element.Credited, element.Value);
         }
 
         // Now apply totals to SquadDamageComponent entities
@@ -50,14 +50,15 @@ public partial struct DamageDealtListenerSystem : ISystem
         damagePerSquad.Dispose();
     }
 
-    private static void AddToTotal(DynamicBuffer<SquadDamageTotalElement> totals, int squadId, int amount)
+    private static void AddToTotal(DynamicBuffer<SquadDamageTotalElement> totals, int squadId, int amount, float value)
     {
         for (int i = 0; i < totals.Length; i++)
         {
             if (totals[i].SquadId != squadId) continue;
             totals.ElementAt(i).Total += amount;
+            totals.ElementAt(i).Value += value;
             return;
         }
-        totals.Add(new SquadDamageTotalElement { SquadId = squadId, Total = amount });
+        totals.Add(new SquadDamageTotalElement { SquadId = squadId, Total = amount, Value = value });
     }
 }

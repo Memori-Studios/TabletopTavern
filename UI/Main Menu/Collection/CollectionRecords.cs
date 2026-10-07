@@ -9,6 +9,8 @@ using Memori.SaveData;
 using Memori.Steamworks;
 using Memori.Tooltip;
 using Memori.UI;
+using TabletopTavern.Leaderboards;
+using TJ.Settings;
 using TJ.Spells;
 using TMPro;
 using UnityEngine;
@@ -92,6 +94,9 @@ namespace TJ.MainMenu
         [SerializeField] private GameObject boardFilterSlot;
         [SerializeField] private CollectionTab godkingTab;
         [SerializeField] private CollectionTab deepestTab;
+        // Picks the Godking board: every hero together, or one hero's board.
+        [SerializeField] private SettingStepper heroPicker;
+        [SerializeField] private GameObject heroPickerRow;
         [SerializeField] private RecordsFilterToggle filter;
         [SerializeField] private TMP_Text boardSubtitle;
         [SerializeField] private TMP_Text rankColumn;
@@ -150,6 +155,9 @@ namespace TJ.MainMenu
 
         private Board _board = Board.Godking;
         private bool _friends;
+        // 0 is the board for every hero together; otherwise the hero whose board is shown.
+        private int _heroId;
+        private readonly List<int> _pickerHeroes = new();
         // Bumped on every board fetch and on hide, so a late Steam reply for an old view is dropped.
         private int _serial;
 
@@ -175,6 +183,11 @@ namespace TJ.MainMenu
                 _ = RefreshBoard();
             };
             filter.Show(false);
+            heroPicker.onValueChanged.AddListener(index =>
+            {
+                _heroId = index > 0 && index <= _pickerHeroes.Count ? _pickerHeroes[index - 1] : 0;
+                _ = RefreshBoard();
+            });
             Localize();
             Hide();
         }
@@ -495,7 +508,8 @@ namespace TJ.MainMenu
             cardLine.text = $"{RecordsFormat.Difficulty(run.difficulty)}  <color=#8E9A9A>·</color>  " +
                             $"<color={RecordsFormat.OutcomeColour(run.outcome)}>{RecordsFormat.Outcome(run.outcome)}</color>";
 
-            cardValues[0].text = MemoriUI.ConvertNumberToRomanNumeral(Mathf.Max(1, run.actReached));
+            // The March has no acts of its own: a run that marched on finished act III, and its battles are in the count beside it.
+            cardValues[0].text = MemoriUI.ConvertNumberToRomanNumeral(Mathf.Clamp(run.actReached, 1, TabletopTavernConstants.FINAL_STORY_ACT));
             cardValues[1].text = RecordsFormat.Time(run.playTimeSeconds);
             cardValues[2].text = run.battlesFought.ToString("N0", CultureInfo.CurrentCulture);
             cardValues[3].text = run.enemiesSlain.ToString("N0", CultureInfo.CurrentCulture);
@@ -605,10 +619,10 @@ namespace TJ.MainMenu
             ClearBoard();
 
             bool depth = _board == Board.Deepest;
-            string boardName = depth ? SteamLeaderboards.DEEPEST_MARCH_BOARD : SteamLeaderboards.GODKING_TIME_BOARD;
             Func<int, string> format = depth ? RecordsFormat.Depth : score => RecordsFormat.Time(score);
             godkingTab.SetActive(!depth);
             deepestTab.SetActive(depth);
+            heroPickerRow.SetActive(!depth);
             filter.Show(_friends);
             boardSubtitle.text = T(depth ? "LeaderboardSubtitleDeepest" : "LeaderboardSubtitle");
             nameColumn.text = T("RecordsCommander");
@@ -626,6 +640,24 @@ namespace TJ.MainMenu
             }
             SetStatus(T("LeaderboardLoading"));
 
+            // The server names this season's boards; Steam holds the scores.
+            LeaderboardSeason season = await LeaderboardClient.GetBoardsAsync();
+            if (serial != _serial || this == null) return;
+            if (season == null)
+            {
+                SetStatus(T("LeaderboardServerOffline"));
+                return;
+            }
+            FillHeroPicker(season);
+            string boardName = depth ? season.MarchBoard : _heroId == 0 ? season.AllHeroesBoard : season.HeroBoard(_heroId);
+            if (string.IsNullOrEmpty(boardName))
+            {
+                SetStatus(T("LeaderboardNotOpen"));
+                return;
+            }
+            // The board for every hero names the hero on each row.
+            bool showHero = !depth && _heroId == 0;
+
             if (_friends)
             {
                 List<LeaderboardRowData> friends = await SteamLeaderboards.GetFriends(boardName);
@@ -638,7 +670,7 @@ namespace TJ.MainMenu
                 }
                 SetStatus(null);
                 for (int i = 0; i < friends.Count; i++)
-                    SpawnRow(i + 1, friends[i], format, $"#{friends[i].Rank:N0}");
+                    SpawnRow(i + 1, friends[i], format, $"#{friends[i].Rank:N0}", showHero);
                 int mine = friends.FindIndex(f => f.IsMe);
                 ShowStanding(mine >= 0 ? friends[mine] : null, friends.Count, mine > 0 ? friends[mine - 1] : null, format, depth, mine + 1);
                 return;
@@ -660,14 +692,14 @@ namespace TJ.MainMenu
                 return;
             }
             SetStatus(null);
-            foreach (LeaderboardRowData row in top) SpawnRow(row.Rank, row, format, null);
+            foreach (LeaderboardRowData row in top) SpawnRow(row.Rank, row, format, null, showHero);
             List<LeaderboardRowData> below = around.Where(r => r.Rank > TOP_COUNT).ToList();
             if (below.Count > 0)
             {
                 TMP_Text gap = Instantiate(boardGapTemplate, boardList);
                 gap.gameObject.SetActive(true);
                 _boardItems.Add(gap.gameObject);
-                foreach (LeaderboardRowData row in below) SpawnRow(row.Rank, row, format, null);
+                foreach (LeaderboardRowData row in below) SpawnRow(row.Rank, row, format, null, showHero);
             }
 
             List<LeaderboardRowData> all = top.Concat(below).ToList();
@@ -681,11 +713,31 @@ namespace TJ.MainMenu
             ShowStanding(me >= 0 ? all[me] : null, entries, above, format, depth);
         }
 
-        private void SpawnRow(int place, LeaderboardRowData data, Func<int, string> format, string second)
+        // "All heroes" first, then every hero the server has a board for, in hero order.
+        private void FillHeroPicker(LeaderboardSeason season)
+        {
+            List<int> heroes = season.boards.Where(b => b.kind == "godking" && b.heroId.HasValue).Select(b => b.heroId.Value).OrderBy(id => id).ToList();
+            if (heroes.SequenceEqual(_pickerHeroes) && heroPicker.options.Count == heroes.Count + 1) return;
+            _pickerHeroes.Clear();
+            _pickerHeroes.AddRange(heroes);
+            var options = new List<TMP_Dropdown.OptionData> { new(T("LeaderboardAllHeroes")) };
+            options.AddRange(heroes.Select(id => new TMP_Dropdown.OptionData(HeroName(id))));
+            heroPicker.ClearOptions();
+            heroPicker.AddOptions(options);
+            int index = _pickerHeroes.IndexOf(_heroId);
+            if (index < 0) _heroId = 0;
+            heroPicker.SetValueWithoutNotify(index < 0 ? 0 : index + 1);
+        }
+
+        private static string HeroName(int heroId) => T(HeroData.GetHeroByID(heroId).HeroName);
+
+        private void SpawnRow(int place, LeaderboardRowData data, Func<int, string> format, string second, bool showHero)
         {
             RecordsBoardRow row = Instantiate(boardRowTemplate, boardList);
             row.gameObject.SetActive(true);
-            row.Set(place, data.PlayerName, format(data.Score), data.IsMe, _boardItems.Count % 2 == 0, second);
+            LeaderboardEntryDetails details = LeaderboardEntryDetails.Decode(data.Details);
+            string shownName = showHero && details.Valid ? $"{data.PlayerName}  <color={ColorData.Secondary}>{HeroName(details.HeroId)}</color>" : data.PlayerName;
+            row.Set(place, shownName, format(data.Score), data.IsMe, _boardItems.Count % 2 == 0, second);
             _boardItems.Add(row.gameObject);
         }
 
@@ -728,8 +780,9 @@ namespace TJ.MainMenu
 
             List<RunRecord> runs = SaveDataHandler.GetRunHistory();
             List<RunRecord> picks = depth
-                ? runs.Where(r => r.actReached > 3).OrderByDescending(r => r.actReached).ThenByDescending(r => DifficultyRules.Rank(r.difficulty)).Take(SUMMARY_COUNT).ToList()
-                : runs.Where(r => r.outcome == RunOutcome.Win && DifficultyRules.IsHardest(r.difficulty)).OrderBy(r => r.playTimeSeconds).Take(SUMMARY_COUNT).ToList();
+                ? runs.Where(r => r.marchBattles > 0).OrderByDescending(r => r.marchBattles).ThenByDescending(r => DifficultyRules.Rank(r.difficulty)).Take(SUMMARY_COUNT).ToList()
+                : runs.Where(r => r.outcome == RunOutcome.Win && DifficultyRules.IsHardest(r.difficulty) && (_heroId == 0 || r.heroID == _heroId))
+                    .OrderBy(r => r.playTimeSeconds).Take(SUMMARY_COUNT).ToList();
 
             yoursGroup.SetActive(picks.Count > 0);
             yoursLabel.text = T(depth ? "LeaderboardYourMarches" : "LeaderboardYourGodkingWins");
@@ -738,7 +791,7 @@ namespace TJ.MainMenu
                 RunRecord run = picks[i];
                 string heroName = T(HeroData.GetHeroByID(run.heroID).HeroName);
                 string score = depth
-                    ? $"{string.Format(T("RunHistoryActReached"), MemoriUI.ConvertNumberToRomanNumeral(run.actReached))} · {RecordsFormat.Difficulty(run.difficulty)}"
+                    ? $"{string.Format(T("RunHistoryMarchBattles"), run.marchBattles)} · {RecordsFormat.Difficulty(run.difficulty)}"
                     : RecordsFormat.Time(run.playTimeSeconds);
                 RecordsBoardRow row = Instantiate(boardRowTemplate, yoursList);
                 row.gameObject.SetActive(true);

@@ -36,17 +36,22 @@ partial struct SetDestinationDebugSystem : ISystem
 [UpdateInGroup(typeof(SimulationSystemGroup), OrderFirst = true)]
 partial struct SetDestinationSystem : ISystem
 {
+    private ComponentLookup<MoveOverride> moveOverrideLookup;
+
     [BurstCompile]
     public void OnCreate(ref SystemState state)
     {
+        moveOverrideLookup = state.GetComponentLookup<MoveOverride>(true);
         state.RequireForUpdate<BattleHasStarted>();
     }
     [BurstCompile]
     public void OnUpdate(ref SystemState state)
     {
+        moveOverrideLookup.Update(ref state);
 
         SetDestinationJob setDestinationJob = new () {
             DeltaTime = SystemAPI.Time.DeltaTime,
+            MoveOverrideLookup = moveOverrideLookup,
         };
 
         state.Dependency = setDestinationJob.Schedule(state.Dependency);
@@ -85,6 +90,7 @@ public partial struct SetDestinationToDebugJob : IJobEntity
 // [WithAbsent(typeof(InCombat))]
 public partial struct SetDestinationJob : IJobEntity {
     [ReadOnly] public float DeltaTime;
+    [ReadOnly] public ComponentLookup<MoveOverride> MoveOverrideLookup;
     public void Execute (ref SetDestination setDestination, ref LocalTransform localTransform, ref AgentBody agentBody, Entity entity)
     {
         if(!agentBody.IsStopped) {
@@ -102,6 +108,28 @@ public partial struct SetDestinationJob : IJobEntity {
         if(setDestination.delayRemaining > 0) {
             setDestination.delayRemaining -= DeltaTime;
             return;
+        }
+
+        if(setDestination.turnTimeLeft > 0) {
+            // Only a standing unit under a Move order turns first; an attack or a unit already walking goes at once.
+            if(agentBody.IsStopped && MoveOverrideLookup.HasComponent(entity) && MoveOverrideLookup.IsComponentEnabled(entity)) {
+                float3 forward = math.forward(localTransform.Rotation);
+                float yaw = math.atan2(forward.x, forward.z);
+                float delta = math.atan2(setDestination.turnDirection.x, setDestination.turnDirection.y) - yaw;
+                delta -= 2f * math.PI * math.floor((delta + math.PI) / (2f * math.PI));
+
+                bool turnNotStarted = setDestination.turnTimeLeft >= TabletopTavernConstants.MARCH_TURN_TIMEOUT;
+                float stopAngle = math.radians(turnNotStarted
+                    ? TabletopTavernConstants.MARCH_TURN_MIN_ANGLE
+                    : TabletopTavernConstants.MARCH_TURN_DONE_ANGLE);
+                if(math.abs(delta) > stopAngle) {
+                    float maxStep = math.radians(TabletopTavernConstants.MARCH_TURN_RATE) * DeltaTime;
+                    localTransform.Rotation = quaternion.RotateY(yaw + math.clamp(delta, -maxStep, maxStep));
+                    setDestination.turnTimeLeft -= DeltaTime;
+                    return;
+                }
+            }
+            setDestination.turnTimeLeft = 0;
         }
 
         agentBody.SetDestination(setDestination.destinationPosition);

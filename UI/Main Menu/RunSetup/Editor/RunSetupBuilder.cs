@@ -34,7 +34,6 @@ namespace TJ.RunSetup.EditorTools
         const string BasicBackgroundPath = "Assets/Data/Prefabs/UI/Reuseable/Basic Background.prefab";
         const string GearTilePath = "Assets/Data/Prefabs/UI/Menu/Warband Gear Tile.prefab";
         const string SheetPath = "Assets/Scripts/Memori.Tooltip/Art/TooltipSheet.png";
-        const string CrestFolder = "Assets/Synty/InterfaceFantasyMenus/Sprites/Crests/";
         const string TableName = "MainLocalizationTable";
 
         const float SideWidth = 600f;
@@ -59,8 +58,6 @@ namespace TJ.RunSetup.EditorTools
         static readonly Color Flavour = Hex("A99F8A");
         static readonly Color Cap = Hex("8C9AA2");
         static readonly Color Hair = Hex("8C9AA2", 0.3f);
-        static readonly Color Edge = Hex("3A4E5C");
-        static readonly Color Well = Hex("08100F", 0.32f);
         static readonly Color TileFill = Hex("1C2A30");
         static readonly Color Dim = Hex("4A5C66");
         static readonly Color Error = Hex("E8A15F");
@@ -246,7 +243,7 @@ namespace TJ.RunSetup.EditorTools
         static void ResetPartsMenu()
         {
             if (!EditorUtility.DisplayDialog("Reset run setup parts",
-                    $"The part prefabs in {PartFolder} are rebuilt from code, which discards your edits to them. The screens are rebuilt after.",
+                    $"The Warband Army Tile in {PartFolder} is rebuilt from code, which discards your edits to it. The Hero Roster Tile is kept. The screens are rebuilt after.",
                     "Reset", "Cancel"))
                 return;
             ResetParts();
@@ -663,7 +660,8 @@ namespace TJ.RunSetup.EditorTools
         static void EnsureParts(bool overwrite)
         {
             if (!AssetDatabase.IsValidFolder(PartFolder)) AssetDatabase.CreateFolder("Assets/Data/Prefabs/UI/Menu", "Run Setup");
-            tilePart = overwrite ? null : AssetDatabase.LoadAssetAtPath<GameObject>(TilePath);
+            // The hero tile is styled by hand in its prefab, so a reset never replaces it; code only creates it when missing.
+            tilePart = AssetDatabase.LoadAssetAtPath<GameObject>(TilePath);
             if (tilePart == null) tilePart = SavePart(TilePath, "Hero Roster Tile", RosterTilePart);
             armyTilePart = overwrite ? null : AssetDatabase.LoadAssetAtPath<GameObject>(ArmyTilePath);
             if (armyTilePart == null) armyTilePart = SavePart(ArmyTilePath, "Warband Army Tile", ArmyTilePart);
@@ -764,7 +762,7 @@ namespace TJ.RunSetup.EditorTools
             so.ApplyModifiedPropertiesWithoutUndo();
         }
 
-        // One squad in the starting army: portrait in a rarity frame, squad size chip, name under it.
+        // One squad in the starting army: portrait in a rarity frame, name under it.
         static void ArmyTilePart(GameObject go)
         {
             RectTransform tile = (RectTransform)go.transform;
@@ -784,17 +782,6 @@ namespace TJ.RunSetup.EditorTools
             frame.fillCenter = false;
             frame.pixelsPerUnitMultiplier = 0.5f;
 
-            RectTransform chip = Rect("Size", square);
-            Anchor(chip, Vector2.zero, Vector2.zero, new Vector2(3f, 3f), new Vector2(33f, 20f));
-            Img(chip, solid, Hex("7BD66F"));
-            TMP_Text size = Text("Text", chip, displayDrop, 13f, Hex("0E1518"), "84");
-            size.alignment = TextAlignmentOptions.Center;
-            size.enableAutoSizing = true;
-            size.fontSizeMin = 9f;
-            size.fontSizeMax = 13f;
-            Stretch(size.rectTransform);
-            CentreInk(size);
-
             TMP_Text name = Text("Name", tile, displayDrop, 13f, Cream, "Unit Name");
             name.alignment = TextAlignmentOptions.Top;
             Wrap(name);
@@ -808,7 +795,6 @@ namespace TJ.RunSetup.EditorTools
             var so = new SerializedObject(component);
             Ref(so, "portrait", portrait);
             Ref(so, "frame", frame);
-            Ref(so, "sizeText", size);
             Ref(so, "nameText", name);
             so.ApplyModifiedPropertiesWithoutUndo();
         }
@@ -854,15 +840,12 @@ namespace TJ.RunSetup.EditorTools
             TMP_Text title = Text("Title", head, displayDrop, 30f, Gold, "Select Hero");
             Localize(title, "Select Hero");
             Flexible(title.gameObject, 1f).preferredWidth = 0f;
-            TMP_Text count = Text("Count", head, display, 15f, Flavour, "16 heroes · 8 factions");
-            count.alignment = TextAlignmentOptions.BottomRight;
-            Unlocalize(count, "16 heroes · 8 factions");
-            Ref(so, "rosterCountText", count);
             BrassRule(panel, 12f, 14f);
 
             RectTransform grid = Rect("Factions", panel);
             GridLayoutGroup layout = grid.gameObject.AddComponent<GridLayoutGroup>();
-            layout.cellSize = new Vector2(266f, 16f + 8f + TileHeight);
+            // The extra 21 px is room for the gem row that hangs under each tile.
+            layout.cellSize = new Vector2(266f, 16f + 8f + TileHeight + 21f);
             layout.spacing = new Vector2(20f, 16f);
             layout.constraint = GridLayoutGroup.Constraint.FixedColumnCount;
             layout.constraintCount = 2;
@@ -901,6 +884,7 @@ namespace TJ.RunSetup.EditorTools
             soonText.fontStyle = FontStyles.Italic;
             Unlocalize(soonText, "Olympian Phalanx and one more faction are on the way.");
             Ref(so, "comingSoonText", soonText);
+            soon.gameObject.SetActive(false);
         }
 
         static void BuildHeroPanel(RectTransform panel, SerializedObject so)
@@ -1474,11 +1458,13 @@ namespace TJ.RunSetup.EditorTools
             RectTransform card = Rect(name + " Card", parent);
             HLayout(card, 14f, TextAnchor.MiddleLeft, new RectOffset(10, 12, 10, 10));
             Flexible(card.gameObject, 1f).preferredWidth = 0f;
-            Image fill = Img(card, solid, Well);
-            fill.raycastTarget = true;
-            Image edge = Img(Stretch(Rect("Edge", card)), squareSliced, Edge, Image.Type.Sliced);
-            edge.fillCenter = false;
-            Ignore(edge.gameObject);
+            // The shared panel background with only its fill and frame showing.
+            GameObject background = Instance(basicBackground, card, "Basic Background");
+            Stretch((RectTransform)background.transform);
+            Ignore(background);
+            Child<RectTransform>(background.transform, "corners").gameObject.SetActive(false);
+            Child<RectTransform>(background.transform, "Texture").gameObject.SetActive(false);
+            Child<Image>(background.transform, "frame").pixelsPerUnitMultiplier = 12f;
             square = Rect("Square", card);
             Fixed(square.gameObject, 48f, 48f);
             RectTransform texts = Rect("Texts", card);
@@ -1506,7 +1492,7 @@ namespace TJ.RunSetup.EditorTools
             Step(steps, "1", "Leader", active == 1);
             Image line = Img(Rect("Line", steps), solid, Hex("5A6A72"));
             Fixed(line.gameObject, 26f, 1f);
-            Step(steps, "2", "Warband", active == 2);
+            Step(steps, "2", "RunHistoryArmy", active == 2);
         }
 
         static void Step(RectTransform parent, string number, string key, bool on)
@@ -1631,80 +1617,29 @@ namespace TJ.RunSetup.EditorTools
         }
 
         #region Crests
-        // One layer of a difficulty crest, placed the way the crest prefabs place it: pixel size and position in a 1200 box.
-        readonly struct Layer
+        // The shared difficulty crest prefabs, Squire to Godking, which the difficulty picker shows too.
+        static readonly string[] CrestPaths =
         {
-            public readonly string sprite;
-            public readonly Color tint;
-            public readonly Vector2 position;
-            public readonly Vector2 size;
-            public readonly Vector2 pivot;
-
-            public Layer(string sprite, string tint, float x, float y, float w, float h, float pivotY = 0.5f, float alpha = 1f)
-            {
-                this.sprite = sprite;
-                this.tint = Hex(tint, alpha);
-                position = new Vector2(x, y);
-                size = new Vector2(w, h);
-                pivot = new Vector2(0.5f, pivotY);
-            }
-        }
-
-        static Layer[] Metal(string tint, string gem, bool gold)
-        {
-            return new[]
-            {
-                new Layer(gold ? "SPR_FantasyMenus_Crest_Wings_01_Gold" : "SPR_FantasyMenus_Crest_Wings_01_Greyscale", gold ? "FFFFFF" : tint, 0f, 94f, 1138f, 569f),
-                new Layer(gold ? "SPR_FantasyMenus_Crest_Shield_02_Gold" : "SPR_FantasyMenus_Crest_Shield_02_Greyscale", gold ? "FFFFFF" : tint, 0f, -23f, 648f, 648f),
-                new Layer(gold ? "SPR_FantasyMenus_Crest_Gem_Housing_01_Gold" : "SPR_FantasyMenus_Crest_Gem_Housing_01_Grey", gold ? "FFFFFF" : tint, 0f, 0f, 240f, 240f),
-                new Layer(gem, "FFFFFF", 0f, 0f, 136f, 136f),
-            };
-        }
-
-        static readonly Layer[] Godking =
-        {
-            new Layer("SPR_FantasyMenus_Crest_Greeble_Dragontail_01_Greyscale", "4B4B4B", 0f, -293f, 800f, 800f, 1f),
-            new Layer("SPR_FantasyMenus_Crest_Wings_03_Greyscale", "4B4B4B", 0f, -283f, 2322f, 1080f, 0f),
-            new Layer("SPR_FantasyMenus_Crest_Greeble_Dragonhead_02_Greyscale", "878080", 0f, -10f, 1650f, 800f, 0f),
-            new Layer("SPR_FantasyMenus_Crest_Shield_01_Greyscale", "736F6F", 0f, -97f, 800f, 850f),
-            new Layer("SPR_FantasyMenus_Crest_Brackets_03_Greyscale", "787878", 0f, -170f, 900f, 1000f, 0f),
-            new Layer("SPR_FantasyMenus_Crest_Shield_02_Greyscale", "9F9F9F", 0f, -97f, 700f, 700f),
+            "Assets/Data/Prefabs/UI/Menu/Difficulty Crest Bronze.prefab",
+            "Assets/Data/Prefabs/UI/Menu/Difficulty Crest Silver.prefab",
+            "Assets/Data/Prefabs/UI/Menu/Difficulty Crest Gold.prefab",
+            "Assets/Data/Prefabs/UI/Menu/Difficulty Crest Godking.prefab",
         };
 
-        // Builds a level's crest from the same sprites and tints as the difficulty crests, scaled to a width.
+        // A level's crest, scaled from the picker's size to the record slot's width.
         static void Crest(RectTransform parent, int rank, float width)
         {
-            Layer[] layers = rank switch
-            {
-                0 => Metal("BA7848", "SPR_FantasyMenus_Crest_Gem_08_Green", false),
-                1 => Metal("CED6E2", "SPR_FantasyMenus_Crest_Gem_08_Blue", false),
-                2 => Metal("FFFFFF", "SPR_FantasyMenus_Crest_Gem_08_Red", true),
-                _ => Godking,
-            };
-            float artWidth = rank < 3 ? 1138f : 1900f;
-            float centreY = rank < 3 ? 15f : 150f;
-            RectTransform art = Rect("Art", parent);
-            art.anchorMin = art.anchorMax = new Vector2(0.5f, 0.5f);
-            art.sizeDelta = new Vector2(1200f, 1200f);
-            float scale = width / artWidth;
-            art.localScale = new Vector3(scale, scale, 1f);
-            art.anchoredPosition = new Vector2(0f, -centreY * scale);
-            if (rank == 3)
-            {
-                Sprite glowSprite = Load<Sprite>("Assets/Synty/InterfaceFantasyMenus/Sprites/General/SPR_FantasyMenus_FX_Glow_01.png");
-                Image glow = Img(Rect("Glow", art), glowSprite, Hex("FF4236", 0.16f));
-                glow.rectTransform.sizeDelta = new Vector2(1300f, 1300f);
-                glow.rectTransform.anchoredPosition = new Vector2(0f, -140f);
-            }
-            foreach (Layer layer in layers)
-            {
-                Sprite sprite = Load<Sprite>(CrestFolder + layer.sprite + ".png");
-                Image image = Img(Rect(layer.sprite.Replace("SPR_FantasyMenus_Crest_", ""), art), sprite, layer.tint);
-                RectTransform rect = image.rectTransform;
-                rect.pivot = layer.pivot;
-                rect.sizeDelta = layer.size;
-                rect.anchoredPosition = layer.position;
-            }
+            GameObject crestPrefab = Load<GameObject>(CrestPaths[rank]);
+            GameObject crest = Instance(crestPrefab, parent, crestPrefab.name);
+            crest.SetActive(true);
+            RectTransform rect = (RectTransform)crest.transform;
+            rect.anchorMin = rect.anchorMax = new Vector2(0.5f, 0.5f);
+            // The metal crests' art is at most 1130 x 830 units around y 13, which fits the slot's 62 px height; Godking's
+            // dragon wings span about 1900 units around y -150.
+            bool godking = rank == CrestPaths.Length - 1;
+            float scale = width / (godking ? 1900f : 1280f);
+            rect.localScale = new Vector3(scale, scale, 1f);
+            rect.anchoredPosition = new Vector2(0f, (godking ? -150f : -13f) * scale);
         }
         #endregion
 

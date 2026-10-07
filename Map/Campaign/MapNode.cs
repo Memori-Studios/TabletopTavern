@@ -47,6 +47,13 @@ namespace TJ.Map
         [SerializeField] private MMF_Player mouseOverWeatherMMF_Player, mouseOffWeatherMMF_Player;
         [SerializeField] private MMF_Player mouseOverBiomeMMF_Player, mouseOffBiomeMMF_Player;
 
+        [Header("March Twist Label")]
+        // Always shown over a March node so the whole road's Twists read at a glance.
+        [SerializeField] private Transform twistLabelCanvas;
+        [SerializeField] private TMP_Text twistLabelText;
+        // The March guide points at a node's Twist label; null when the node shows none.
+        public Transform TwistLabel => twistLabelCanvas != null && twistLabelCanvas.gameObject.activeInHierarchy ? twistLabelText.transform : null;
+
         [Header("Town Stuff")]
         [SerializeField] private Transform townTextCanvas;
         [SerializeField] private Shader alwaysOnTopFontShader; // TextMeshPro/Distance Field Overlay
@@ -68,6 +75,9 @@ namespace TJ.Map
         Race _race;
         Weather _weather;
         Biome _biome;
+        // On the March the node is a rogue host: its faction is _race and these are its Twists.
+        bool _marchNode;
+        List<OrdealId> _twists = new();
         private void Awake()
         {
             boxCollider = GetComponent<BoxCollider>();
@@ -81,6 +91,7 @@ namespace TJ.Map
             ApplyAlwaysOnTop(townTextCanvas);
             ApplyAlwaysOnTop(weatherFlagText);
             ApplyAlwaysOnTop(biomeFlagText);
+            ApplyAlwaysOnTop(twistLabelCanvas);
         }
         private void Start()
         {
@@ -97,6 +108,7 @@ namespace TJ.Map
             townGameObject.SetActive(false);
             if (tavernGameObject != null) tavernGameObject.SetActive(false);
             if (campfireGameObject != null) campfireGameObject.SetActive(false);
+            if (twistLabelCanvas != null) twistLabelCanvas.gameObject.SetActive(false);
             SetLayerOutline(false);
         }
         public void SetUp(MapNodeData mapNodeData, Camera _camera, bool _surprise, Race race)
@@ -114,8 +126,17 @@ namespace TJ.Map
                 MapRegion mapRegion = MapThemeManager.Instance.GetMapRegion(_race);
                 int campaignSeed = CampaignManager.Instance.CampaignSaveManager.SaveData.seed;
                 int bookNum = CampaignManager.Instance.CampaignSaveManager.SaveData.bookNumber;
-                _weather = CampaignSaveManager.GenerateNodeWeather(_mapNodeData.index, campaignSeed, bookNum, mapRegion, CampaignManager.Instance.CampaignSaveManager.SaveData.ordealWeather);
+                Memori.SaveData.CampaignSaveData run = CampaignManager.Instance.CampaignSaveManager.SaveData;
+                _weather = CampaignSaveManager.GenerateNodeWeather(_mapNodeData.index, campaignSeed, bookNum, mapRegion, run.ordealWeather);
                 _biome = CampaignSaveManager.GenerateNodeBiome(_mapNodeData.index, campaignSeed, bookNum, mapRegion);
+                _marchNode = run.InMarch;
+                if (_marchNode)
+                {
+                    _twists = MarchRules.Twists(run, _mapNodeData.layer, _mapNodeData.index);
+                    // The same rule the engagement screen applies, so the flag never shows a weather the battle will not have.
+                    if (_twists.Contains(OrdealId.FoulWeather) && run.ordealWeather == Weather.ClearSkies)
+                        _weather = MarchRules.FoulWeather(campaignSeed, bookNum, _mapNodeData.index);
+                }
             }
             if (surprise)
             {
@@ -148,6 +169,8 @@ namespace TJ.Map
 
             RegisterText(manager, weatherFlagText);
             RegisterText(manager, biomeFlagText);
+            if (twistLabelCanvas != null && twistLabelCanvas.gameObject.activeSelf)
+                manager.Register(twistLabelCanvas, lockY: false);
         }
 
         private static void RegisterText(MapNodeFacingManager manager, TMP_Text text)
@@ -252,7 +275,18 @@ namespace TJ.Map
                     SetMiniSkirmishBiome(GetBiomeSprite(_biome));
                     biomeFlagText.text = LocalizationManager.Instance.GetText(_biome.ToString());
                 }
+                ShowTwistLabel();
             }
+        }
+        private void ShowTwistLabel()
+        {
+            if (twistLabelCanvas == null) return;
+            bool show = _marchNode && _twists.Count > 0;
+            twistLabelCanvas.gameObject.SetActive(show);
+            if (!show) return;
+            List<string> names = new();
+            foreach (OrdealId twist in _twists) names.Add(LocalizationManager.Instance.GetText(OrdealRegistry.Get(twist).NameKey));
+            twistLabelText.text = string.Join("\n", names);
         }
         private Sprite GetWeatherSprite(Weather weather) => weather switch
         {
@@ -312,7 +346,9 @@ namespace TJ.Map
         public void HoverNode(bool _hover)
         {
             if(!surprise && NodeLeadsToBattle(_mapNodeData.type)) {
-                CampaignManager.Instance.MapSceneUIManager.HUDPanel.ShowWeatherHover(_weather, _hover);
+                HUDPanel hud = CampaignManager.Instance.MapSceneUIManager.HUDPanel;
+                hud.ShowWeatherHover(_weather, _hover);
+                if (_marchNode) hud.ShowRogueHostHover(_race, _mapNodeData.type == NodeType.Horde, _twists, _hover);
             }
             if(completed) return;
 
@@ -367,6 +403,12 @@ namespace TJ.Map
             for(int i = 0; i < _mapNodeData.connectedNodeLines.Count; i++) {
                 SetLineColor(i, passedColor);
             }
+            HideTwistLabel();
+        }
+        // A Twist only matters on a node still ahead.
+        private void HideTwistLabel()
+        {
+            if (twistLabelCanvas != null) twistLabelCanvas.gameObject.SetActive(false);
         }
         public void ShowCompleted(List<int> completedPath, bool activeLayer)
         {
@@ -399,6 +441,7 @@ namespace TJ.Map
                 }
             }
             UpdateIcon();
+            HideTwistLabel();
         }
         public void ResetNode()
         {
@@ -507,6 +550,7 @@ namespace TJ.Map
                 manager.Unregister(townFlag.transform);
                 manager.Unregister(hordeFlag.transform);
                 manager.Unregister(townTextCanvas);
+                if (twistLabelCanvas != null) manager.Unregister(twistLabelCanvas);
             }
             if (_biomeMaterial != null) Destroy(_biomeMaterial);
             if (_weatherMaterial != null) Destroy(_weatherMaterial);

@@ -25,7 +25,14 @@ namespace TJ
         public const string ModListFileName = "modlist.json";
         public const string ModManifestFileName = "mod.json";
 
-        public static string ModsRootPath => Path.Combine(Application.persistentDataPath, ModsFolderName);
+        private static string _modsRootOverride;
+        public static string ModsRootPath => _modsRootOverride ?? Path.Combine(Application.persistentDataPath, ModsFolderName);
+
+        /// <summary>Tests and harnesses point the mod folder away from the player's real mods. Null restores the default.</summary>
+        public static void SetModsRoot(string root)
+        {
+            _modsRootOverride = string.IsNullOrEmpty(root) ? null : root;
+        }
 
         // Folder names actually applied by TabletopTavernData.ApplyModOverrides() at boot, frozen
         // for the session. Enable/reorder edits made afterward in the mod list UI change

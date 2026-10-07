@@ -37,6 +37,9 @@ namespace TJ.Prestige
             UnitAttribute.Quickcast => "SpellStatCooldown",
             UnitAttribute.SwiftStride => "Speed",
             UnitAttribute.ProjectileWard => "Armor",
+            UnitAttribute.ThickScales => "Armor",
+            UnitAttribute.Ethereal => "Armor",
+            UnitAttribute.ForestDweller => "MeleeAttack",
             UnitAttribute.SpellWard => "Mana",
             _ => FALLBACK,
         };

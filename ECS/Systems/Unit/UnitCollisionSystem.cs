@@ -22,6 +22,7 @@ partial struct UnitCollisionSystem : ISystem
     ComponentLookup<RetreatingUnit>    m_RetreatingLookup;
     ComponentLookup<BracedTag>         m_BracedLookup;
     ComponentLookup<GateCollisionShape> m_GateLookup;
+    ComponentLookup<ChargePenetration> m_PenetrationLookup;
 
     [BurstCompile]
     public void OnCreate(ref SystemState state)
@@ -32,6 +33,7 @@ partial struct UnitCollisionSystem : ISystem
         m_RetreatingLookup = state.GetComponentLookup<RetreatingUnit>(isReadOnly: true);
         m_BracedLookup     = state.GetComponentLookup<BracedTag>(isReadOnly: true);
         m_GateLookup       = state.GetComponentLookup<GateCollisionShape>(isReadOnly: true);
+        m_PenetrationLookup = state.GetComponentLookup<ChargePenetration>(isReadOnly: true);
         state.RequireForUpdate<UnitCollisionBody>();
         state.RequireForUpdate<AgentSpatialPartitioningSystem.Singleton>();
         state.RequireForUpdate<NavMeshQuerySystem.Singleton>();
@@ -46,6 +48,7 @@ partial struct UnitCollisionSystem : ISystem
         m_RetreatingLookup.Update(ref state);
         m_BracedLookup.Update(ref state);
         m_GateLookup.Update(ref state);
+        m_PenetrationLookup.Update(ref state);
 
         var navmesh = SystemAPI.GetSingleton<NavMeshQuerySystem.Singleton>();
 
@@ -64,6 +67,7 @@ partial struct UnitCollisionSystem : ISystem
             RetreatingLookup = m_RetreatingLookup,
             BracedLookup     = m_BracedLookup,
             GateLookup       = m_GateLookup,
+            PenetrationLookup = m_PenetrationLookup,
             DeltaTime        = SystemAPI.Time.DeltaTime,
         }.ScheduleParallel();
 
@@ -85,6 +89,7 @@ partial struct UnitCollisionSystem : ISystem
         [ReadOnly] public ComponentLookup<RetreatingUnit> RetreatingLookup;
         [ReadOnly] public ComponentLookup<BracedTag> BracedLookup;
         [ReadOnly] public ComponentLookup<GateCollisionShape> GateLookup;
+        [ReadOnly] public ComponentLookup<ChargePenetration> PenetrationLookup;
         [ReadOnly] public NativeList<GateData> Gates;
         public float DeltaTime;
 
@@ -122,6 +127,8 @@ partial struct UnitCollisionSystem : ISystem
                 RetreatingLookup = RetreatingLookup,
                 BracedLookup     = BracedLookup,
                 GateLookup       = GateLookup,
+                PenetrationLookup = PenetrationLookup,
+                SelfPenetrating  = IsPenetrating(entity, PenetrationLookup),
             };
 
             Spatial.QueryCylinder(
@@ -173,6 +180,11 @@ partial struct UnitCollisionSystem : ISystem
             return unitState == UnitState.Moving || unitState == UnitState.Spawn;
         }
 
+        static bool IsPenetrating(Entity entity, in ComponentLookup<ChargePenetration> penetrationLookup)
+        {
+            return penetrationLookup.HasComponent(entity) && penetrationLookup.IsComponentEnabled(entity);
+        }
+
         static bool IsBraced(Entity squadEntity, in ComponentLookup<BracedTag> bracedLookup)
         {
             return bracedLookup.HasComponent(squadEntity) && bracedLookup.IsComponentEnabled(squadEntity);
@@ -213,6 +225,7 @@ partial struct UnitCollisionSystem : ISystem
             public bool SelfBraced;
             public float3 SelfVelocity;
             public float2 SelfVelocityXZ;
+            public bool SelfPenetrating;
 
             [ReadOnly] public ComponentLookup<Unit> UnitLookup;
             [ReadOnly] public ComponentLookup<UnitCollisionBody> BodyLookup;
@@ -220,6 +233,7 @@ partial struct UnitCollisionSystem : ISystem
             [ReadOnly] public ComponentLookup<RetreatingUnit> RetreatingLookup;
             [ReadOnly] public ComponentLookup<BracedTag> BracedLookup;
             [ReadOnly] public ComponentLookup<GateCollisionShape> GateLookup;
+            [ReadOnly] public ComponentLookup<ChargePenetration> PenetrationLookup;
 
             public float2 Displacement;
             public bool Contact;
@@ -288,6 +302,12 @@ partial struct UnitCollisionSystem : ISystem
                     float selfMass = EffectiveMass(SelfMass, SelfState, SelfStopped, SelfBraced, friendly);
                     float otherMass = EffectiveMass(otherCollision.Mass, other.unitState, otherBody.IsStopped,
                         IsBraced(other.squadEntity, BracedLookup), friendly);
+                    // A model driving into an enemy line after a landed charge shoves far above its weight.
+                    if (!friendly)
+                    {
+                        if (SelfPenetrating) selfMass *= TabletopTavernConstants.COLLISION_PENETRATION_MULT;
+                        if (IsPenetrating(otherEntity, PenetrationLookup)) otherMass *= TabletopTavernConstants.COLLISION_PENETRATION_MULT;
+                    }
                     share = otherMass / (selfMass + otherMass);
                 }
                 if (share <= 0f) return;

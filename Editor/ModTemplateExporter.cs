@@ -47,6 +47,13 @@ namespace TJ
             File.WriteAllText(Path.Combine(templateFolder, LocalizationOverrideLoader.FileName),
                 LocalizationOverrideLoader.ExportTemplate());
 
+            // Unit models are baked with TJBake, so the template only says where they go.
+            string visualsFolder = Path.Combine(templateFolder, UnitVisualOverrideLoader.FolderName);
+            Directory.CreateDirectory(visualsFolder);
+            File.WriteAllText(Path.Combine(visualsFolder, "README.txt"),
+                "Put one TJBake output folder here per unit, named after the unit (for example HelmwallDefenders).\n"
+                + "Bake them with https://github.com/Memori-Studios/TJBake. The modding guide's unit_visuals section lists the rules.\n");
+
             string modManifestPath = Path.Combine(templateFolder, ModLoadOrder.ModManifestFileName);
             if (!File.Exists(modManifestPath))
             {

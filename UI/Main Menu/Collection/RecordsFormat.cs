@@ -1,4 +1,6 @@
 using System;
+using System.Globalization;
+using TabletopTavern.Leaderboards;
 using Memori.Localization;
 using Memori.SaveData;
 using Memori.UI;
@@ -17,13 +19,20 @@ namespace TJ.MainMenu
                 : $"{span.Minutes}:{span.Seconds:00}";
         }
 
-        /// <summary>A Deepest March score as "Act IV - 7 · Godking": act, chapters finished in it, difficulty.</summary>
+        /// <summary>A March board score as "17 battles · 2,345 slain": battles won on the March, then enemies slain.</summary>
         public static string Depth(int score)
         {
-            DeepestMarchScore.Decode(score, out int act, out int chapters, out TT_Difficulty difficulty);
+            MarchScore.Decode(score, out int battles, out int kills);
+            return string.Format(LocalizationManager.Instance.GetText("LeaderboardBattlesFormat"), battles, kills.ToString("N0", CultureInfo.CurrentCulture));
+        }
+
+        /// <summary>How far a recorded run got: its March battles when it marched on, else the act it reached.</summary>
+        public static string Reached(RunRecord record)
+        {
             LocalizationManager loc = LocalizationManager.Instance;
-            string difficultyName = loc.GetText(DifficultyData.GetDifficultyLevelData(difficulty).difficultyName);
-            return string.Format(loc.GetText("LeaderboardDepthFormat"), MemoriUI.ConvertNumberToRomanNumeral(act), chapters, difficultyName);
+            return record.marchBattles > 0
+                ? string.Format(loc.GetText("RunHistoryMarchBattles"), record.marchBattles)
+                : string.Format(loc.GetText("RunHistoryActReached"), record.actReached);
         }
 
         public static string Outcome(RunOutcome outcome)

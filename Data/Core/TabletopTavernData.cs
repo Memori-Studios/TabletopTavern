@@ -45,6 +45,22 @@ namespace TJ
             EnsureDataLoaded();
         }
 
+        // Core.unity awakes before SceneHandler.Start runs the Workshop sync and the remote balance pick,
+        // so the Awake catalogue is rebuilt once those hooks have finished.
+        [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.BeforeSceneLoad)]
+        private static void RegisterBootReload()
+        {
+            Memori.Scenes.SceneHandler.OnBeforeFirstLoadComplete -= ReloadAfterBootHooks;
+            Memori.Scenes.SceneHandler.OnBeforeFirstLoadComplete += ReloadAfterBootHooks;
+        }
+
+        private static void ReloadAfterBootHooks()
+        {
+            TabletopTavernData data = InstanceIfExists;
+            if (data == null) return;
+            data.ReloadData();
+        }
+
         /// <summary>
         /// Builds the stat, asset and race catalogues once. Awake calls this, but anything that needs
         /// the catalogue outside Play Mode - an editor tool, a test - can call it directly rather than
@@ -62,12 +78,13 @@ namespace TJ
         }
 
         /// <summary>
-        /// Unconditionally rebuilds the catalogue from Resources and re-applies every enabled mod's
-        /// overrides. This is what Awake used to do inline.
+        /// Unconditionally rebuilds the catalogue from Resources, then applies the remote balance stats
+        /// and every enabled mod's overrides, in that order so a mod still wins. This is what Awake used to do inline.
         /// </summary>
         public void ReloadData()
         {
             LoadStatsFromSOs();
+            RemoteBalance.Apply(SquadStatsDictionary, SquadAssetsDictionary, UnitsOfRaceDictionary);
             ApplyModOverrides();
         }
 
@@ -95,6 +112,7 @@ namespace TJ
             RaceBonusRuleData.ClearOverrides();
             WeatherOverrideLoader.ClearOverrides();
             Memori.Localization.LocalizationOverrides.Clear();
+            UnitVisualOverrideLoader.ClearOverrides();
             foreach (string modFolder in modFolders)
             {
                 SquadStatsOverrideLoader.ApplyOverridesFromModFolder(modFolder, SquadStatsDictionary, SquadAssetsDictionary, UnitsOfRaceDictionary, _appliedHeroID);
@@ -105,6 +123,7 @@ namespace TJ
                 RaceBonusOverrideLoader.ApplyOverridesFromModFolder(modFolder);
                 WeatherOverrideLoader.ApplyOverridesFromModFolder(modFolder);
                 LocalizationOverrideLoader.ApplyOverridesFromModFolder(modFolder);
+                UnitVisualOverrideLoader.ApplyOverridesFromModFolder(modFolder, SquadStatsDictionary);
             }
             HeroData.LoadFromResourcesAndOverrides(modFolders);
             HeroBonusManager.LoadRulesFromResourcesAndOverrides(modFolders);
@@ -164,6 +183,9 @@ namespace TJ
         {
             // Load your static file (example: assume JSON deserialization to SquadStats[])
             // SquadStats[] allStats = LoadStatsFromFile();  // Your loading logic here
+
+            // Unit values are worked out from these stats, so a rebuild here must drop the old ones.
+            UnitValues.Invalidate();
 
             // --- 1. Dispose previous blob (if any) ---
             if (_cachedBlobRef.IsCreated)
@@ -233,9 +255,19 @@ namespace TJ
         // The prestige pool minus any trait a mage's spell cannot use; player picks and enemy rolls both draw from this.
         public List<UnitAttribute> GetUsablePrestigeTraits(UnitName unitName)
         {
-            List<UnitAttribute> traits = TabletopTavernConstants.GetEligiblePrestigeTraits(GetSquadStats(unitName));
+            SquadStats squadStats = GetSquadStats(unitName);
+            List<UnitAttribute> traits = TabletopTavernConstants.GetEligiblePrestigeTraits(squadStats);
             SquadAssetsDictionary.TryGetValue(unitName, out SquadAssets assets);
+            // Thick Scales is a Drakosaur Brood-only pick, skipped where the unit already has it.
+            if (assets.race == Race.DrakosaurBrood && !squadStats.SquadAttributes.ThickScales) traits.Add(UnitAttribute.ThickScales);
+            // Ethereal is a Sanguine Court-only pick, skipped where the unit already has it.
+            if (assets.race == Race.SanguineCourt && !squadStats.SquadAttributes.Ethereal) traits.Add(UnitAttribute.Ethereal);
+            // Forest Dweller is a Taelindor Forest-only pick, skipped where the unit already has it and for casters, which its attack bonus does not help.
+            if (assets.race == Race.TaelindorForest && !squadStats.SquadAttributes.ForestDweller && !TabletopTavernConstants.Casts(squadStats.unitType))
+                traits.Add(UnitAttribute.ForestDweller);
             if (assets.mageSpell != null) traits.RemoveAll(trait => !assets.mageSpell.IsImprovedBy(trait));
+            // Sanguine Court are already terror-immune, which is all Stalwart gives.
+            if (assets.race == Race.SanguineCourt && RaceBonusRuleData.SanguineCourt.ImmuneToTerror) traits.Remove(UnitAttribute.Stalwart);
             return traits;
         }
         public UnitType GetUnitTypeFromUnitName(UnitName _unitName)
@@ -366,6 +398,7 @@ namespace TJ
         }
         public Sprite GetUnitIcon(UnitName _unitName)
         {
+            if (UnitVisualOverrideLoader.TryGetIcon(_unitName, out Sprite modIcon)) return modIcon;
             return SquadAssetsDictionary[_unitName].unitIcon;
         }
         public Sprite GetSquadTypeIcon(UnitName _unitName)
@@ -709,19 +742,9 @@ namespace TJ
 
             return unitStats;
         }
-        public bool IgnoresSwamp(UnitName unitName)
-        {
-            SquadStats squadStats = GetSquadStats(unitName);
-            return
-                (squadStats.SquadAttributes.SwampCreature ||
-                squadStats.SquadAttributes.Ethereal ||
-                squadStats.SquadAttributes.ChickenFlight);
-        }
-        public bool IsForestDweller(UnitName unitName)
-        {
-            SquadStats squadStats = GetSquadStats(unitName);
-            return squadStats.SquadAttributes.ForestDweller;
-        }
+        // Callers pass a battle squad's merged attributes so a prestige trait or hero grant counts.
+        public static bool IgnoresSwamp(SquadAttributes attributes) =>
+            attributes.SwampCreature || attributes.Ethereal || attributes.ChickenFlight;
         public Race GenerateRaceForMap(int bookNumber, int seed, Race activeRace)
         {
             List<Race> allRaces = new ();
@@ -807,6 +830,8 @@ namespace TJ
             UnityEngine.Random.state = priorState;
             return heroes[randomIndex];
         }
+        /// <summary>One of a faction's heroes, the same one for the same seed. The March's warlords come from here.</summary>
+        public Hero GetHeroLeadingRace(Race race, int seed) => GetHeroForRace(race, seed);
         public Hero GetEnemyHeroForCampaign(int heroID, int bookNumber, int seed, bool justGetRandomHero = false)
         {
             if(justGetRandomHero)

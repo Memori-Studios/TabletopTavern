@@ -2,7 +2,6 @@ using Unity.Burst;
 using Unity.Entities;
 using Unity.Transforms;
 using UnityEngine;
-using GPUECSAnimationBaker.Engine.AnimatorSystem;
 using System.Collections.Generic;
 
 namespace TJ

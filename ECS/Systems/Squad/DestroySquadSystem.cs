@@ -3,7 +3,6 @@ using Unity.Burst;
 using Unity.Entities;
 using Unity.Collections;
 using ProjectDawn.Navigation;
-using GPUECSAnimationBaker.Engine.AnimatorSystem;
 using UnityEngine;
 
 [UpdateInGroup(typeof(LateSimulationSystemGroup))]

@@ -5,7 +5,7 @@ using Unity.Transforms;
 using Unity.Mathematics;
 using UnityEngine;
 using ProjectDawn.Navigation;
-using GPUECSAnimationBaker.Engine.AnimatorSystem;
+using TabletopTavern.GpuAnim;
 using TJ;
 
 [UpdateInGroup(typeof(LateSimulationSystemGroup), OrderFirst = true)]
@@ -20,9 +20,11 @@ partial struct SquadEngageInCombatSystem : ISystem
         _random = Unity.Mathematics.Random.CreateFromIndex(0);
     }
 
-    [BurstCompile]
+    // Not [BurstCompile]: the flank charge morale shock reads the managed RaceBonusRuleData Sanguine Court toggle.
+    // Only squads that made contact this frame are visited, so nearly every frame the loops are empty.
     public void OnUpdate(ref SystemState state)
     {
+        bool sanguineImmune = RaceBonusRuleData.SanguineCourt.ImmuneToFlankMorale;
         EntityManager entityManager = state.EntityManager;
         EntityCommandBuffer entityCommandBuffer = SystemAPI.GetSingleton<EndSimulationEntityCommandBufferSystem.Singleton>().CreateCommandBuffer(state.WorldUnmanaged);
         var statsData = SystemAPI.GetSingleton<SquadStatsData>();
@@ -122,6 +124,21 @@ partial struct SquadEngageInCombatSystem : ISystem
             bool isCharging = FormationEngagedInCombat.ValueRO.WasCharging;
             float chargeMultiplier = 1f;
 
+            SquadStats squadStats = statsBlob.GetStats(squad.ValueRO.UnitName);
+            float3 toTarget = targetSquadMovement.SquadCenter - SquadMovementComponent.ValueRO.SquadCenter;
+            toTarget.y = 0f;
+            float3 chargeDirection = math.normalizesafe(toTarget, math.forward(SquadMovementComponent.ValueRO.SquadRotation));
+            OnFormationsCollide collide = new OnFormationsCollide
+            {
+                Position = (SquadMovementComponent.ValueRO.SquadCenter + targetSquadMovement.SquadCenter) / 2f,
+                Kind = ChargeImpactKind.Contact,
+                Size = squadStats.unitSize,
+                Count = entityBuffer.Length,
+                Right = math.cross(math.up(), chargeDirection),
+                HalfWidth = SquadMovementComponent.ValueRO.SquadWidthAndDepth.x * TabletopTavernConstants.GetSpread(squadStats.unitSize) * 0.5f,
+                SquadId = squad.ValueRO.SquadId,
+            };
+
             if (isCharging)
             {
                 // 1 = the charger is dead ahead of the target, -1 = dead behind it.
@@ -152,14 +169,20 @@ partial struct SquadEngageInCombatSystem : ISystem
                     chargeMultiplier = flankCharge ? TabletopTavernConstants.CHARGE_FLANK_MULT : 1f;
                     entityCommandBuffer.AddComponent(squad.ValueRO.SelfEntity, new ChargeBonus());
                     entityCommandBuffer.AddComponent(squad.ValueRO.SelfEntity, new ApplyChargeBonusTag { Multiplier = chargeMultiplier, FlatBonus = rallyBonus });
+                    if (flankCharge) ShockMorale(entityManager, squad.ValueRO.TargetSquadEntity, sanguineImmune);
                 }
 
                 entityCommandBuffer.AddComponent(squad.ValueRO.SelfEntity, new WearyTag { Remaining = TabletopTavernConstants.CHARGE_WEARY_TIME });
-                entityCommandBuffer.AddComponent(squad.ValueRO.SelfEntity, new OnFormationsCollide
-                {
-                    Position = (SquadMovementComponent.ValueRO.SquadCenter + targetSquadMovement.SquadCenter) / 2f,
-                    Kind = blocked ? ChargeImpactKind.Blocked : flankCharge ? ChargeImpactKind.FlankCharge : ChargeImpactKind.Charge,
-                });
+                collide.Kind = blocked ? ChargeImpactKind.Blocked : flankCharge ? ChargeImpactKind.FlankCharge : ChargeImpactKind.Charge;
+                entityCommandBuffer.AddComponent(squad.ValueRO.SelfEntity, collide);
+            }
+            else
+            {
+                // The squad that was charged leaves the event to its charger; two squads walking into each other both raise it.
+                Entity other = FormationEngagedInCombat.ValueRO.EngagementEntity;
+                bool otherCharged = entityManager.HasComponent<FormationEngagedInCombat>(other)
+                    && entityManager.GetComponentData<FormationEngagedInCombat>(other).WasCharging;
+                if (!otherCharged) entityCommandBuffer.AddComponent(squad.ValueRO.SelfEntity, collide);
             }
 
 
@@ -169,7 +192,30 @@ partial struct SquadEngageInCombatSystem : ISystem
 
             if (opponentIsBracing) allowKnockback = false;
 
-            SquadStats squadStats = statsBlob.GetStats(squad.ValueRO.UnitName);
+            // A large squad that landed a clean charge on an unbraced infantry line drives into it.
+            float penetrationDepth = allowKnockback && largerHittingSmaller
+                ? TabletopTavernConstants.ChargePenetrationDepth(squadStats.unitSize) : 0f;
+            if (isCharging)
+            {
+                entityCommandBuffer.AddComponent(squad.ValueRO.SelfEntity, new SprintFollowThrough
+                {
+                    Remaining = penetrationDepth > 0f
+                        ? TabletopTavernConstants.CHARGE_PENETRATION_TIME
+                        : TabletopTavernConstants.CHARGE_FOLLOW_THROUGH_TIME,
+                });
+            }
+
+            // How far forward the squad's leading model is, so the front rank can be told from the rest.
+            float frontEdge = float.MinValue;
+            if (bothSmall && allowKnockback)
+            {
+                for (int i = 0; i < entityBuffer.Length; i++)
+                {
+                    if (!entityManager.HasComponent<LocalTransform>(entityBuffer[i].Entity)) continue;
+                    float3 position = entityManager.GetComponentData<LocalTransform>(entityBuffer[i].Entity).Position;
+                    frontEdge = math.max(frontEdge, math.dot(position - SquadMovementComponent.ValueRO.SquadCenter, chargeDirection));
+                }
+            }
 
             for (int i = 0; i < entityBuffer.Length; i++)
             {
@@ -177,8 +223,14 @@ partial struct SquadEngageInCombatSystem : ISystem
                 bool unitKnockback = allowKnockback;
                 if (bothSmall)
                 {
-                    // Infantry into infantry only shoves now and then, and never without a charge or into a brace.
-                    unitKnockback = allowKnockback && _random.NextFloat(0f, 1f) < 0.15f;
+                    // Infantry into infantry shoves only from the front rank, and never without a charge or into a brace.
+                    if (unitKnockback)
+                    {
+                        float3 position = entityManager.GetComponentData<LocalTransform>(entity).Position;
+                        bool frontRank = math.dot(position - SquadMovementComponent.ValueRO.SquadCenter, chargeDirection)
+                            >= frontEdge - TabletopTavernConstants.CHARGE_FRONT_RANK_DEPTH;
+                        unitKnockback = frontRank && _random.NextFloat(0f, 1f) < TabletopTavernConstants.CHARGE_FRONT_RANK_SHOVE_CHANCE;
+                    }
                     knockbackForce = _random.NextFloat(1f, 3f);
                 }
                 else
@@ -204,6 +256,25 @@ partial struct SquadEngageInCombatSystem : ISystem
                             : squadStats.ChargeImactDamage)),
                     });
                     // Debug.Log($"SquadEngageInCombatSystem: squad {squad.ValueRO.SquadId} is engaging in combat with a smaller squad {squad.ValueRO.TargetSquadEntity.Index} and applying knockback to unit {entity}");
+                }
+
+                if (isCharging)
+                {
+                    // The first blows land as the ranks arrive, not whenever each model's old timer runs out.
+                    MeleeAttack meleeAttack = entityManager.GetComponentData<MeleeAttack>(entity);
+                    meleeAttack.timer = _random.NextFloat(0f, TabletopTavernConstants.CHARGE_FIRST_STRIKE_WINDOW);
+                    entityManager.SetComponentData(entity, meleeAttack);
+                }
+
+                if (penetrationDepth > 0f && entityManager.HasComponent<ChargePenetration>(entity))
+                {
+                    entityManager.SetComponentData(entity, new ChargePenetration
+                    {
+                        Direction = chargeDirection,
+                        DistanceLeft = penetrationDepth,
+                        TimeLeft = TabletopTavernConstants.CHARGE_PENETRATION_TIME,
+                    });
+                    entityManager.SetComponentEnabled<ChargePenetration>(entity, true);
                 }
 
                 Unit unit = entityManager.GetComponentData<Unit>(entity);
@@ -234,12 +305,24 @@ partial struct SquadEngageInCombatSystem : ISystem
                 for (int i = 0; i < entityBuffer.Length; i++)
                 {
                     animationDataHolder.ValueRW.currentIdleAnimationId = animationDataHolder.ValueRO.attackIdleAnimationId;
-                    GpuEcsAnimatorControlComponent controlComp = entityManager.GetComponentData<GpuEcsAnimatorControlComponent>(animationDataHolder.ValueRO.gpuEcsAnimatorEntity);
-                    controlComp.animatorInfo.animationID = animationDataHolder.ValueRO.currentIdleAnimationId;
+                    GpuAnimControl controlComp = entityManager.GetComponentData<GpuAnimControl>(animationDataHolder.ValueRO.gpuEcsAnimatorEntity);
+                    controlComp.Slot = animationDataHolder.ValueRO.currentIdleAnimationId;
                     entityManager.SetComponentData(animationDataHolder.ValueRO.gpuEcsAnimatorEntity, controlComp);
                 }
             }
         }
+    }
+
+    // A side or rear charge knocks a flat amount of morale off at once; MoraleSystem re-reads the state next frame.
+    static void ShockMorale(EntityManager entityManager, Entity target, bool sanguineImmune)
+    {
+        if (!entityManager.HasComponent<TJ.Morale.MoraleComponent>(target)) return;
+        if (entityManager.HasComponent<BrokenSquadTag>(target) || entityManager.HasComponent<GarrisonGateSquadTag>(target)) return;
+        if (sanguineImmune && entityManager.HasComponent<SanguineCourtRaceTag>(target)) return;
+
+        TJ.Morale.MoraleComponent morale = entityManager.GetComponentData<TJ.Morale.MoraleComponent>(target);
+        morale.CurrentMorale = math.max(0f, morale.CurrentMorale - TabletopTavernConstants.CHARGE_FLANK_MORALE_SHOCK);
+        entityManager.SetComponentData(target, morale);
     }
 }
 

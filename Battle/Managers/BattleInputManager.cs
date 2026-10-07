@@ -73,12 +73,13 @@ public class BattleInputManager : MonoBehaviour
     public bool RightClickHeldDown => _rightClickHeldDown;
     public CursorMode CursorMode => cursorMode;
 
-    private bool _leftClickDownThisFrame => Input.GetMouseButtonDown(0);
-    private bool _rightClickDownThisFrame => Input.GetMouseButtonDown(1);
-    private bool _rightClickUpThisFrame => Input.GetMouseButtonUp(1);
-    private bool _leftClickUpThisFrame => Input.GetMouseButtonUp(0);
-    private bool _leftClickHeldDown => Input.GetMouseButton(0);
-    private bool _rightClickHeldDown => Input.GetMouseButton(1);
+    // Photo mode uses the mouse for its camera and focus, so the battlefield never sees a button while it is open.
+    private bool _leftClickDownThisFrame => !TJ.BattleViewModes.OrdersBlocked && Input.GetMouseButtonDown(0);
+    private bool _rightClickDownThisFrame => !TJ.BattleViewModes.OrdersBlocked && Input.GetMouseButtonDown(1);
+    private bool _rightClickUpThisFrame => !TJ.BattleViewModes.OrdersBlocked && Input.GetMouseButtonUp(1);
+    private bool _leftClickUpThisFrame => !TJ.BattleViewModes.OrdersBlocked && Input.GetMouseButtonUp(0);
+    private bool _leftClickHeldDown => !TJ.BattleViewModes.OrdersBlocked && Input.GetMouseButton(0);
+    private bool _rightClickHeldDown => !TJ.BattleViewModes.OrdersBlocked && Input.GetMouseButton(1);
     private SpawnManager spawnManager;
     private PositionDrawer positionDrawer;
     private UnitPositioningManager unitPositioningManager;
@@ -262,6 +263,11 @@ public class BattleInputManager : MonoBehaviour
             return;
         }
         if (spellManager.PlacementPhase != TJ.Spells.SpellManager.SpellPlacementPhase.Placing) return;
+        if (spellManager.PlacingBarricade)
+        {
+            HandleBarricadePlacement(spellManager);
+            return;
+        }
 
         positionDrawer.ConfirmValidityOfPositions(Team.Player, false);
 
@@ -291,6 +297,34 @@ public class BattleInputManager : MonoBehaviour
             if (!MinimumDistanceFromInitialClick()) return;
             RotateFormationToMouse();
             CalculateMouseDraggedDistance();
+        }
+    }
+    // Barricades draws a line, not a formation: right-press starts it, the drag sets its length and angle, release raises it.
+    private void HandleBarricadePlacement(TJ.Spells.SpellManager spellManager)
+    {
+        Vector3 cursor = MouseWorldPosition.Instance.GetWorldPosition();
+        if (_leftClickDownThisFrame)
+        {
+            if (UnityEngine.EventSystems.EventSystem.current.IsPointerOverGameObject()) return;
+            spellManager.CancelPlacement();
+            IAudioRequester.Instance.PlaySFX(SFXData.ActionFailed);
+        }
+        else if (_rightClickUpThisFrame)
+        {
+            spellManager.ConfirmBarricadeLine();
+        }
+        else if (_rightClickDownThisFrame)
+        {
+            spellManager.StartBarricadeDrag(cursor);
+            spellManager.DragBarricadeLine(cursor);
+        }
+        else if (_rightClickHeldDown)
+        {
+            spellManager.DragBarricadeLine(cursor);
+        }
+        else
+        {
+            spellManager.MoveBarricadeLine(cursor);
         }
     }
     public void HandleRepositionUnits()

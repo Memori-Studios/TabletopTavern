@@ -30,7 +30,6 @@ namespace TJ.MainMenu
         [Header("Budget")]
         [SerializeField] private TMP_Text budgetLabelText;
         [SerializeField] private TMP_Text budgetValueText;
-        [SerializeField] private TMP_Text budgetNoteText;
 
         [Header("Columns")]
         [SerializeField] private TMP_Text sizeColumnText;
@@ -116,7 +115,6 @@ namespace TJ.MainMenu
 
             budgetLabelText.text = T("WarbandRecruitBudget");
             budgetValueText.text = $"<color={(gold < 0 ? ColorData.Error : ColorData.Gold)}>{gold}</color> <sprite name=GoldSprite>";
-            budgetNoteText.text = string.Format(T("WarbandRecruitSquads"), army.Length, StartingArmyManager.MaxStartingArmySize);
             sizeColumnText.text = T("WarbandRecruitColSize");
             costColumnText.text = T("Cost");
         }

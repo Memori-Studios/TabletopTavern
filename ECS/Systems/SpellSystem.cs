@@ -5,7 +5,7 @@ using Unity.Physics;
 using Unity.Collections;
 using Unity.Transforms;
 using ProjectDawn.Navigation;
-using GPUECSAnimationBaker.Engine.AnimatorSystem;
+using TabletopTavern.GpuAnim;
 
 [UpdateInGroup(typeof(SimulationSystemGroup))]
 [UpdateBefore(typeof(TJ.ApplyDamageSystem))]
@@ -131,7 +131,16 @@ partial struct SpellSystem : ISystem
                     if (damageBufferElement.TeamOfSource != Team.Neutral && sameTeam != heals) continue;
 
                     if (!spellEntity.ValueRO.SkipsDamage)
-                        SystemAPI.GetBuffer<DamageBufferElement>(hitEntity).Add(damageBufferElement);
+                    {
+                        DamageBufferElement hit = damageBufferElement;
+                        float monstrousPercent = spellEntity.ValueRO.MonstrousPercentOfMaxHealth;
+                        if (!heals && monstrousPercent > 0f
+                            && SystemAPI.HasComponent<MaxHitPoints>(hitEntity)
+                            && SystemAPI.HasComponent<UnitParentEntityTag>(hitEntity)
+                            && SystemAPI.HasComponent<MonsterousSquadTag>(SystemAPI.GetComponent<UnitParentEntityTag>(hitEntity).parentSquadEntity))
+                            hit.AttackStrength = (int)math.round(SystemAPI.GetComponent<MaxHitPoints>(hitEntity).Value * monstrousPercent / 100f);
+                        SystemAPI.GetBuffer<DamageBufferElement>(hitEntity).Add(hit);
+                    }
 
                     // Zone spells have no squad-level tag, so each tick stamps the parent squad's status entry
                     // to outlive the next tick by half a second; a squad that leaves the zone drops it then.
@@ -171,9 +180,9 @@ partial struct SpellSystem : ISystem
                     Entity childEntity = animationDataHolder.gpuEcsAnimatorEntity;
                     if (childEntity == Entity.Null) continue;
 
-                    GpuEcsAnimatorControlComponent controlComp = SystemAPI.GetComponent<GpuEcsAnimatorControlComponent>(childEntity);
-                    controlComp.transitionSpeed = 0f;
-                    controlComp.animatorInfo.animationID = animationDataHolder.thrownAnimationId;
+                    GpuAnimControl controlComp = SystemAPI.GetComponent<GpuAnimControl>(childEntity);
+                    controlComp.TransitionSeconds = 0f;
+                    controlComp.Slot = animationDataHolder.thrownAnimationId;
                     ecb.SetComponent(childEntity, controlComp);
 
                     RefRW<AgentBody> agentBody = SystemAPI.GetComponentRW<AgentBody>(hitEntity);

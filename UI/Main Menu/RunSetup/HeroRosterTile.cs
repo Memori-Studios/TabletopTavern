@@ -17,9 +17,13 @@ namespace TJ.MainMenu
     [RequireComponent(typeof(MemoriTooltipTrigger))]
     public class HeroRosterTile : MonoBehaviour, IPointerEnterHandler, IPointerExitHandler
     {
+        private const float UnwonGemAlpha = 0.1f;
+
         [SerializeField] private Button button;
         [SerializeField] private Image portrait;
         [SerializeField] private Image frame;
+        [Tooltip("Frame sprite per level won, Easy to Godking. Shown untinted; a missing entry falls back to the tinted plain frame.")]
+        [SerializeField] private Sprite[] wonFrames;
         [SerializeField] private Image[] gems;
         [SerializeField] private TMP_Text nameText;
         [SerializeField] private GameObject lockedMark;
@@ -31,6 +35,7 @@ namespace TJ.MainMenu
         private PlayPanel playPanel;
         private MemoriTooltipTrigger tooltip;
         private bool listening;
+        private Sprite plainFrame;
 
         public Hero Hero => hero;
 
@@ -57,9 +62,18 @@ namespace TJ.MainMenu
             LoadPortrait();
 
             bool[] won = unlocked ? DifficultyMetal.WonLevels(hero.HeroID) : new bool[DifficultyMetal.LevelCount];
-            frame.color = DifficultyMetal.ForRank(DifficultyMetal.BestRank(won));
+            if (plainFrame == null) plainFrame = frame.sprite;
+            int best = DifficultyMetal.BestRank(won);
+            Sprite wonFrame = wonFrames != null && best >= 0 && best < wonFrames.Length ? wonFrames[best] : null;
+            frame.sprite = wonFrame != null ? wonFrame : plainFrame;
+            frame.color = wonFrame != null ? Color.white : DifficultyMetal.ForRank(best);
             for (int i = 0; i < gems.Length; i++)
-                gems[i].color = i < won.Length && won[i] ? DifficultyMetal.ForRank(i) : DifficultyMetal.Unwon;
+            {
+                bool gemWon = i < won.Length && won[i];
+                gems[i].color = gemWon ? DifficultyMetal.ForRank(i) : DifficultyMetal.Unwon;
+                CanvasGroup group = gems[i].GetComponent<CanvasGroup>();
+                if (group != null) group.alpha = gemWon ? 1f : UnwonGemAlpha;
+            }
 
             tooltip.enabled = !unlocked;
             if (!unlocked)

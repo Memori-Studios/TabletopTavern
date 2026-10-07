@@ -4,7 +4,7 @@ using Unity.Transforms;
 using UnityEngine;
 using ProjectDawn.Navigation;
 using Memori.Utilities;
-using GPUECSAnimationBaker.Engine.AnimatorSystem;
+using TabletopTavern.GpuAnim;
 using Unity.Mathematics;
 
 partial struct UnitStateMachineSystem : ISystem
@@ -109,8 +109,8 @@ partial struct UnitStateMachineSystem : ISystem
 
                         entityCommandBuffer.AddComponent<InCombat>(entity);
 
-                        GpuEcsAnimatorControlComponent controlComp =
-                            entityManager.GetComponentData<GpuEcsAnimatorControlComponent>(animationDataHolder.ValueRO.gpuEcsAnimatorEntity);
+                        GpuAnimControl controlComp =
+                            entityManager.GetComponentData<GpuAnimControl>(animationDataHolder.ValueRO.gpuEcsAnimatorEntity);
 
                         if (entityManager.HasComponent<RangedMeleeConverter>(entity))
                         {
@@ -122,7 +122,7 @@ partial struct UnitStateMachineSystem : ISystem
                         else
                         {
                             animationDataHolder.ValueRW.currentIdleAnimationId = animationDataHolder.ValueRO.attackIdleAnimationId;
-                            controlComp.animatorInfo.animationID = animationDataHolder.ValueRO.currentIdleAnimationId;
+                            controlComp.Slot = animationDataHolder.ValueRO.currentIdleAnimationId;
                             entityCommandBuffer.SetComponent(animationDataHolder.ValueRO.gpuEcsAnimatorEntity, controlComp);
                         }
 
@@ -197,9 +197,9 @@ partial struct UnitStateMachineSystem : ISystem
 
                         if (!entityManager.HasComponent<UnitRemovedFromSquad>(entity))
                         {
-                            GpuEcsAnimatorControlComponent controlComp = entityManager.GetComponentData<GpuEcsAnimatorControlComponent>(
+                            GpuAnimControl controlComp = entityManager.GetComponentData<GpuAnimControl>(
                                         animationDataHolder.ValueRO.gpuEcsAnimatorEntity);
-                            controlComp.animatorInfo.animationID = animationDataHolder.ValueRO.currentIdleAnimationId;
+                            controlComp.Slot = animationDataHolder.ValueRO.currentIdleAnimationId;
                             entityCommandBuffer.SetComponent(animationDataHolder.ValueRO.gpuEcsAnimatorEntity, controlComp);
                         }
 

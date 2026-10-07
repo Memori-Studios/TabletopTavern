@@ -169,6 +169,7 @@ namespace TJ.Engagement.EditorTools
             ("engagementEnemy", "Enemy"),
             ("engagementHeavensongLine", "Heavensong: reroll the weather once before this battle."),
             ("engagementReserveWarning", "Your reserves do not heal after this fight"),
+            ("engagementStrikeTwist", "Strike"),
             ("engagementPredicts", "Predicts {0}"),
             ("engagementSkirmishSub", "A battle in Act {0} against the {1}"),
             ("engagementHordeSub", "The final battle of Act {0} against the {1}"),
@@ -931,10 +932,16 @@ namespace TJ.Engagement.EditorTools
             TMP_Text pillText = Text("Text", pill, display, 14f, Hex("7BD66F"), "Victory");
             pillText.fontStyle = FontStyles.UpperCase | FontStyles.Bold;
             pillText.characterSpacing = 10f;
+            Image pillHit = GetOrAdd<Image>(pill.gameObject);
+            pillHit.color = Color.clear;
+            pillHit.raycastTarget = true;
+            MemoriTooltipTrigger pillTooltip = pill.gameObject.AddComponent<MemoriTooltipTrigger>();
+            pillTooltip.enabled = false;
             pill.gameObject.SetActive(false);
             Ref(so, "pill", pill.gameObject);
             Ref(so, "pillFrame", pillFrame);
             Ref(so, "pillText", pillText);
+            Ref(so, "pillTooltip", pillTooltip);
         }
 
         static void BuildBeforeBattle(RectTransform root, SerializedObject so)
@@ -942,17 +949,6 @@ namespace TJ.Engagement.EditorTools
             RectTransform body = Rect("Before Battle", root);
             VLayout(body, 16f, new RectOffset(24, 24, 18, 22));
             Ref(so, "preBattleBody", body.gameObject);
-
-            RectTransform host = Rect("Host Row", body);
-            HLayout(host, 10f, TextAnchor.MiddleLeft, new RectOffset());
-            Fixed(host.gameObject, -1f, 22f);
-            Localize(CapLabel(host, "Caption"), "engagementEnemyHost");
-            TMP_Text hostLine = Text("Count", host, displayDrop, 15f, Cream, "11 squads · 188 troops");
-            Unlocalize(hostLine, "11 squads · 188 troops");
-            Ref(so, "enemyHostLine", hostLine);
-            Spacer(host, true);
-            TMP_Text hint = Text("Hint", host, display, 14f, Cap, "Hover a card for its stats");
-            Localize(hint, "townGarrisonHint");
 
             // The enemy's cards sit in a well; the same grid moves to the battle report after the fight.
             RectTransform well = Rect("Enemy Well", body);
@@ -976,29 +972,6 @@ namespace TJ.Engagement.EditorTools
             grid.gameObject.AddComponent<CanvasGroup>();
             Ref(so, "enemyArmyParent", grid);
 
-            RectTransform strip = Rect("Strip", body);
-            Fixed(strip.gameObject, -1f, 62f);
-            StripRules(strip);
-            HorizontalLayoutGroup row = HLayout(strip, 0f, TextAnchor.MiddleLeft, new RectOffset());
-            row.childForceExpandWidth = true;
-            row.childForceExpandHeight = true;
-            GameObject battlefield = Cell(strip, "Battlefield", "townBattlefield", forestIcon, Hex("9CC48A"), false);
-            Ref(so, "battlefieldValue", Child<TMP_Text>(battlefield.transform, "Value Row/Value"));
-            Ref(so, "battlefieldIcon", Child<Image>(battlefield.transform, "Value Row/Icon"));
-            GameObject weather = Cell(strip, "Weather", "townWeather", clearIcon, Hex("F2C866"), true);
-            Ref(so, "weatherValue", Child<TMP_Text>(weather.transform, "Value Row/Value"));
-            Ref(so, "weatherIcon", Child<Image>(weather.transform, "Value Row/Icon"));
-            Image weatherHit = GetOrAdd<Image>(weather);
-            weatherHit.color = Color.clear;
-            weatherHit.raycastTarget = true;
-            MemoriTooltipTrigger weatherTooltip = weather.AddComponent<MemoriTooltipTrigger>();
-            weatherTooltip.enabled = false;
-            Ref(so, "weatherTooltip", weatherTooltip);
-            GameObject yours = Cell(strip, "Your Army", "engagementYourArmy", null, Color.white, true);
-            Ref(so, "yourArmyValue", Child<TMP_Text>(yours.transform, "Value Row/Value"));
-            GameObject enemy = Cell(strip, "Enemy", "engagementEnemy", null, Color.white, true);
-            Ref(so, "enemyValue", Child<TMP_Text>(enemy.transform, "Value Row/Value"));
-
             RectTransform warning = Rect("Reserve Warning", body);
             HLayout(warning, 9f, TextAnchor.MiddleLeft, new RectOffset());
             Image heart = Img(Rect("Icon", warning), heartIcon, Negative);
@@ -1008,13 +981,11 @@ namespace TJ.Engagement.EditorTools
             warning.gameObject.SetActive(false);
             Ref(so, "reserveWarning", warning.gameObject);
 
-            RectTransform actions = Rect("Actions", body);
-            HLayout(actions, 16f, TextAnchor.MiddleLeft, new RectOffset());
-            Fixed(actions.gameObject, -1f, ButtonHeight);
-
-            RectTransform heavensong = Rect("Heavensong", actions);
+            // Heavensong has its own row so the battlefield and weather keep the left of the action row.
+            RectTransform heavensong = Rect("Heavensong", body);
             HLayout(heavensong, 12f, TextAnchor.MiddleLeft, new RectOffset());
             Flexible(heavensong.gameObject, 1f).preferredWidth = 0f;
+            Fixed(heavensong.gameObject, -1f, 44f);
             GameObject reroll = Instance(standardButton, heavensong, "Reroll");
             Fixed(reroll, 132f, 44f);
             TMP_Text rerollLabel = Child<TMP_Text>(reroll.transform, "Button Label");
@@ -1031,7 +1002,54 @@ namespace TJ.Engagement.EditorTools
             Ref(so, "heavensongGroup", heavensong.gameObject);
             Ref(so, "heavensongButton", reroll.GetComponent<Button>());
             Ref(so, "heavensongTooltip", rerollTooltip);
-            Spacer(actions, true);
+
+            // The War Chest sits in a row like Heavensong's: one button, and a line the panel fills with the Twist and its price.
+            RectTransform warChest = Rect("War Chest", body);
+            HLayout(warChest, 12f, TextAnchor.MiddleLeft, new RectOffset());
+            Flexible(warChest.gameObject, 1f).preferredWidth = 0f;
+            Fixed(warChest.gameObject, -1f, 44f);
+            GameObject strike = Instance(standardButton, warChest, "Strike");
+            Fixed(strike, 132f, 44f);
+            TMP_Text strikeLabel = Child<TMP_Text>(strike.transform, "Button Label");
+            Localize(strikeLabel, "engagementStrikeTwist");
+            strikeLabel.alignment = TextAlignmentOptions.Center;
+            strikeLabel.margin = new Vector4(10f, 0f, 10f, 0f);
+            MemoriTooltipTrigger strikeTooltip = strike.AddComponent<MemoriTooltipTrigger>();
+            TMP_Text chestNote = Text("Note", warChest, display, 14f, Flavour, "War Chest");
+            chestNote.fontStyle = FontStyles.Italic;
+            Wrap(chestNote);
+            Flexible(chestNote.gameObject, 1f).preferredWidth = 0f;
+            Unlocalize(chestNote, "War Chest: pay 15 gold to strike Ambush from this battle.");
+            warChest.gameObject.SetActive(false);
+            Ref(so, "warChestGroup", warChest.gameObject);
+            Ref(so, "warChestButton", strike.GetComponent<Button>());
+            Ref(so, "warChestNote", chestNote);
+            Ref(so, "warChestTooltip", strikeTooltip);
+
+            RectTransform actions = Rect("Actions", body);
+            HLayout(actions, 16f, TextAnchor.MiddleLeft, new RectOffset());
+            Fixed(actions.gameObject, -1f, ButtonHeight);
+
+            // Battlefield and weather fill the left of the row; the two battle buttons sit on the right.
+            RectTransform strip = Rect("Strip", actions);
+            Fixed(strip.gameObject, -1f, 62f);
+            Flexible(strip.gameObject, 1f).preferredWidth = 0f;
+            StripRules(strip);
+            HorizontalLayoutGroup row = HLayout(strip, 0f, TextAnchor.MiddleLeft, new RectOffset());
+            row.childForceExpandWidth = true;
+            row.childForceExpandHeight = true;
+            GameObject battlefield = Cell(strip, "Battlefield", "townBattlefield", forestIcon, Hex("9CC48A"), false);
+            Ref(so, "battlefieldValue", Child<TMP_Text>(battlefield.transform, "Value Row/Value"));
+            Ref(so, "battlefieldIcon", Child<Image>(battlefield.transform, "Value Row/Icon"));
+            GameObject weather = Cell(strip, "Weather", "townWeather", clearIcon, Hex("F2C866"), true);
+            Ref(so, "weatherValue", Child<TMP_Text>(weather.transform, "Value Row/Value"));
+            Ref(so, "weatherIcon", Child<Image>(weather.transform, "Value Row/Icon"));
+            Image weatherHit = GetOrAdd<Image>(weather);
+            weatherHit.color = Color.clear;
+            weatherHit.raycastTarget = true;
+            MemoriTooltipTrigger weatherTooltip = weather.AddComponent<MemoriTooltipTrigger>();
+            weatherTooltip.enabled = false;
+            Ref(so, "weatherTooltip", weatherTooltip);
 
             TMP_Text disabled = Text("Autoresolve Disabled", actions, display, 15f, Cap, "Autoresolve disabled");
             Localize(disabled, "difficultyModifier20");
@@ -1111,9 +1129,9 @@ namespace TJ.Engagement.EditorTools
             HorizontalLayoutGroup row = HLayout(strip, 0f, TextAnchor.MiddleLeft, new RectOffset());
             row.childForceExpandWidth = true;
             row.childForceExpandHeight = true;
-            var labels = new Object[4];
-            var values = new Object[4];
-            for (int i = 0; i < 4; i++)
+            var labels = new Object[2];
+            var values = new Object[2];
+            for (int i = 0; i < 2; i++)
             {
                 GameObject cell = Instance(statCellPart, strip, "Cell " + (i + 1));
                 if (i == 0) cell.transform.Find("Divider").gameObject.SetActive(false);
@@ -1132,12 +1150,12 @@ namespace TJ.Engagement.EditorTools
             RectTransform stacks = Rect("Stacks", body);
             HLayout(stacks, 24f, TextAnchor.UpperLeft, new RectOffset()).childForceExpandHeight = true;
             Ref(so, "stacks", stacks.gameObject);
-            RectTransform spoilRows = Column(stacks, "Spoils", "engagementSpoils", "engagementTakeAll");
+            RectTransform spoilRows = Column(stacks, "Spoils", "engagementTakeAll");
             Ref(so, "spoilsParent", spoilRows);
             RectTransform divider = Rect("Divider", stacks);
             Fixed(divider.gameObject, 1f, -1f);
             Img(Stretch(Rect("Line", divider), 0f, 0f, 6f, 6f), null, A(Brass, 0.55f));
-            RectTransform choiceRows = Column(stacks, "Spoils Of War", "engagementSpoilsOfWar", "engagementChooseOne");
+            RectTransform choiceRows = Column(stacks, "Spoils Of War", "engagementChooseOne");
             Ref(so, "choicesParent", choiceRows);
 
             // A thin brass thread joins the choice diamonds, 20.5 px in from the row's left edge.
@@ -1159,7 +1177,7 @@ namespace TJ.Engagement.EditorTools
         }
 
         // A stack column: its caption and note, then the rows. The rows grow with their content; the stacks row keeps both columns one height.
-        static RectTransform Column(RectTransform parent, string name, string captionKey, string noteKey)
+        static RectTransform Column(RectTransform parent, string name, string noteKey)
         {
             RectTransform column = Rect(name, parent);
             VLayout(column, 10f, new RectOffset());
@@ -1167,8 +1185,7 @@ namespace TJ.Engagement.EditorTools
             RectTransform head = Rect("Head", column);
             HLayout(head, 10f, TextAnchor.MiddleLeft, new RectOffset());
             Fixed(head.gameObject, -1f, 18f);
-            Localize(CapLabel(head, "Caption"), captionKey);
-            Spacer(head, true);
+            // Only the note ("Take them all", "Choose one") heads the column; the Spoils captions were cut.
             Localize(Text("Note", head, display, 14f, Cap, "Note"), noteKey);
             RectTransform rows = Rect("Rows", column);
             VLayout(rows, RowGap, new RectOffset());

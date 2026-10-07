@@ -51,6 +51,35 @@ public static class TabletopTavernConstants
     // an enemy charge only from the rear, the same lean SquadNavObject gives the flank marker.
     public const float CHARGE_FLANK_DOT_PLAYER = 0.25f;
     public const float CHARGE_FLANK_DOT_ENEMY = -0.7f;
+    // Seconds the sprint speed stays on after contact; the longer one covers a large squad driving in.
+    public const float CHARGE_FOLLOW_THROUGH_TIME = 0.6f;
+    public const float CHARGE_PENETRATION_TIME = 1.2f;
+    // Morale a side or rear charge takes at once: shakes militia, barely moves elite troops.
+    public const float CHARGE_FLANK_MORALE_SHOCK = 12f;
+    // A charging model's first swing comes within this many seconds of contact.
+    public const float CHARGE_FIRST_STRIKE_WINDOW = 0.25f;
+    // Infantry charge shove: only models this close to the front of the squad roll for it.
+    public const float CHARGE_FRONT_RANK_DEPTH = 1.2f;
+    public const float CHARGE_FRONT_RANK_SHOVE_CHANCE = 0.5f;
+    // How far a large model drives into an unbraced infantry line.
+    public static float ChargePenetrationDepth(UnitSize size) => size switch
+    {
+        UnitSize.Cavalry    => 4f,
+        UnitSize.Monstrous  => 5f,
+        UnitSize.SingleUnit => 6f,
+        _                   => 0f,
+    };
+    #endregion
+    #region Clash visuals
+    // The swing starts when the hit is rolled; the lunge waits for the blow in the attack clip.
+    public const float RECOIL_LUNGE_DELAY = 0.5f;
+    public const float RECOIL_LUNGE_DISTANCE = 0.2f;
+    public const float RECOIL_LUNGE_TIME = 0.28f;
+    public const float RECOIL_HIT_DISTANCE = 0.35f;
+    public const float RECOIL_HIT_TILT_DEGREES = 12f;
+    public const float RECOIL_HIT_TIME = 0.32f;
+    public const float DUST_CHANCE_APPROACH = 0.1f;
+    public const float DUST_CHANCE_SPRINT = 0.2f;
     #endregion
     public const float TERROR_RADIUS = 20f;
     public const int OVERIDE_TARGET_SQUADENTITY_DISTANCE = 20;
@@ -112,6 +141,7 @@ public static class TabletopTavernConstants
     public const float COLLISION_PLANTED_MULT = 3f;
     public const float COLLISION_CHARGE_MULT = 1.5f;
     public const float COLLISION_BRACED_MULT = 2f;
+    public const float COLLISION_PENETRATION_MULT = 4f;
     public const float COLLISION_MAX_STEP = 0.4f;
     public const float COLLISION_MAX_RADIUS = 2.5f;
     public const float COLLISION_CONTACT_EPSILON = 0.05f;
@@ -119,6 +149,14 @@ public static class TabletopTavernConstants
     public const float RETURN_TO_SLOT_DISTANCE = 0.5f;
     public const float RETURN_TO_SLOT_SETTLE_TIME = 0.5f;
     public const int RETURN_TO_SLOT_BUDGET = 2;
+    // A standing unit turns in place to face its travel direction before a Move order starts it walking.
+    public const float MARCH_TURN_MIN_ANGLE = 25f;
+    public const float MARCH_TURN_DONE_ANGLE = 10f;
+    public const float MARCH_TURN_RATE = 150f;
+    // Extra random wait per unit before its turn starts, so a squad does not pivot as one.
+    public const float MARCH_TURN_START_JITTER = 0.2f;
+    public const float MARCH_TURN_TIMEOUT = 1.5f;
+    public const float MARCH_TURN_MIN_DISTANCE = 6f;
     #endregion
 
     // Colors
@@ -185,17 +223,15 @@ public static class TabletopTavernConstants
     public const float ENDLESS_HORDES_HEAL_AMOUNT = 0.30f;
     public const float CONSUME_CAPTIVES_HEAL_AMOUNT = 0.33f;
 
-    // Endless campaign: acts past the last story act. The win is banked when act 3 falls and the player
-    // may march on; every extra act adds squads and veteran odds on top of the act 3 tables.
+    // The March: everything past the last story act. The win is banked when act 3 falls and the player may
+    // march on; from there enemy armies scale by the battle (MarchRules), not by the act.
     public const int FINAL_STORY_ACT = 3;
     // The enemy deployment formation has 15 slots (three rows of five); a 16th squad is stranded at staging.
     public const int ENDLESS_ENEMY_SQUAD_CAP = 15;
+    // Only a modded garrison past act 3 still scales by the act.
     public const float ENDLESS_PRESTIGE_CHANCE_PER_ACT = 0.10f;
     public const float ENDLESS_PRESTIGE_CHANCE_CAP = 0.90f;
     public const float ENDLESS_PRESTIGE_TWO_CHANCE_CAP = 0.80f;
-    public const int ENDLESS_GOLD_PER_ACT = 2;
-    public const int ENDLESS_GOLD_CAP = 10;
-    public const int ENDLESS_INTEREST_BONUS_CAP = 5;
     public static int EndlessActs(int bookNumber) => System.Math.Max(0, bookNumber - FINAL_STORY_ACT);
 
     //Prestige: melee gains MeleeAttack/MeleeDefense/Leadership, ranged gains Range/Accuracy/Ammunition, all scaled by prestige level
@@ -226,6 +262,13 @@ public static class TabletopTavernConstants
     // now share it, and their radii range from 7 to 18, so this is the loosest part of the model -
     // worth revisiting if area size ever needs to matter in auto-resolve.
     public const int MAGE_AOE_MODELS_HIT = 18;
+    // Monsters stand at MonsterSpread 5, so a radius-8 blast catches 4 (a line) to 8 (a 4x2 block) of a squad.
+    public const int MAGE_AOE_MONSTERS_HIT = 5;
+
+    // The rule SquadManager uses to add MonsterousSquadTag.
+    public static bool IsMonstrous(SquadStats squadStats) =>
+        (squadStats.unitSize == UnitSize.Monstrous || squadStats.unitSize == UnitSize.SingleUnit)
+        && squadStats.unitType != UnitType.Structure;
 
     // How much of a hit a braced squad shrugs off in auto-resolve, per charge spent on it, as a
     // reduction to its damageTakenMultiplier. A live brace grants knockback immunity and halves
@@ -245,6 +288,12 @@ public static class TabletopTavernConstants
     // alternating ticks. 1.1 means the target has to be a clear 10% beyond range before it is let go.
     public const float MAGE_TARGET_DROP_RANGE_MULTIPLIER = 1.1f;
 
+    // Seconds an enemy mage's hostile spell shows its ring before it lands, long enough for a squad to walk out of it.
+    public const float ENEMY_MAGE_CAST_WARNING = 2.5f;
+
+    // Most mage squads an enemy army fields; each mage casts on its own, so more mages would mean more spells.
+    public const int ENEMY_MAGE_SQUAD_CAP = 2;
+
     // Shooter trait magnitudes (Shot Discipline / Overdraw / Demolisher / Powder Reserves).
     // Steady Aim has no magnitude - it simply waives FIRE_AT_WILL_ACCURACY_PENALTY.
     public const float SHOT_DISCIPLINE_RELOAD_MULTIPLIER = 0.8f;    // 20% faster reload
@@ -259,7 +308,7 @@ public static class TabletopTavernConstants
     #region Mage trait magnitudes
     public const float POTENT_MAGIC_MULTIPLIER = 1.25f;        // +25% spell damage, healing, mark and stat change
     public const float WIDE_WEAVE_RADIUS_MULTIPLIER = 1.25f;   // +25% spell radius
-    public const float FAR_CAST_RANGE_MULTIPLIER = 2f;         // double cast range
+    public const float FAR_CAST_RANGE_MULTIPLIER = 1.25f;      // +25% cast range
     public const float QUICKCAST_COOLDOWN = 1f;                // seconds between casts
     public const float SWIFT_STRIDE_SPEED_MULTIPLIER = 1.25f;  // +25% move speed
     public const float PROJECTILE_WARD_DAMAGE_MULTIPLIER = 0.5f;
@@ -290,6 +339,8 @@ public static class TabletopTavernConstants
     public const int CASTLE_RECRUIT_COST = 20;
     public const int CITY_RECRUIT_COST = 40;
     public const int FORGEFURY_TEMPERING_KILLS_REQUIRED = 50;
+    // Share of melee damage dealt that a Blood Drinker squad heals.
+    public const float BLOOD_DRINKER_LIFESTEAL = 0.5f;
     // public const int MAX_DEMO_DEPOSITED_GOLD = 200000; //max gold that can be deposited in demo version of the game
     public const int RANSOM_CAPTIVES_REWARD = 3;
     public const int SKIRMISH_REWARD = 3;
@@ -455,6 +506,7 @@ public static class TabletopTavernConstants
         UnitAttribute.SwiftStride => attributes.SwiftStride,
         UnitAttribute.ProjectileWard => attributes.ProjectileWard,
         UnitAttribute.SpellWard => attributes.SpellWard,
+        UnitAttribute.BloodDrinker => attributes.BloodDrinker,
         _ => false,
     };
 
@@ -476,6 +528,9 @@ public static class TabletopTavernConstants
     {
         bool isArtillery = squadStats.unitType == UnitType.Artillery;
         bool shoots = Shoots(squadStats.unitType);
+
+        // Stalwart is only terror immunity, and TerrorSystem never terrifies a squad that causes terror.
+        if (trait == UnitAttribute.Stalwart && squadStats.SquadAttributes.Terrifying) return false;
 
         // Mages take an allowlist instead of falling through to the switch's "_ => true" default.
         // Nearly everything in the pool scales melee or missile damage, and a mage's real output
@@ -577,6 +632,7 @@ public static class TabletopTavernConstants
             case UnitAttribute.SwiftStride: attributes.SwiftStride = true; break;
             case UnitAttribute.ProjectileWard: attributes.ProjectileWard = true; break;
             case UnitAttribute.SpellWard: attributes.SpellWard = true; break;
+            case UnitAttribute.BloodDrinker: attributes.BloodDrinker = true; break;
             default:
                 Debug.LogWarning($"[TabletopTavernConstants] SetAttribute: '{trait}' has no SquadAttributes backing field, ignoring.");
                 break;

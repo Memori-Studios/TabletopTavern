@@ -31,6 +31,8 @@ namespace TabletopTavern.Analytics
         public int Kills;
         // Health removed from enemy models, overkill excluded.
         public int Damage;
+        // What that damage destroyed, in unit value points.
+        public float Value;
         // Stand, Withdrew, Broke or Dead.
         public string Status;
     }

@@ -1,7 +1,7 @@
 using UnityEngine;
 using Unity.Entities;
 using Unity.Transforms;
-using GPUECSAnimationBaker.Engine.AnimatorSystem;
+using TabletopTavern.GpuAnim;
 using Unity.Collections;
 using System;
 using ProjectDawn.Navigation;
@@ -69,9 +69,9 @@ namespace TJ
             if (!inMeleeCombat && Vector3.Distance(crewGameObjects[0].transform.position, crewTransforms[0].position) > CREW_LEFT_BEHIND_DISTANCE)
                 SnapCrewToSlots();
 
-            if (!entityManager.HasComponent<GpuEcsAnimatorControlComponent>(_animatorEntity)) return;
+            if (!entityManager.HasComponent<GpuAnimControl>(_animatorEntity)) return;
 
-            int animationID = entityManager.GetComponentData<GpuEcsAnimatorControlComponent>(_animatorEntity).animatorInfo.animationID;
+            int animationID = entityManager.GetComponentData<GpuAnimControl>(_animatorEntity).Slot;
 
             for (int i = 0; i < crewGameObjects.Length; i++)
             {

@@ -2,8 +2,7 @@
 // using Unity.Entities;
 // using Unity.Transforms;
 // using UnityEngine;
-// using GPUECSAnimationBaker.Engine.AnimatorSystem;
-
+// 
 // namespace TJ
 // {
 // public partial struct ArtilleryCrewSetUpSystem : ISystem

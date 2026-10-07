@@ -26,6 +26,11 @@ namespace TJ.Games
         // [SerializeField] private float _parallaxStrength = 0.025f;
         // [SerializeField] private float _parallaxLerpSpeed = 3f;
         [SerializeField] private Light _spotlight;
+        // Dice Holder local height on a short canvas (UI Scale 125%), so the dice clear the strip above the army bar.
+        [SerializeField] private float _raisedDiceHolderY = 0.5f;
+        private Transform _diceHolder;
+        private float _authoredDiceHolderY;
+        private bool _diceRaised;
         private TavernThemeHideMe objectToHide;
         private TavernCheer[] _tavernCheers;
 
@@ -75,6 +80,18 @@ namespace TJ.Games
         {
             panelCanvasGroup = GetComponent<MemoriCanvasGroup>();
             if (_spotlight != null) _spotlight.enabled = false;
+            _diceHolder = _playerDice.transform.parent;
+            _authoredDiceHolderY = _diceHolder.localPosition.y;
+        }
+
+        private void LateUpdate()
+        {
+            bool raise = view.ShortCanvas;
+            if (raise == _diceRaised) return;
+            _diceRaised = raise;
+            Vector3 position = _diceHolder.localPosition;
+            position.y = raise ? _raisedDiceHolderY : _authoredDiceHolderY;
+            _diceHolder.localPosition = position;
         }
 
         private void Start()

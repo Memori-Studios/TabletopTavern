@@ -18,6 +18,9 @@ namespace TJ.Engagement
         public int UnitsSlain;
         // Health removed from enemy models, overkill excluded, as the live battle counts it.
         public int DamageDealt;
+        // What that damage destroyed, in unit value points, and what one model of this squad pays out when it is hit.
+        public float DamageValue;
+        public float WorthPerModel;
         public int finalHealth;
         public int healthPerKill;
         public float armorMitigation;
@@ -45,6 +48,7 @@ namespace TJ.Engagement
         [NonSerialized] public float MoveSeconds;       // seconds spent closing on the current target
         [NonSerialized] public float SprintSeconds;     // seconds of the final sprint at the current target
         [NonSerialized] public float WearyTimer;        // seconds until the squad can charge again
+        [NonSerialized] public float StartWeary;        // Forced March: Weary seconds the squad opens the battle with
         [NonSerialized] public float EngagedSeconds;
         [NonSerialized] public float FlankedTimer;
         [NonSerialized] public float OnFireTimer;
@@ -56,6 +60,7 @@ namespace TJ.Engagement
         [NonSerialized] public float[] RecentLoss, RecentDealt;   // last five seconds, ring
         [NonSerialized] public int RingIndex;
         [NonSerialized] public float TickLoss, TickDealt;
+        [NonSerialized] public int BloodBank;           // Blood Drinker lifesteal no living model could take
     }
     // The hero inputs the live battle reads from CampaignSaveDataHolder, as plain data so the
     // difficulty sim can supply them without a campaign. default(...) means no hero.
@@ -136,7 +141,8 @@ namespace TJ.Engagement
         private const int MAX_AUTORESOLVE_ROUNDS = 10000;
         private bool _isGarrisonBattle;
         // Set from the run in SetUpArmies; a custom or test battle leaves it off.
-        private bool _bloodPact;
+        // Blood Pact and Death Wish: what the player's squads deal and take is multiplied by this.
+        private float _ordealDamageScale = 1f;
         // Only Load() sets the garrison flag, and Load() needs a campaign. The difficulty sim
         // sets it directly.
         internal bool IsGarrisonBattle { set => _isGarrisonBattle = value; }
@@ -286,7 +292,7 @@ namespace TJ.Engagement
             useCampaign ? (Func<GearID, bool>)campaignSaveManager.CheckForGear : null,
             useCampaign && campaignSaveManager.SaveData.battleFieldPreset.weather == Weather.Rain,
             hero);
-        if (useCampaign) ApplyOrdeals(ref squad, _team, campaignSaveManager.SaveData);
+        if (useCampaign) ApplyOrdeals(ref squad, _team, campaignSaveManager.SaveData, _squadToLoad);
         if (useCampaign) ApplyEventLeadership(ref squad, _team, campaignSaveManager.SaveData);
         return squad;
     }
@@ -299,7 +305,7 @@ namespace TJ.Engagement
         squad.squadStats.Leadership = Mathf.Max(squad.squadStats.Leadership + change, TabletopTavernConstants.MORALE_BREAK_THRESHOLD * 2);
     }
     // The stat Ordeals, applied as EntityWatcher, SquadManager and the charge system apply them in a live battle.
-    private static void ApplyOrdeals(ref AutoResolveSquad squad, Team team, CampaignSaveData run)
+    private static void ApplyOrdeals(ref AutoResolveSquad squad, Team team, CampaignSaveData run, SquadToLoad source)
     {
         if (team == Team.Enemy && run.HasOrdeal(OrdealId.UnbrokenRanks))
             squad.squadStats.Leadership += OrdealRegistry.UNBROKEN_RANKS_LEADERSHIP;
@@ -308,6 +314,14 @@ namespace TJ.Engagement
             squad.squadStats.Ammunition = (int)(squad.squadStats.Ammunition * OrdealRegistry.SHORT_QUIVERS_AMMUNITION);
         if (run.HasOrdeal(OrdealId.BluntedCharge))
             squad.ChargeBonus /= 2;
+        if (run.HasOrdeal(OrdealId.BurnTheWagons))
+            squad.squadStats.Leadership += OrdealMask.BURN_THE_WAGONS_LEADERSHIP;
+        if (run.HasOrdeal(OrdealId.LastStand) && OrdealMask.BelowHalfStrength(source.SquadCurrentHealth, source.SquadMaxHealth))
+            squad.squadStats.Leadership += OrdealMask.LAST_STAND_LEADERSHIP;
+        if (run.HasOrdeal(OrdealId.Dread))
+            squad.squadStats.Leadership = Mathf.Max(squad.squadStats.Leadership - OrdealMask.DREAD_LEADERSHIP, TabletopTavernConstants.MORALE_BREAK_THRESHOLD * 2);
+        if (run.HasOrdeal(OrdealId.ForcedMarch))
+            squad.StartWeary = OrdealMask.FORCED_MARCH_WEARY_SECONDS;
     }
     // Gear, weather and hero as plain inputs. The game passes them from the campaign save through
     // the overload above; the difficulty sim (Tests.Editor) passes them as data, because it has no
@@ -486,6 +500,7 @@ namespace TJ.Engagement
             damageTakenMultiplier = 1f,
             ChargeBonus = ChargeBonus,
             Race = TabletopTavernData.Instance.GetRaceFromUnitName(_squadToLoad.UnitName),
+            WorthPerModel = UnitValues.PerModel(_squadToLoad.UnitName),
         };
     }
     public void SetUpArmies()
@@ -507,7 +522,7 @@ namespace TJ.Engagement
         playerArmyIsDefeated = false;
         enemyArmyIsDefeated = false;
 
-        _bloodPact = CampaignManager.Instance.CampaignSaveManager.SaveData.HasOrdeal(OrdealId.BloodPact);
+        _ordealDamageScale = OrdealMask.DamageScale(CampaignManager.Instance.CampaignSaveManager.SaveData.OrdealBits);
         AutoResolveHeroContext hero = AutoResolveHeroContext.From(
             CampaignManager.Instance.CampaignSaveManager.SaveData.heroID, playerArmy, enemyArmy);
         for (int i = 0; i < playerArmy.Length; i++) {
@@ -541,7 +556,7 @@ namespace TJ.Engagement
         }
         playerAutoResolveStats = new AutoResolveSquad[playerArmy.Length];
         _mageAlphaStrikeApplied = false;
-        _bloodPact = false;
+        _ordealDamageScale = 1f;
         playerArmyIsDefeated = false;
 
         for (int i = 0; i < playerArmy.Length; i++) {
@@ -577,6 +592,25 @@ namespace TJ.Engagement
         GenerateTestEnemyArmy();
     }
     [ContextMenu("Predict Auto Resolve")]
+    /// <summary>Whether auto-resolve would win an assault on this garrison. The save and the result cache are left as they were.</summary>
+    public bool PredictGarrisonAssault(SquadToLoad[] garrison, Weather weather)
+    {
+        CampaignSaveData run = CampaignManager.Instance.CampaignSaveManager.SaveData;
+        SquadToLoad[] savedEnemyArmy = run.enemyArmy;
+        Weather savedWeather = run.battleFieldPreset.weather;
+        bool savedGarrisonFlag = _isGarrisonBattle;
+
+        run.enemyArmy = garrison;
+        run.battleFieldPreset.weather = weather;
+        _isGarrisonBattle = true;
+        SetUpArmies();
+        RunToCompletion();
+
+        run.enemyArmy = savedEnemyArmy;
+        run.battleFieldPreset.weather = savedWeather;
+        _isGarrisonBattle = savedGarrisonFlag;
+        return enemyArmyIsDefeated;
+    }
     public void PredictAutoResolve()
     {
         SetUpArmies();
@@ -635,7 +669,7 @@ namespace TJ.Engagement
         AssignTargets();
         HandleMageCasts();
         // Blood Pact scales both sides' hits on the player, as BloodPactSystem does in a live battle.
-        float bloodPact = _bloodPact ? OrdealMask.BLOOD_PACT_DAMAGE : 1f;
+        float bloodPact = _ordealDamageScale;
         bool active = AutoResolveSimulation.Tick(playerAutoResolveStats, enemyAutoResolveStats,
             (_isGarrisonBattle ? GARRISON_AUTORESOLVE_BONUS : 1f) * bloodPact, unitsSlainData, bloodPact);
         _idleSeconds = active ? 0 : _idleSeconds + 1;
@@ -866,6 +900,16 @@ namespace TJ.Engagement
                 List<int> targetOrder = new() { mageSquad.TargetIndex };
                 for (int i = 0; i < _foes.Length; i++)
                     if (_foes[i].SquadIndex != mageSquad.TargetIndex) targetOrder.Add(_foes[i].SquadIndex);
+                // MonstrousFirst spends on monsters before anything else, matching MageSquadFindTargetSystem.
+                if (mageSpell.MageTargetPriority == MageTargetPriority.MonstrousFirst)
+                {
+                    List<int> monstersFirst = new();
+                    foreach (int i in targetOrder)
+                        if (TabletopTavernConstants.IsMonstrous(TargetSquadFromIndex(i, _foes).squadStats)) monstersFirst.Add(i);
+                    foreach (int i in targetOrder)
+                        if (!monstersFirst.Contains(i)) monstersFirst.Add(i);
+                    targetOrder = monstersFirst;
+                }
 
                 foreach (int targetIndex in targetOrder)
                 {
@@ -880,8 +924,16 @@ namespace TJ.Engagement
 
                     // The blast cannot catch more models than the squad still has standing.
                     int modelsHit = math.min(aoeModelsHit, targetSquad.UnitsAlive);
-                    float ward    = targetSquad.squadStats.SquadAttributes.SpellWard ? TabletopTavernConstants.SPELL_WARD_DAMAGE_MULTIPLIER : 1f;
-                    int perCast   = math.max(1, (int)(magnitude * applications * modelsHit * _bonusModifier * ward));
+                    // Spell Ward and Ethereal multiply, the same as the live MagicalDamageMultiplier in UnitSetUpSystem.
+                    float ward    = (targetSquad.squadStats.SquadAttributes.SpellWard ? TabletopTavernConstants.SPELL_WARD_DAMAGE_MULTIPLIER : 1f)
+                                  * (targetSquad.squadStats.SquadAttributes.Ethereal ? 0.5f : 1f);
+                    float perModel = magnitude;
+                    if (mageSpell.MonstrousPercentOfMaxHealth > 0f && TabletopTavernConstants.IsMonstrous(targetSquad.squadStats))
+                    {
+                        perModel  = targetSquad.healthPerKill * mageSpell.ScaledMonstrousPercent(potency) / 100f;
+                        modelsHit = math.min(modelsHit, TabletopTavernConstants.MAGE_AOE_MONSTERS_HIT);
+                    }
+                    int perCast   = math.max(1, (int)(perModel * applications * modelsHit * _bonusModifier * ward));
 
                     int castsSpent = math.min(chargesLeft, (healthLeft + perCast - 1) / perCast);
                     int damage     = math.min(castsSpent * perCast, healthLeft);
@@ -894,7 +946,7 @@ namespace TJ.Engagement
         }
 
         // Mages are squads, so Blood Pact reaches both sides' casts.
-        float bloodPact = _bloodPact ? OrdealMask.BLOOD_PACT_DAMAGE : 1f;
+        float bloodPact = _ordealDamageScale;
         CastFrom(playerAutoResolveStats, enemyAutoResolveStats, playerAutoResolveStats, bloodPact);
         CastFrom(enemyAutoResolveStats, playerAutoResolveStats, enemyAutoResolveStats,
             (_isGarrisonBattle ? GARRISON_AUTORESOLVE_BONUS : 1f) * bloodPact);
@@ -982,6 +1034,7 @@ namespace TJ.Engagement
                     UnitsEnd = unitsEnd,
                     Kills = stats[i].UnitsSlain,
                     Damage = stats[i].DamageDealt,
+                    Value = stats[i].DamageValue,
                     Status = unitsEnd <= 0 ? "Dead" : stats[i].Broken ? "Broke" : "Stand",
                 });
                 break;
@@ -1009,11 +1062,14 @@ namespace TJ.Engagement
                         playerAutoResolveStats[i].finalHealth = math.max(0, playerAutoResolveStats[i].finalHealth);
                         playerArmy[j].SquadCurrentHealth = playerAutoResolveStats[i].finalHealth;
                         squadKillsStored.Add(new SquadKillsStored() { SquadGUID = playerArmy[j].UniqueID, Kills = playerAutoResolveStats[i].UnitsSlain });
-                        squadDamageStored.Add(new SquadDamageStored() { SquadGUID = playerArmy[j].UniqueID, Damage = playerAutoResolveStats[i].DamageDealt });
+                        squadDamageStored.Add(new SquadDamageStored() { SquadGUID = playerArmy[j].UniqueID, Damage = playerAutoResolveStats[i].DamageDealt, Value = playerAutoResolveStats[i].DamageValue });
                         // UnitsAlive is ceiling-rounded from pooled health, so it can read as 1 even when only a
                         // sliver of a unit's health remains - floor-dividing finalHealth avoids undercounting losses by 1.
                         int endingUnits = playerAutoResolveStats[i].healthPerKill > 0 ? playerAutoResolveStats[i].finalHealth / playerAutoResolveStats[i].healthPerKill : playerAutoResolveStats[i].UnitsAlive;
                         squadLossesStored.Add(new SquadLossesStored() { SquadGUID = playerArmy[j].UniqueID, Losses = math.max(0, playerAutoResolveStats[i].maxUnits - endingUnits) });
+                        // Banked lifesteal regrows lost models after losses are counted, as the live battle does.
+                        if (playerArmy[j].SquadCurrentHealth > 0 && playerAutoResolveStats[i].BloodBank > 0 && !CampaignSaveManager.HealingBlocked())
+                            playerArmy[j].SquadCurrentHealth = math.min(playerArmy[j].SquadMaxHealth, playerArmy[j].SquadCurrentHealth + playerAutoResolveStats[i].BloodBank);
                         //get how many units were killed
                         // Debug.Log($"Unit {playerArmy[j].UnitName} now at {playerArmy[j].SquadCurrentHealth} health");
                     }
@@ -1029,7 +1085,7 @@ namespace TJ.Engagement
                     //clamping health to 0
                     enemyAutoResolveStats[i].finalHealth = math.max(0, enemyAutoResolveStats[i].finalHealth);
                     enemyArmy[j].SquadCurrentHealth = enemyAutoResolveStats[i].finalHealth;
-                    squadDamageStored.Add(new SquadDamageStored() { SquadGUID = enemyArmy[j].UniqueID, Damage = enemyAutoResolveStats[i].DamageDealt });
+                    squadDamageStored.Add(new SquadDamageStored() { SquadGUID = enemyArmy[j].UniqueID, Damage = enemyAutoResolveStats[i].DamageDealt, Value = enemyAutoResolveStats[i].DamageValue });
                     // Debug.Log($"Unit {enemyArmy[j].UnitName} now at {enemyArmy[j].SquadCurrentHealth} health");
                 }
             }

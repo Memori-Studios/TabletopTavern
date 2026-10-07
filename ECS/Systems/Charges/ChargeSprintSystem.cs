@@ -99,6 +99,15 @@ partial struct ChargeSprintSystem : ISystem
                 && !SystemAPI.HasComponent<GarrisonGateSquadTag>(entity);
             if (stillCharging) continue;
 
+            // A landed charge keeps its speed for a moment so the ranks behind arrive running.
+            if (SystemAPI.HasComponent<SprintFollowThrough>(entity) && !SystemAPI.HasComponent<BrokenSquadTag>(entity))
+            {
+                RefRW<SprintFollowThrough> followThrough = SystemAPI.GetComponentRW<SprintFollowThrough>(entity);
+                followThrough.ValueRW.Remaining -= deltaTime;
+                if (followThrough.ValueRO.Remaining > 0f) continue;
+            }
+            if (SystemAPI.HasComponent<SprintFollowThrough>(entity)) ecb.RemoveComponent<SprintFollowThrough>(entity);
+
             ScaleSpeed(ref state, unitBuffer, 1f / TabletopTavernConstants.CHARGE_SPRINT_SPEED_MULT);
             ecb.RemoveComponent<SprintingTag>(entity);
         }

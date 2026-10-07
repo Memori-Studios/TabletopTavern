@@ -1,7 +1,6 @@
 using System;
 using UnityEngine;
 using UnityEngine.UI;
-using Memori.Localization;
 
 namespace TJ
 {
@@ -14,7 +13,7 @@ namespace TJ
         public const float Min = 1f;
         // 150% leaves the map node panels 347 units of height between the top bar and the army panel; nothing fits there.
         public const float Max = 1.25f;
-        // The Graphics tab offers these as a dropdown; index into this array is what the control stores.
+        // The Game Scale stepper offers these; the pref stores the value, so adding a step never shifts a saved choice.
         public static readonly float[] Steps = { 1f, 1.25f };
         public static int StepIndex(float scale) { int best = 0; for (int i = 1; i < Steps.Length; i++) if (Mathf.Abs(Steps[i] - scale) < Mathf.Abs(Steps[best] - scale)) best = i; return best; }
         const float SteamDeckDefault = 1.25f;
@@ -34,9 +33,6 @@ namespace TJ
                 if (scaler.GetComponent<Canvas>().renderMode == RenderMode.WorldSpace) continue;
                 scaler.referenceResolution = ReferenceResolution / scale;
             }
-
-            LocalizationManager localization = LocalizationManager.InstanceIfExists;
-            if (localization != null) localization.SetUIScale(scale);
         }
     }
 }

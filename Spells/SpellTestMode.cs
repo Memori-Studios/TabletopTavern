@@ -1,3 +1,4 @@
+using Unity.Entities;
 using UnityEngine;
 using UnityEngine.UI;
 
@@ -31,6 +32,54 @@ namespace TJ.Spells
 
         /// <summary>Custom battle only. A campaign battle keeps its real numbers even with the toggle on.</summary>
         public static bool Active => Enabled && Memori.SaveData.SaveDataHandler.IsCustomBattle();
+
+        #region Mage options
+        public const string MageNoCooldownPrefsKey = "TabletopTavern.MageNoCooldown";
+        public const string MageUnlimitedChargesPrefsKey = "TabletopTavern.MageUnlimitedCharges";
+
+        // Off in any build without TESTING, same as Enabled.
+        public static bool MageNoCooldown
+        {
+#if TESTING
+            get => PlayerPrefs.GetInt(MageNoCooldownPrefsKey, 0) == 1;
+#else
+            get => false;
+#endif
+            set { PlayerPrefs.SetInt(MageNoCooldownPrefsKey, value ? 1 : 0); PushMageOptions(); }
+        }
+
+        public static bool MageUnlimitedCharges
+        {
+#if TESTING
+            get => PlayerPrefs.GetInt(MageUnlimitedChargesPrefsKey, 0) == 1;
+#else
+            get => false;
+#endif
+            set { PlayerPrefs.SetInt(MageUnlimitedChargesPrefsKey, value ? 1 : 0); PushMageOptions(); }
+        }
+
+        /// <summary>
+        /// Writes the mage switches into the MageTestOptions singleton, creating it on first call.
+        /// Campaign battles never get one. Safe mid-battle: the systems read it every frame.
+        /// </summary>
+        public static void PushMageOptions()
+        {
+            if (!Memori.SaveData.SaveDataHandler.IsCustomBattle()) return;
+            World world = World.DefaultGameObjectInjectionWorld;
+            if (world == null || !world.IsCreated) return;
+
+            EntityManager entityManager = world.EntityManager;
+            MageTestOptions options = new()
+            {
+                NoCooldown = MageNoCooldown,
+                Cooldown = CooldownSeconds,
+                UnlimitedCharges = MageUnlimitedCharges,
+            };
+            using EntityQuery query = entityManager.CreateEntityQuery(ComponentType.ReadWrite<MageTestOptions>());
+            if (query.CalculateEntityCount() == 0) entityManager.CreateEntity(typeof(MageTestOptions));
+            query.SetSingleton(options);
+        }
+        #endregion
 
         /// <summary>
         /// A dimmed panel with a grid layout, stacked above the spell bar's top-left corner so it

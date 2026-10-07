@@ -144,12 +144,15 @@ public class SquadDisplayCardBattle : SquadDisplayCard, IDragHandler, IEndDragHa
     public override void SelectSquadButtonClicked()
     {
         if(BattleManager.Instance.GroupManager.GroupHovered != 0) return;
+        // With a spell armed the click is the cast, not a selection.
+        if(BattleManager.Instance.SpellManager.CastOnSquadCard(squadId)) return;
 
         // Debug.Log($"Select Squad Button Clicked squad {squadId}");
         UnitSelectionManager.Instance.SquadCardSelected(squadId);
     }
     public override void OnPointerEnter(PointerEventData eventData)
     {
+        BattleManager.Instance.SpellManager.SetHoveredCard(squadId);
         if(BattleManager.Instance.GroupManager.GroupHovered != 0) return;
         if(_quickInfo.IsPointerOver) return;
 
@@ -159,6 +162,7 @@ public class SquadDisplayCardBattle : SquadDisplayCard, IDragHandler, IEndDragHa
     }
     public override void OnPointerExit(PointerEventData eventData)
     {
+        BattleManager.Instance.SpellManager.ClearHoveredCard(squadId);
         base.OnPointerExit(eventData);
         BattleManager.Instance.UnitSelectionManager.HoverSquad(0, true);
     }
@@ -259,6 +263,9 @@ public class SquadDisplayCardBattle : SquadDisplayCard, IDragHandler, IEndDragHa
         // bypassing the normal UIManager.RemoveSquad path. Notify UIManager so it cleans up
         // squadDisplays and SquadOrderManager. If UIManager already removed it first via
         // RemoveSquad, the flag is set and we skip to avoid SetParent on a destroying object.
+        // A card destroyed under the pointer never gets OnPointerExit.
+        if(BattleManager.HasInstance && BattleManager.Instance.SpellManager != null)
+            BattleManager.Instance.SpellManager.ClearHoveredCard(squadId);
         if (RemovedByUIManager) return;
         RemovedByUIManager = true;
         if(BattleManager.HasInstance && BattleManager.Instance.UIManager != null)

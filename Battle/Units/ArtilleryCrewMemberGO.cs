@@ -1,7 +1,6 @@
 using UnityEngine;
 using Unity.Entities;
 using Unity.Transforms;
-using GPUECSAnimationBaker.Engine.AnimatorSystem;
 using System.Collections;
 
 namespace TJ

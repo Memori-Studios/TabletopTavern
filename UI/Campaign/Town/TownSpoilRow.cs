@@ -15,6 +15,9 @@ namespace TJ.Town
         [SerializeField] private TMP_Text value;
         [SerializeField] private GameObject taken;
         [SerializeField] private TMP_Text takenTitle;
+        [SerializeField] private Image icon;
+        [SerializeField] private Memori.Tooltip.MemoriTooltipTrigger tooltip;
+        [SerializeField] private float itemIconSize = 54f;
         // The button sits inside this wrapper, so the pop never fights MemoriButtonV2's hover scale on the button itself.
         [SerializeField] private RectTransform pop;
         [SerializeField] private CanvasGroup popGroup;
@@ -25,6 +28,10 @@ namespace TJ.Town
         [SerializeField] private float vanishSeconds = 0.16f;
 
         private Coroutine vanish;
+        private bool glyphCached;
+        private Sprite glyph;
+        private Color glyphColour;
+        private Vector2 glyphSize;
 
         public Button Button => button;
 
@@ -34,6 +41,28 @@ namespace TJ.Town
             detail.text = _detail;
             value.text = _value;
             takenTitle.text = _title;
+        }
+
+        // An item's own art replaces the row's glyph, untinted and larger. Null puts the glyph back.
+        public void SetIcon(Sprite item)
+        {
+            if (!glyphCached)
+            {
+                glyphCached = true;
+                glyph = icon.sprite;
+                glyphColour = icon.color;
+                glyphSize = icon.rectTransform.sizeDelta;
+            }
+            icon.sprite = item != null ? item : glyph;
+            icon.color = item != null ? Color.white : glyphColour;
+            icon.rectTransform.sizeDelta = item != null ? new Vector2(itemIconSize, itemIconSize) : glyphSize;
+        }
+
+        // An empty title switches the hover off.
+        public void SetTooltip(string _title, string body)
+        {
+            tooltip.enabled = !string.IsNullOrEmpty(_title);
+            if (tooltip.enabled) tooltip.SetUpToolTip(_title, body);
         }
 
         // A taken reward pops and disappears, leaving the Taken line in its slot.

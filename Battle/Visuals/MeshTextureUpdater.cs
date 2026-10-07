@@ -13,7 +13,7 @@ public class MeshTextureUpdater : MonoBehaviour
     // [SerializeField] private Texture2D mainTex, snowTexture;
     [SerializeField] private GameObject explosionPrefab;
     [SerializeField] private GameObject dustCloudPrefab;
-    private const int dustCloudPoolSize = 200;
+    private const int dustCloudPoolSize = 260;
     private const float DustCloudLifetime = 3f;
     private Stack<GameObject> _dustCloudPool = new();
     // Splats are stamped on the GPU into this copy of the ground texture; the CPU never touches pixels.

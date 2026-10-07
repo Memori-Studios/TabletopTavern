@@ -90,6 +90,23 @@ partial struct ApplyRotationJob : IJobEntity
         ref LocalTransform localTransform,
         [ChunkIndexInQuery] int chunkIndex)
     {
+        // A unit taking its formation facing after a Move turns at the same fixed rate as its turn before the march.
+        if (rotateUnit.steadyTurn && !InCombatLookup.HasComponent(entity))
+        {
+            float angle = 2f * math.acos(math.min(1f, math.abs(math.dot(localTransform.Rotation, rotateUnit.targetRotation))));
+            float maxStep = math.radians(TabletopTavernConstants.MARCH_TURN_RATE) * DeltaTime;
+            if (angle <= maxStep)
+            {
+                localTransform.Rotation = rotateUnit.targetRotation;
+                ECB.SetComponentEnabled<RotateUnit>(chunkIndex, entity, false);
+            }
+            else
+            {
+                localTransform.Rotation = math.slerp(localTransform.Rotation, rotateUnit.targetRotation, maxStep / angle);
+            }
+            return;
+        }
+
         localTransform.Rotation = math.slerp(
             localTransform.Rotation,
             rotateUnit.targetRotation,

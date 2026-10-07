@@ -110,7 +110,7 @@ namespace TJ.Prestige
         {
             LocalizationManager text = LocalizationManager.Instance;
             int held = campaignSaveManager.FateshineElixirsHeld;
-            OrdealId countering = OrdealRegistry.CounteringOrdeal(campaignSaveManager.SaveData.ordeals, ConsumableEnum.FateshineElixir);
+            OrdealId countering = OrdealRegistry.CounteringOrdeal(campaignSaveManager.SaveData.ActiveOrdeals, ConsumableEnum.FateshineElixir);
             bool usable = held > 0 && countering == OrdealId.None && !picked;
             string label = held > 0 ? string.Format(text.GetText("prestigeRerollCount"), held) : $"<s>{text.GetText("prestigeReroll")}</s>";
             string hint = usable ? text.GetText("prestigeRerollHint") : held == 0 ? text.GetText("prestigeRerollNeedsElixir") : null;
@@ -215,7 +215,7 @@ namespace TJ.Prestige
             bool bigBase = TabletopTavernData.Instance.GetUnitSizeFromUnitName(unitName) != UnitSize.Infantry;
 
             // Keeps the recruit prefab's own offset, as the town's recruit cards do.
-            prefabObject = Instantiate(prefab, prefabHolder).GetComponent<Transform>();
+            prefabObject = ModUnitPreview.Instantiate(unitName, prefab, prefabHolder).transform;
             baseObject = Instantiate(TabletopTavernData.Instance.GetRaceData(race).RaceBasePrefab, prefabHolder);
             baseObject.transform.localPosition = Vector3.zero;
             baseObject.SetUp(true, null);

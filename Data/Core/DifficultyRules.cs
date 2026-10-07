@@ -142,6 +142,9 @@ namespace TJ
         // DifficultyMod 16 "Settlements have stronger garrisons".
         public static bool StrongerGarrisons(TT_Difficulty difficulty) => Applies(16, difficulty);
 
+        // Not on any difficulty card: Easy act 1 garrisons field one squad fewer.
+        public static bool SmallerGarrison(TT_Difficulty difficulty, int act) => Rank(difficulty) == 0 && act == 1;
+
         // DifficultyMod 18 "Start each run with a weakened army". Fraction of max health every
         // starting squad is created with.
         public static float StartingHealth(TT_Difficulty difficulty) => Applies(18, difficulty) ? 0.75f : 1f;

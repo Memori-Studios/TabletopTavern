@@ -72,6 +72,10 @@ namespace TJ.Town
         [SerializeField] private float garrisonTrayPadding = 8f;
         [SerializeField] private int garrisonSingleRowMax = 9;
         [SerializeField] private GameObject fightLines;
+        [SerializeField] private GameObject gearLine;
+        [SerializeField] private TMP_Text gearLineText;
+        [SerializeField] private MemoriTooltipTrigger gearLineTooltip;
+        [SerializeField] private TMP_Text fightPrediction;
         [SerializeField] private GameObject spoilsBlock;
         [SerializeField] private TownSpoilRow goldRow;
         [SerializeField] private TownSpoilRow gearRow;
@@ -115,7 +119,7 @@ namespace TJ.Town
                 sizeLinks[i].color = i < current ? sizeReachedBorder : sizeEmptyBorder;
         }
 
-        public void SetTownInfo(string title, string body) => townInfoTooltip.SetUpToolTip(title, body);
+        public void SetTownInfo(TooltipContent content) => townInfoTooltip.SetUpToolTip(content);
         #endregion
 
         #region Enter Town
@@ -163,6 +167,18 @@ namespace TJ.Town
         }
 
         public void SetBounty(string text) => bountyValue.text = text;
+
+        // The gear a sack would win; hidden for a town that holds none.
+        public void SetGearPreview(string text, string tooltipTitle, string tooltipBody)
+        {
+            bool show = !string.IsNullOrEmpty(text);
+            gearLine.SetActive(show);
+            if (!show) return;
+            gearLineText.text = text;
+            gearLineTooltip.SetUpToolTip(tooltipTitle, tooltipBody);
+        }
+
+        public void SetPrediction(string text) => fightPrediction.text = text;
 
         // One row up to garrisonSingleRowMax squads, two above that. The grid is scaled, so the tray height is set here.
         public void SetGarrisonCount(int count, string countText)

@@ -70,6 +70,8 @@ namespace TJ.Engagement
         private bool choiceOffered;
         private bool choiceMade;
         private bool autoContinueQueued;
+        // A Continue click during the auto-continue wait would otherwise complete the layer twice.
+        private bool engagementCompleted;
         private Coroutine closeFade;
         private enum Picker { None, Recruit, Conscript }
         private Picker openPicker;
@@ -81,10 +83,8 @@ namespace TJ.Engagement
         // The other side of the same battle; Kills or Lost of -1 means the save did not keep it.
         private readonly List<DamageReportRow> enemyReports = new();
         private string reportSubtitle;
-        private int reportSlain, reportTroopsLost, reportSquadsLost, reportEnemyDestroyed, reportEnemyTotal;
+        private int reportSlain, reportTroopsLost, reportSquadsLost;
         private Race reportHeroRace;
-        // Army slots 0 to 9 fight; 10 and up are reserves.
-        private const int DeployedSlots = 10;
         #endregion
 
         // Watchdog against a stalled LoadEngagement/ShowEngagementResult chain. Both methods hide/lock
@@ -117,6 +117,7 @@ namespace TJ.Engagement
             view.AutoResolveButton.onClick.AddListener(AutoResolveButtonClicked);
             view.FightButton.onClick.AddListener(StartBattleButtonClicked);
             view.HeavensongButton.onClick.AddListener(HeavensongButtonClicked);
+            if (view.WarChestButton != null) view.WarChestButton.onClick.AddListener(StrikeTwistClicked);
             view.AutoResolveTooltip.SetUpToolTip(_description: Text("AutoResolveDesc"), _delay: 0.5f);
             view.FightTooltip.SetUpToolTip(_description: Text("ManuallyFightDesc"), _delay: 0.5f);
             view.SetBattleButtonsInteractable(false);
@@ -174,10 +175,16 @@ namespace TJ.Engagement
             view.SetBattleButtonsInteractable(false);
             view.SetPrediction("");
             view.ShowHeavensong(false);
+            view.ShowWarChest(false);
+            heavensongUsed = false;
             view.ShowReserveWarning(garrisonFight);
+            // Map input stops on node click, so the node's hover-off never fires to hide these.
+            mapSceneUIManager.HUDPanel.ShowWeatherHover(Weather.ClearSkies, false);
+            mapSceneUIManager.HUDPanel.ShowRogueHostHover(Race.Special, false, null, false);
             continueButton.enabled = true;
             continueButton.gameObject.SetActive(false);
             lootTownButton.gameObject.SetActive(false);
+            engagementCompleted = false;
             ClearEnemyCards();
 
             // Every line is filled before the card shows; only the enemy cards arrive after it.
@@ -217,7 +224,18 @@ namespace TJ.Engagement
         {
             int heroID = campaignSaveManager.SaveData.heroID;
             Race heroRace = HeroData.GetRaceFromHero(heroID);
-            Race race = TabletopTavernData.Instance.GenerateRaceForMap(campaignSaveManager.SaveData.bookNumber, campaignSaveManager.SaveData.seed, heroRace);
+            CampaignSaveData run = campaignSaveManager.SaveData;
+            // On the March every node is its own rogue host with its own Twists; before it, the act has one enemy.
+            bool march = run.InMarch && !garrisonFight;
+            MapNodeData marchNode = march ? CampaignManager.Instance.MapSceneUIManager.MapSceneManager.SelectedNodeData : default;
+            Race race = march
+                ? MarchRules.RogueRace(run.seed, run.bookNumber, marchNode.layer, marchNode.index)
+                : TabletopTavernData.Instance.GenerateRaceForMap(run.bookNumber, run.seed, heroRace);
+            if (march)
+            {
+                run.activeTwists = MarchRules.Twists(run, marchNode.layer, marchNode.index);
+                if (run.twistsStruckHere != null) run.activeTwists.RemoveAll(run.twistsStruckHere.Contains);
+            }
             List<UnitTier> unitsPool = TabletopTavernData.Instance.GetSquadsWithTiersFromRace(race);
             SetBeforeBattleHeader(race);
 
@@ -227,6 +245,34 @@ namespace TJ.Engagement
                 if (garrisonFight)
                 {
                     enemyArmy = campaignSaveManager.SaveData.townData.townGarrisonUnits;
+                }
+                else if (march)
+                {
+                    TT_Difficulty difficulty = run.difficultyLevel;
+                    int battle = MarchRules.CurrentBattle(run);
+                    Debug.Log($"[battle generation] March battle {battle}, {race}, twists: {string.Join(", ", run.activeTwists)}");
+                    int extraSquads = (run.HasOrdeal(OrdealId.Outnumbered) ? OrdealRegistry.OUTNUMBERED_SQUADS : 0)
+                        + (run.HasOrdeal(OrdealId.LastStand) ? OrdealRegistry.LAST_STAND_ENEMY_SQUADS : 0);
+                    // The campaign seed is the same for every node on a layer, so the node index sets each host apart.
+                    int armySeed = campaignSaveManager.GetSeededRandom() + marchNode.index * MarchRules.ARMY_SEED_PER_NODE;
+
+                    enemyArmy = ArmyCreator.GenerateMarchArmy(
+                        MarchRules.ScheduleBattle(run, battle),
+                        armySeed,
+                        engagementType == EngagementType.Horde,
+                        unitsPool,
+                        DifficultyRules.EnemyPrestigeEligible(difficulty),
+                        OrdealRegistry.EnemyPrestigeEnhanced(run),
+                        run.HasOrdeal(OrdealId.EliteGuard),
+                        OrdealRegistry.DoubleEnemyPrestigeChance(run),
+                        DifficultyRules.SpellsExtraSquad(difficulty),
+                        extraSquads
+                    );
+
+                    if (CampaignManager.Instance.GearManager.CheckForGear(GearID.BearSpray))
+                    {
+                        enemyArmy = ArmyCreator.ReplaceMonsterUnits(enemyArmy, armySeed, unitsPool);
+                    }
                 }
                 else
                 {
@@ -268,7 +314,8 @@ namespace TJ.Engagement
                 }
 
                 campaignSaveManager.SaveData.enemyWarlordHeroID = EnemyWarlord.ResolveHeroID(
-                    campaignSaveManager.SaveData, engagementType == EngagementType.Horde, garrisonFight);
+                    campaignSaveManager.SaveData, engagementType == EngagementType.Horde, garrisonFight, race, marchNode.index);
+                if (march) SetBeforeBattleHeader(race);
                 campaignSaveManager.SaveEnemyArmy(enemyArmy);
                 autoResolveBattleManager.Load(garrisonFight);
             }
@@ -280,6 +327,8 @@ namespace TJ.Engagement
                 int bookNum = CampaignManager.Instance.CampaignSaveManager.SaveData.bookNumber;
                 MapNodeData nodeData = CampaignManager.Instance.MapSceneUIManager.MapSceneManager.SelectedNodeData;
                 Weather weather = CampaignSaveManager.GenerateNodeWeather(nodeData.index, campaignSeed, bookNum, mapRegion, campaignSaveManager.SaveData.ordealWeather);
+                if (march && run.HasOrdeal(OrdealId.FoulWeather) && run.ordealWeather == Weather.ClearSkies)
+                    weather = MarchRules.FoulWeather(campaignSeed, bookNum, nodeData.index);
                 Biome biome = CampaignSaveManager.GenerateNodeBiome(nodeData.index, campaignSeed, bookNum, mapRegion);
                 if (garrisonFight) biome = Biome.Plains;
 
@@ -307,10 +356,10 @@ namespace TJ.Engagement
 
             GenerateBattlefield();
             GenerateEnemyArmy();
-            ShowArmies();
 
-            bool isTaelindorHero = (heroID == 7 || heroID == 8) && !campaignSaveManager.SaveData.IsFactionPassiveBlocked(Race.TaelindorForest);
+            bool isTaelindorHero = (heroID == 7 || heroID == 8) && !campaignSaveManager.SaveData.IsFactionPassiveBlocked(Race.TaelindorForest) && !heavensongUsed;
             view.ShowHeavensong(isTaelindorHero, Text("Campaign Bonus"), Text("TaelindorForestBonusDescription"));
+            RefreshWarChest();
             if (isTaelindorHero)
             {
                 MapRegion region = campaignSaveManager.SaveData.battleFieldPreset.mapRegion;
@@ -329,7 +378,6 @@ namespace TJ.Engagement
             SetBeforeBattleHeader(preset.race);
             view.SetBattlefield(Text(garrisonFight ? "Garrison" : preset.biome.ToString()), preset.biome, garrisonFight);
             ShowWeather(preset.weather);
-            ShowArmies();
             _ = LoadEnemyCompany(false, runId);
         }
         private void SetBeforeBattleHeader(Race enemyRace)
@@ -341,42 +389,104 @@ namespace TJ.Engagement
                 view.SetHeader(EngagementPanelView.HeaderKind.Garrison, Text("TownGarrison"), townLine, ColorData.GetRaceDisplayColor(town.townRace));
                 return;
             }
-            string act = MemoriUI.ConvertNumberToRomanNumeral(campaignSaveManager.SaveData.bookNumber);
             bool horde = engagementType == EngagementType.Horde;
-            string subtitle = string.Format(Text(horde ? "engagementHordeSub" : "engagementSkirmishSub"), act, Text(enemyRace.ToString()));
+            if (campaignSaveManager.SaveData.InMarch)
+            {
+                SetMarchHeader(enemyRace, horde);
+                return;
+            }
             view.SetHeader(horde ? EngagementPanelView.HeaderKind.Horde : EngagementPanelView.HeaderKind.Skirmish,
-                Text(engagementType.ToString()), subtitle, ColorData.GetRaceDisplayColor(enemyRace));
+                Text(engagementType.ToString()), null, ColorData.GetRaceDisplayColor(enemyRace));
         }
+        // A March battle is named by its number and its host; a warlord is named, and the Twists ride the header pill.
+        private void SetMarchHeader(Race enemyRace, bool warlord)
+        {
+            CampaignSaveData run = campaignSaveManager.SaveData;
+            int battle = MarchRules.CurrentBattle(run);
+            string subtitle = string.Format(Text("marchBattleSub"), battle, Text(enemyRace.ToString()));
+            if (warlord && run.enemyWarlordHeroID > 0)
+                subtitle = string.Format(Text("marchWarlordSub"), battle, Text(enemyRace.ToString()), Text(HeroData.GetHeroByID(run.enemyWarlordHeroID).HeroName));
+            view.SetHeader(warlord ? EngagementPanelView.HeaderKind.Horde : EngagementPanelView.HeaderKind.Skirmish,
+                Text(warlord ? "marchWarlord" : "marchRogueHost"), subtitle, ColorData.GetRaceDisplayColor(enemyRace));
+
+            if (run.battleCompleted) return;
+            if (run.activeTwists == null || run.activeTwists.Count == 0)
+            {
+                view.SetPill(null, Color.clear);
+                return;
+            }
+            List<string> twists = new();
+            List<string> lines = new();
+            foreach (OrdealId twist in run.activeTwists)
+            {
+                OrdealDefinition definition = OrdealRegistry.Get(twist);
+                twists.Add(Text(definition.NameKey));
+                lines.Add($"<color={ColorData.Error}>{Text(definition.NameKey)}</color>\n{Text(definition.TwistDescriptionKey)}");
+            }
+            TooltipContent tooltip = new TooltipContent
+            {
+                Title = Text("marchTwists"),
+                Body = KeywordText.ForTooltip(string.Join("\n\n", lines)),
+            };
+            view.SetPill(string.Join(" + ", twists), ParseColour(ColorData.Negative), tooltip);
+        }
+        #region War Chest
+        // Heavensong is one reroll a battle; striking a Twist rebuilds the battle and must not hand the reroll back.
+        private bool heavensongUsed;
+
+        // Gold's one use on the March: pay to strike the battle's next Twist. Each strike raises the price for the run.
+        private void RefreshWarChest()
+        {
+            CampaignSaveData run = campaignSaveManager.SaveData;
+            bool offered = run.InMarch && !garrisonFight && !run.battleCompleted && run.activeTwists != null && run.activeTwists.Count > 0;
+            if (!offered)
+            {
+                view.ShowWarChest(false);
+                return;
+            }
+            OrdealDefinition twist = OrdealRegistry.Get(run.activeTwists[0]);
+            int cost = MarchRules.StrikeTwistCost(run.twistsStruck);
+            string twistName = Text(twist.NameKey);
+            view.ShowWarChest(true, string.Format(Text("engagementWarChestLine"), cost, twistName),
+                CampaignManager.Instance.GoldManager.CurrentGoldAmount >= cost,
+                twistName, KeywordText.ForTooltip(Text(twist.TwistDescriptionKey)));
+        }
+        private void StrikeTwistClicked()
+        {
+            CampaignSaveData run = campaignSaveManager.SaveData;
+            if (!run.InMarch || run.battleCompleted || run.activeTwists == null || run.activeTwists.Count == 0) return;
+            int cost = MarchRules.StrikeTwistCost(run.twistsStruck);
+            if (CampaignManager.Instance.GoldManager.CurrentGoldAmount < cost) return;
+
+            OrdealId struck = run.activeTwists[0];
+            CampaignManager.Instance.GoldManager.ModifyGold(-cost, Text("engagementWarChest"));
+            run.twistsStruck++;
+            (run.twistsStruckHere ??= new List<OrdealId>()).Add(struck);
+            IAudioRequester.Instance.PlaySFX(SFXData.Reroll);
+
+            // The Twist may have shaped the host or the weather, so the battle is built again without it.
+            Weather rerolled = run.battleFieldPreset.weather;
+            PrepareBattle();
+            if (heavensongUsed && struck != OrdealId.FoulWeather)
+            {
+                BattleFieldPreset preset = run.battleFieldPreset;
+                preset.weather = rerolled;
+                campaignSaveManager.SaveBattlefieldPreset(preset);
+                ShowWeather(rerolled);
+            }
+            campaignSaveManager.SaveCampaign();
+            campaignSaveManager.SaveCampaignSnapshot();
+            _ = LoadEnemyCompany(false, _engagementRunId);
+        }
+        #endregion
         private void ShowWeather(Weather weather)
         {
             string localizedWeather = Text(weather.ToString());
             string description = weather == Weather.ClearSkies ? "" : WeatherInfo.GetDescription(weather);
             view.SetWeather(localizedWeather, weather, localizedWeather, description);
         }
-        // Squads and troops on each side. Only deployed squads fight, so reserves are left out of the player's count.
-        private void ShowArmies()
-        {
-            int squads = 0, troops = 0;
-            foreach (SquadToLoad squad in campaignSaveManager.SaveData.playerArmy)
-            {
-                if (squad.UnitIndex < 0 || squad.UnitIndex >= DeployedSlots || squad.SquadCurrentHealth <= 0) continue;
-                squads++;
-                troops += Troops(squad);
-            }
-            int enemySquads = 0, enemyTroops = 0;
-            foreach (SquadToLoad squad in campaignSaveManager.SaveData.enemyArmy)
-            {
-                enemySquads++;
-                enemyTroops += Troops(squad);
-            }
-            string format = Text("engagementSquadsTroops");
-            string enemyLine = string.Format(format, enemySquads, enemyTroops);
-            view.SetEnemyHost(enemyLine);
-            view.SetArmies(string.Format(format, squads, troops), enemyLine);
-        }
-        // The same count the squad cards show, so the strip adds up to the army bar.
-        private static int Troops(SquadToLoad squad) =>
-            int.TryParse(TabletopTavernData.Instance.GetSquadCurrentUnitCount(squad), out int units) ? units : 0;
+        // Blind March: before the fight the host is a faction and a Twist, nothing more. The result shows it as usual.
+        private bool BlindToEnemy => !campaignSaveManager.SaveData.battleCompleted && campaignSaveManager.SaveData.HasOrdeal(OrdealId.BlindMarch);
 
         // Watches a single LoadEngagement attempt (identified by runId). If it hasn't finished within
         // ENGAGEMENT_WATCHDOG_TIMEOUT real seconds, that attempt is treated as stalled (this is what was
@@ -435,7 +545,7 @@ namespace TJ.Engagement
         {
             isLoadingEnemyCompany = true;
             ClearEnemyCards();
-            if (campaignSaveManager.SaveData.enemyArmy == null || campaignSaveManager.SaveData.enemyArmy.Length == 0)
+            if (BlindToEnemy || campaignSaveManager.SaveData.enemyArmy == null || campaignSaveManager.SaveData.enemyArmy.Length == 0)
             {
                 isLoadingEnemyCompany = false; // don't leave OnArmyStructureChanged permanently blocked
                 return;
@@ -478,7 +588,8 @@ namespace TJ.Engagement
                 {
                     squadDisplayCardMenu.SpawnInJuice(false);
                     await Task.Delay(100);
-                    if (runId != _engagementRunId)
+                    // Fight can unload the Map mid-loop; a card made after that has no parent and leaks into the active scene.
+                    if (this == null || runId != _engagementRunId)
                     {
                         isLoadingEnemyCompany = false; // don't leave OnArmyStructureChanged permanently blocked
                         return;
@@ -519,6 +630,7 @@ namespace TJ.Engagement
         }
         public void ShowAutoResolvePrediction()
         {
+            if (BlindToEnemy) return;
             SquadToLoad[] predictedPlayerSquads = autoResolveBattleManager.PredictedPlayerArmy;
             foreach (SquadDisplayCardMenu squadDisplayCardMenu in mapSceneUIManager.HUDPanel.PlayerSquadsCards) {
                 for(int i = 0; i < predictedPlayerSquads.Length; i++) {
@@ -526,7 +638,7 @@ namespace TJ.Engagement
                         squadDisplayCardMenu.ShowPotentialHealthLoss(predictedPlayerSquads[i]);
                     }
                 }
-                if(squadDisplayCardMenu.InReserve && !garrisonFight) {
+                if(squadDisplayCardMenu.InReserve && !garrisonFight && !CampaignSaveManager.HealingBlocked()) {
                     squadDisplayCardMenu.ShowPotentialHealthRecovery();
                 }
             }
@@ -544,7 +656,6 @@ namespace TJ.Engagement
             if (_showedEngagementResult) StartCoroutine(ReshowUnitsSlain());
             if (isLoadingEnemyCompany) return;
             if (campaignSaveManager.SaveData.battleCompleted) return;
-            ShowArmies();
             autoResolveBattleManager.Load(garrisonFight);
         }
         private IEnumerator ReshowUnitsSlain()
@@ -564,6 +675,7 @@ namespace TJ.Engagement
             if (candidates.Count == 0) return;
 
             view.ShowHeavensong(false);
+            heavensongUsed = true;
 
             float total = candidates.Sum(w => w.likelihood);
             float roll = UnityEngine.Random.Range(0f, total);
@@ -599,7 +711,6 @@ namespace TJ.Engagement
             BattleFieldPreset preset = campaignSaveManager.SaveData.battleFieldPreset;
             preset.weather = finalWeather;
             campaignSaveManager.SaveBattlefieldPreset(preset);
-            mapSceneUIManager.HUDPanel.ShowWeatherHover(finalWeather, finalWeather != Weather.ClearSkies);
             IAudioRequester.Instance.PlaySFX(SFXData.TinyClick);
 
             LoadWeatherTip(finalWeather);
@@ -617,9 +728,11 @@ namespace TJ.Engagement
                 TutorialManager.Instance.LoadStepsFromRandomSpot(new TutorialStep[1] { tip.Value });
         }
 
+        public bool PredictGarrisonAssault(SquadToLoad[] garrison, Weather weather) => autoResolveBattleManager.PredictGarrisonAssault(garrison, weather);
         public void AlertOfBattleResults(bool playerWon)
         {
             if (DifficultyRules.AutoResolveDisabled(campaignSaveManager.SaveData.difficultyLevel)) return;
+            if (BlindToEnemy) return;
 
             string result = $"<color={(playerWon ? ColorData.Positive : ColorData.Negative)}>{Text(playerWon ? "Victory" : "Defeat")}</color>";
             view.SetPrediction(string.Format(Text("engagementPredicts"), result));
@@ -627,15 +740,11 @@ namespace TJ.Engagement
         #endregion
 
         #region Post Battle
-        // Endless acts add a little pay on top of the battles-fought bands, which reset every act.
-        private int EndlessGoldBonus()
-        {
-            return Mathf.Min(TabletopTavernConstants.ENDLESS_GOLD_CAP,
-                TabletopTavernConstants.EndlessActs(campaignSaveManager.SaveData.bookNumber) * TabletopTavernConstants.ENDLESS_GOLD_PER_ACT);
-        }
         // The same +0 / +2 / +4 / +6 bands by battles fought pay out on the bounty and the ransom.
+        // The March always pays the top band: its count of battles in the act resets with every stretch of road.
         private int BattlesFoughtBonus()
         {
+            if (campaignSaveManager.SaveData.InMarch) return 6;
             int fought = campaignSaveManager.SaveData.BattlesFought;
             if (fought < 3) return 0;
             if (fought < 6) return 2;
@@ -645,21 +754,25 @@ namespace TJ.Engagement
         public void GenerateBattleRewards()
         {
             goldRewardAmount = engagementType == EngagementType.Skirmish ? TabletopTavernConstants.GetSkirmishReward() : TabletopTavernConstants.GetHordeReward();
-            goldRewardAmount += BattlesFoughtBonus() + EndlessGoldBonus();
+            goldRewardAmount += BattlesFoughtBonus();
+            // The build is locked on the March and a won battle pays nothing, gold included (TJ).
+            bool march = campaignSaveManager.SaveData.InMarch;
+            if (march) goldRewardAmount = 0;
 
             // Both the drop roll and the pick come off the campaign seed, so re-opening the results panel
             // (exiting to the main menu and back) can't reroll the consumable reward.
             System.Random rewardRandom = campaignSaveManager.GetCampaignRandom();
             generateConsumable = rewardRandom.Next(0, 100) < CampaignManager.Instance.GoldManager.PotionRewardsOdds;
             if (SaveDataHandler.IsMetaprogressionNodeUnlocked(_postBattleConsumableMetaprogressionModel)) generateConsumable = true;
+            if (march) generateConsumable = false;
             if (generateConsumable)
             {
                 bool hasLuckyHorseshoe = CampaignManager.Instance.GearManager.CheckForGear(GearID.LuckyHorseshoe);
                 consumableEnum = ConsumableData.GetWeightedConsumable(campaignSaveManager.SaveData.bookNumber, rewardRandom, hasLuckyHorseshoe);
             }
 
-            if (!campaignSaveManager.SaveData.HasOrdeal(OrdealId.NoQuarter)) campaignSaveManager.RegisterRansomOffered();
-            ransomAmount = TabletopTavernConstants.GetRansomCaptivesReward() + BattlesFoughtBonus() + EndlessGoldBonus();
+            if (!march && !campaignSaveManager.SaveData.HasOrdeal(OrdealId.NoQuarter)) campaignSaveManager.RegisterRansomOffered();
+            ransomAmount = TabletopTavernConstants.GetRansomCaptivesReward() + BattlesFoughtBonus();
             if (SaveDataHandler.IsMetaprogressionNodeUnlocked(_postBattleGoldMetaprogressionModel)) ransomAmount += _postBattleGoldMetaprogressionModel.NodeValue;
             //The Skull Harvest: +2 Gold from ransoming captives
             if (HeroBonusManager.Instance.ActiveHeroID == 5) ransomAmount += 2;
@@ -677,6 +790,7 @@ namespace TJ.Engagement
             }));
 
             conscriptedUnitNames = null;
+            if (march) return;
             if (campaignSaveManager.SaveData.enemyArmy == null || campaignSaveManager.SaveData.enemyArmy.Length == 0) return;
             //get 3 random units from enemy army
             UnityEngine.Random.InitState(campaignSaveManager.SaveData.seed);
@@ -861,7 +975,13 @@ namespace TJ.Engagement
             var damage = new Dictionary<string, int>();
             var kills = new Dictionary<string, int>();
             var losses = new Dictionary<string, int>();
-            if (data.SquadDamageStore != null) foreach (SquadDamageStored entry in data.SquadDamageStore) damage[entry.SquadGUID] = entry.Damage;
+            var value = new Dictionary<string, float>();
+            if (data.SquadDamageStore != null)
+                foreach (SquadDamageStored entry in data.SquadDamageStore)
+                {
+                    damage[entry.SquadGUID] = entry.Damage;
+                    value[entry.SquadGUID] = entry.Value;
+                }
             if (data.SquadKillsStore != null) foreach (SquadKillsStored entry in data.SquadKillsStore) kills[entry.SquadGUID] = entry.Kills;
             if (data.SquadLossesStore != null) foreach (SquadLossesStored entry in data.SquadLossesStore) losses[entry.SquadGUID] = entry.Losses;
 
@@ -877,21 +997,17 @@ namespace TJ.Engagement
                 {
                     Unit = squad.UnitName,
                     Damage = damage.TryGetValue(id, out int d) ? d : 0,
+                    Value = value.TryGetValue(id, out float v) ? v : 0f,
                     Kills = kills.TryGetValue(id, out int k) ? k : 0,
                     Lost = losses.TryGetValue(id, out int l) ? l : 0,
+                    Fallen = squad.SquadCurrentHealth <= 0,
                 };
                 squadReports.Add(report);
                 reportSlain += report.Kills;
                 reportTroopsLost += report.Lost;
-                if (squad.SquadCurrentHealth <= 0) reportSquadsLost++;
+                if (report.Fallen) reportSquadsLost++;
             }
-            squadReports.Sort((a, b) => b.Damage.CompareTo(a.Damage));
-
-            reportEnemyTotal = data.enemyArmy?.Length ?? 0;
-            reportEnemyDestroyed = 0;
-            if (data.enemyArmy != null)
-                foreach (SquadToLoad squad in data.enemyArmy)
-                    if (squad.SquadCurrentHealth <= 0) reportEnemyDestroyed++;
+            squadReports.Sort(DamageReportTooltip.ByValue);
 
             // Auto-resolve saves enemy damage only; its enemy kills and losses live in the sim's stats, as the enemy card badges read them.
             AutoResolveSquad[] enemyStats = autoResolved ? autoResolveBattleManager.EnemyAutoResolveStats : null;
@@ -905,6 +1021,7 @@ namespace TJ.Engagement
                     {
                         Unit = squad.UnitName,
                         Damage = damage.TryGetValue(id, out int d) ? d : 0,
+                        Value = value.TryGetValue(id, out float v) ? v : 0f,
                         Kills = kills.TryGetValue(id, out int k) ? k : -1,
                         Lost = losses.TryGetValue(id, out int l) ? l : -1,
                     };
@@ -917,15 +1034,13 @@ namespace TJ.Engagement
                         }
                     enemyReports.Add(report);
                 }
-            enemyReports.Sort((a, b) => b.Damage.CompareTo(a.Damage));
+            enemyReports.Sort(DamageReportTooltip.ByValue);
         }
         private List<(string, string)> ReportCells()
         {
             string negative = ColorData.Negative;
             return new List<(string, string)>
             {
-                (Text("engagementCellDestroyed"), string.Format(Text("engagementOfCount"), reportEnemyDestroyed, reportEnemyTotal)),
-                (Text("engagementCellSlain"), reportSlain.ToString("N0")),
                 (Text("engagementCellLosses"), Warn(string.Format(Text("engagementTroopsCount"), reportTroopsLost), reportTroopsLost > 0, negative)),
                 (Text("engagementCellSquadsLost"), reportSquadsLost == 0 ? Text("engagementNone") : Warn(reportSquadsLost.ToString(), true, negative)),
             };
@@ -955,11 +1070,16 @@ namespace TJ.Engagement
             conscriptRow = null;
             TutorialManager.Instance.LoadStepsFromRandomSpot(new TutorialStep[1] { TutorialData.PostBattleChoices });
 
-            bountyRow = view.AddSpoil();
-            bountyRow.Set(view.Icon(EngagementPanelView.RewardIcon.Gold), ParseColour(ColorData.Gold), Text("Claim Bounty"), Text("engagementBountyDetail"));
-            bountyRow.SetValue("+" + goldRewardAmount, true);
-            bountyRow.SetTaken(WasTaken(SpoilBounty));
-            bountyRow.Button.onClick.AddListener(ClaimGoldRewardButtonClicked);
+            bountyRow = null;
+            // The March pays no gold for a win.
+            if (!campaignSaveManager.SaveData.InMarch)
+            {
+                bountyRow = view.AddSpoil();
+                bountyRow.Set(view.Icon(EngagementPanelView.RewardIcon.Gold), ParseColour(ColorData.Gold), Text("Claim Bounty"), Text("engagementBountyDetail"));
+                bountyRow.SetValue("+" + goldRewardAmount, true);
+                bountyRow.SetTaken(WasTaken(SpoilBounty));
+                bountyRow.Button.onClick.AddListener(ClaimGoldRewardButtonClicked);
+            }
 
             if (generateConsumable)
             {
@@ -973,20 +1093,26 @@ namespace TJ.Engagement
                 consumableRow.Button.onClick.AddListener(ClaimConsumableButtonClicked);
             }
 
-            Color rarityColour = ColorData.GetRarityTierColor(recruitsRarity);
-            recruitRow = view.AddSpoil();
-            recruitRow.Set(view.Icon(EngagementPanelView.RewardIcon.Recruit), rarityColour, Text("Recruit Unit"), Text("Recruit Unit Reward Desc"));
-            recruitRow.SetTag(Text(recruitsRarity.ToString()), rarityColour);
-            recruitRow.SetTaken(WasTaken(SpoilRecruit));
-            recruitRow.Button.onClick.AddListener(ClaimRecruitUnitButtonClicked);
+            recruitRow = null;
+            // No Reinforcements: the March offers no recruit.
+            if (!campaignSaveManager.SaveData.InMarch)
+            {
+                Color rarityColour = ColorData.GetRarityTierColor(recruitsRarity);
+                recruitRow = view.AddSpoil();
+                recruitRow.Set(view.Icon(EngagementPanelView.RewardIcon.Recruit), rarityColour, Text("Recruit Unit"), Text("Recruit Unit Reward Desc"));
+                recruitRow.SetTag(Text(recruitsRarity.ToString()), rarityColour);
+                recruitRow.SetTaken(WasTaken(SpoilRecruit));
+                recruitRow.Button.onClick.AddListener(ClaimRecruitUnitButtonClicked);
+            }
 
             ShowChoices();
+            if (bountyRow == null && consumableRow == null && recruitRow == null && !choiceOffered) view.ShowStacks(false);
             continueButton.gameObject.SetActive(true);
         }
         private void ShowChoices()
         {
-            // No Quarter: defeated enemies pay no ransom, so the choice is not offered.
-            if (!campaignSaveManager.SaveData.HasOrdeal(OrdealId.NoQuarter))
+            // No Quarter, and the March, which pays no gold: the ransom is not offered.
+            if (!campaignSaveManager.SaveData.InMarch && !campaignSaveManager.SaveData.HasOrdeal(OrdealId.NoQuarter))
             {
                 EngagementChoiceRow ransom = AddChoice(EngagementPanelView.RewardIcon.Ransom, "Ransom Captives", Text("engagementRansomDetail"));
                 ransom.SetValue("+" + ransomAmount, true);
@@ -1000,7 +1126,8 @@ namespace TJ.Engagement
                 conscriptRow.Button.onClick.AddListener(ConscriptSurvivorsButtonClicked);
             }
 
-            int heroID = HeroBonusManager.Instance.ActiveHeroID;
+            // The March's laws switch off every hero choice here: each one heals, recruits or adds gear.
+            int heroID = campaignSaveManager.SaveData.InMarch ? -1 : HeroBonusManager.Instance.ActiveHeroID;
             if (heroID == 10) AddRaiseDead();
             else if (heroID == 3 || heroID == 4)
             {
@@ -1136,7 +1263,7 @@ namespace TJ.Engagement
         #region Taking spoils
         public void ClaimGoldRewardButtonClicked()
         {
-            if (bountyRow.IsTaken) return;
+            if (bountyRow == null || bountyRow.IsTaken) return;
             MarkTaken(SpoilBounty);
             CampaignManager.Instance.GoldManager.ModifyGold(goldRewardAmount, Text("Loot Gold"));
             bountyRow.SetTaken(true, true);
@@ -1304,7 +1431,7 @@ namespace TJ.Engagement
         private void QueueAutoContinue()
         {
             if (autoContinueQueued || openPicker != Picker.None) return;
-            bool spoilsDone = bountyRow.IsTaken && recruitRow.IsTaken && (consumableRow == null || consumableRow.IsTaken);
+            bool spoilsDone = (bountyRow == null || bountyRow.IsTaken) && (recruitRow == null || recruitRow.IsTaken) && (consumableRow == null || consumableRow.IsTaken);
             if (!spoilsDone || (choiceOffered && !choiceMade)) return;
             autoContinueQueued = true;
             StartCoroutine(AutoContinue());
@@ -1325,6 +1452,8 @@ namespace TJ.Engagement
         }
         public void CompleteEngagement(bool garrisonEngagement)
         {
+            if (engagementCompleted) return;
+            engagementCompleted = true;
             _showedEngagementResult = false; // player is on their way out; visibility check no longer applies
             // Resolve the kobold hero-bonus auto-prestige (and anything PrestigeUnitsOnKills already
             // queued up during results display) before deciding where to go next, so the trait picker
@@ -1340,7 +1469,8 @@ namespace TJ.Engagement
                 }
                 else
                 {
-                    if(engagementType == EngagementType.Horde)
+                    // A March warlord is one more battle on the road: no Act Complete screen, the layer just completes.
+                    if(engagementType == EngagementType.Horde && !campaignSaveManager.SaveData.InMarch)
                     {
                         mapSceneUIManager.CompleteHordeBattle();
                     }

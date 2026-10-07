@@ -1,8 +1,9 @@
 using Unity.Burst;
 using Unity.Entities;
 using Unity.Collections;
+using Unity.Transforms;
 using UnityEngine;
-using GPUECSAnimationBaker.Engine.AnimatorSystem;
+using TabletopTavern.GpuAnim;
 
 [UpdateInGroup(typeof(LateSimulationSystemGroup))]
 [UpdateBefore(typeof(KillUnitSystem))]
@@ -74,25 +75,26 @@ public partial class ProcessUnitDeathSystem : SystemBase
                             //check if cavalry
                             if(entityManager.HasComponent<Cavalry>(removedUnit.Entity)) {
                                 Cavalry cavalry = entityManager.GetComponentData<Cavalry>(removedUnit.Entity);
-                                ecbDelete.AddComponent<KillUnitTag>(cavalry.riderEntity);
+                                // A squad destroyed in the same frame it spawned has no rider yet.
+                                if (cavalry.riderEntity != Entity.Null) ecbDelete.AddComponent<KillUnitTag>(cavalry.riderEntity);
                             }
                             break;
                         }
 
-                        //make sure GpuEcsAnimatorControlComponent exists. The unit is already out of the
+                        //make sure GpuAnimControl exists. The unit is already out of the
                         //buffer at this point, so it must still be killed or it leaks as an orphan.
-                        if(!entityManager.HasComponent<GpuEcsAnimatorControlComponent>(animationDataHolder.gpuEcsAnimatorEntity)) {
-                            Debug.LogError($"Entity {animationDataHolder.gpuEcsAnimatorEntity} does not have GpuEcsAnimatorControlComponent component.");
+                        if(!entityManager.HasComponent<GpuAnimControl>(animationDataHolder.gpuEcsAnimatorEntity)) {
+                            Debug.LogError($"Entity {animationDataHolder.gpuEcsAnimatorEntity} does not have GpuAnimControl component.");
                             if (entityManager.Exists(childEntity)) ecbDelete.AddComponent<KillUnitTag>(childEntity);
                             ecbDelete.AddComponent<KillUnitTag>(removedUnit.Entity);
                             ecbDelete.AddComponent<KillUnitTag>(debugEntity);
                             break;
                         }
 
-                        GpuEcsAnimatorControlComponent controlComp = entityManager.GetComponentData<GpuEcsAnimatorControlComponent>(animationDataHolder.gpuEcsAnimatorEntity);
-                        controlComp.transitionSpeed = 0f;
+                        GpuAnimControl controlComp = entityManager.GetComponentData<GpuAnimControl>(animationDataHolder.gpuEcsAnimatorEntity);
+                        controlComp.TransitionSeconds = 0f;
                         int deathAnimationId = _random.NextInt(0, 3);
-                        controlComp.animatorInfo.animationID = deathAnimationId switch {
+                        controlComp.Slot = deathAnimationId switch {
                             0 => animationDataHolder.deathAnimationId1,
                             1 => animationDataHolder.deathAnimationId2,
                             2 => animationDataHolder.deathAnimationId3,
@@ -102,6 +104,13 @@ public partial class ProcessUnitDeathSystem : SystemBase
                         ecbDelete.SetComponent(childEntity, controlComp);
                         ecbDelete.AddComponent<UnitOutlineClearTag>(childEntity);
 
+                        // The corpse outlives its unit, so its LocalTransform must hold its world pose or a LocalToWorld recompute drops it at the origin.
+                        // Composed from the two LocalTransforms, not LocalToWorld: a non-uniform model scale lives in PostTransformMatrix, which stays on the corpse and would apply twice.
+                        LocalTransform unitWorld = entityManager.GetComponentData<LocalTransform>(removedUnit.Entity);
+                        LocalTransform modelLocal = entityManager.GetComponentData<LocalTransform>(childEntity);
+                        ecbDelete.RemoveComponent<Parent>(childEntity);
+                        ecbDelete.SetComponent(childEntity, unitWorld.TransformTransform(modelLocal));
+
                         ecbDelete.AddComponent<KillUnitTag>(removedUnit.Entity);
                         ecbDelete.AddComponent<KillUnitTag>(debugEntity);
 
@@ -110,9 +119,9 @@ public partial class ProcessUnitDeathSystem : SystemBase
                         //if cavalry, play rider death animation
                         if(SystemAPI.HasComponent<Cavalry>(removedUnit.Entity)) {
                             Cavalry cavalry = SystemAPI.GetComponent<Cavalry>(removedUnit.Entity);
-                            RefRW<GpuEcsAnimatorControlComponent> controlComp2 = SystemAPI.GetComponentRW<GpuEcsAnimatorControlComponent>(cavalry.riderEntity);
-                            controlComp2.ValueRW.animatorInfo.animationID = TabletopTavernConstants.CAVALRY_DEATH_ANIMATION_ID;
-                            controlComp2.ValueRW.transitionSpeed = 0f;
+                            RefRW<GpuAnimControl> controlComp2 = SystemAPI.GetComponentRW<GpuAnimControl>(cavalry.riderEntity);
+                            controlComp2.ValueRW.Slot = TabletopTavernConstants.CAVALRY_DEATH_ANIMATION_ID;
+                            controlComp2.ValueRW.TransitionSeconds = 0f;
                         }
 
                         if(removedUnit.KilledBySquadId != 100)

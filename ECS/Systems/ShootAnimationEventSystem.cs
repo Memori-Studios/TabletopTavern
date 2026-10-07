@@ -1,6 +1,6 @@
 using Unity.Burst;
 using Unity.Entities;
-using GPUECSAnimationBaker.Engine.AnimatorSystem;
+using TabletopTavern.GpuAnim;
 
 [UpdateInGroup(typeof(LateSimulationSystemGroup))]
 partial struct ShootAnimationEventSystem : ISystem {
@@ -17,11 +17,9 @@ partial struct ShootAnimationEventSystem : ISystem {
 
             if (shootAttack.ValueRO.onShoot.isTriggered) {
                 RefRO<AnimationDataHolder> gpuEcsAnimatorAspect = SystemAPI.GetComponentRO<AnimationDataHolder>(entity);
-                RefRW<GpuEcsAnimatorControlComponent> controlComp = SystemAPI.GetComponentRW<GpuEcsAnimatorControlComponent>(gpuEcsAnimatorAspect.ValueRO.gpuEcsAnimatorEntity);
-                controlComp.ValueRW.animatorInfo.animationID = gpuEcsAnimatorAspect.ValueRO.attackanimationId;
-
-                RefRW<GpuEcsAnimatorControlStateComponent> controlStateComp = SystemAPI.GetComponentRW<GpuEcsAnimatorControlStateComponent>(gpuEcsAnimatorAspect.ValueRO.gpuEcsAnimatorEntity);
-                controlStateComp.ValueRW.state = GpuEcsAnimatorControlStates.Start;
+                RefRW<GpuAnimControl> controlComp = SystemAPI.GetComponentRW<GpuAnimControl>(gpuEcsAnimatorAspect.ValueRO.gpuEcsAnimatorEntity);
+                controlComp.ValueRW.Slot = gpuEcsAnimatorAspect.ValueRO.attackanimationId;
+                SystemAPI.GetComponentRW<GpuAnimRestart>(gpuEcsAnimatorAspect.ValueRO.gpuEcsAnimatorEntity).ValueRW.Value = true;
             }
 
         }

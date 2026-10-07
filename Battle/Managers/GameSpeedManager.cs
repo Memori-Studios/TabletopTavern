@@ -86,6 +86,8 @@ namespace TJ
 
         public void SetTimeScale(GameSpeedButton _gameSpeedButton)
         {
+            // Photo mode owns time while it is open; the speed buttons and pause state stay as the player left them.
+            if (_photoHeld) return;
             if (_gameSpeedButton == pauseButton && !_isPaused)
                 _prePauseButton = gameSpeedButtons[_currentSpeedIndex];
             for (int i = 0; i < gameSpeedButtons.Length; i++) {
@@ -163,6 +165,12 @@ namespace TJ
         private bool AutoPause()
         {
             if (_isPaused || BattleManager.Instance.GamePhase != GamePhase.Battle) return false;
+            // A pause that falls inside a photo mode time step waits until photo mode closes.
+            if (_photoHeld)
+            {
+                _pendingAutoPause = true;
+                return false;
+            }
             SetTimeScale(pauseButton);
             return true;
         }
@@ -181,8 +189,86 @@ namespace TJ
             return false;
         }
         #endregion
+
+        #region Photo mode hold
+        private bool _photoHeld;
+        private bool _pendingAutoPause;
+        private Coroutine _photoStep;
+        public bool PhotoStepRunning => _photoStep != null;
+
+        /// <summary>Freezes the battle for photo mode without touching the speed buttons or the player's pause state.</summary>
+        public void BeginPhotoHold()
+        {
+            if (_photoHeld) return;
+            // After the battle the units are already frozen by LockEndOfBattleSpeed, and that state must not change.
+            GamePhase phase = BattleManager.Instance.GamePhase;
+            if (phase == GamePhase.Battle && !_isPaused)
+                SaveDataHandler.PauseUsedThisBattle = true;
+            _photoHeld = true;
+            if (phase != GamePhase.PostGame) ApplyRaw(0f);
+        }
+
+        /// <summary>Hands time back. With restoreSpeed off (scene teardown) nothing is re-applied.</summary>
+        public void EndPhotoHold(bool restoreSpeed)
+        {
+            if (!_photoHeld) return;
+            if (_photoStep != null)
+            {
+                StopCoroutine(_photoStep);
+                _photoStep = null;
+            }
+            _photoHeld = false;
+            bool pendingPause = _pendingAutoPause;
+            _pendingAutoPause = false;
+            if (!restoreSpeed || BattleManager.Instance.GamePhase == GamePhase.PostGame) return;
+            ApplyRaw(gameSpeedButtons[_currentSpeedIndex].GameSpeed);
+            if (pendingPause) AutoPause();
+        }
+
+        /// <summary>Runs the battle for a short stretch of game time, then freezes it again. Battle phase only.</summary>
+        public bool PhotoStep(float seconds)
+        {
+            if (!_photoHeld || _photoStep != null || BattleManager.Instance.GamePhase != GamePhase.Battle) return false;
+            // A step only makes sense from a frozen battle.
+            if (Time.timeScale > 0f) return false;
+            _photoStep = StartCoroutine(PhotoStepRoutine(seconds));
+            return true;
+        }
+        /// <summary>Lets the battle run at a set speed inside photo mode; 0 freezes it again. Battle phase only.</summary>
+        public void SetPhotoSpeed(float speed)
+        {
+            if (!_photoHeld || BattleManager.Instance.GamePhase != GamePhase.Battle) return;
+            if (_photoStep != null)
+            {
+                StopCoroutine(_photoStep);
+                _photoStep = null;
+            }
+            ApplyRaw(speed);
+        }
+        private IEnumerator PhotoStepRoutine(float seconds)
+        {
+            ApplyRaw(1f);
+            float elapsed = 0f;
+            while (elapsed < seconds)
+            {
+                yield return null;
+                elapsed += Time.deltaTime;
+            }
+            ApplyRaw(0f);
+            _photoStep = null;
+        }
+        private static void ApplyRaw(float speed)
+        {
+            Time.timeScale = speed;
+            World world = World.DefaultGameObjectInjectionWorld;
+            if (world == null || !world.IsCreated) return;
+            world.GetExistingSystemManaged<SimulationSystemGroup>().Enabled = speed > 0f;
+            world.GetExistingSystemManaged<InitializationSystemGroup>().Enabled = speed > 0f;
+        }
+        #endregion
         public void LockEndOfBattleSpeed()
         {
+            EndPhotoHold(false);
             Time.timeScale = 1f;
             var defaultWorld = World.DefaultGameObjectInjectionWorld;
             var simulationSystemGroup = defaultWorld.GetExistingSystemManaged<SimulationSystemGroup>();

@@ -17,6 +17,7 @@ partial struct RangedSquadRemoveAmmunitionSystem : ISystem
     {
         EntityManager entityManager = state.EntityManager;
         EntityCommandBuffer entityCommandBuffer = SystemAPI.GetSingleton<EndSimulationEntityCommandBufferSystem.Singleton>().CreateCommandBuffer(state.WorldUnmanaged);
+        bool testUnlimitedCharges = SystemAPI.TryGetSingleton(out MageTestOptions testOptions) && testOptions.UnlimitedCharges;
 
         // Keyed on SquadAmmunition rather than RangedSquad, so this covers mages too: MageCastSystem
         // adds the same AmmuntionSpent tag an archer's shot does, and a charge is spent here.
@@ -25,6 +26,8 @@ partial struct RangedSquadRemoveAmmunitionSystem : ISystem
             RefRW<SquadAmmunition>,
             DynamicBuffer<EntityReferenceBufferElement>>())
         {
+            bool isMage = entityManager.HasComponent<MageSquad>(squad.ValueRO.SelfEntity);
+            bool spendsCharge = !(isMage && testUnlimitedCharges);
             //skip this the first time the squad is processed
             for (int i = 0; i < entityBuffer.Length; i++)
             {
@@ -32,14 +35,14 @@ partial struct RangedSquadRemoveAmmunitionSystem : ISystem
                 if(entityManager.HasComponent<AmmuntionSpent>(referencedEntity))
                 {
                     entityCommandBuffer.RemoveComponent<AmmuntionSpent>(referencedEntity);
-                    ammunition.ValueRW.Value -= 1;
+                    if (spendsCharge) ammunition.ValueRW.Value -= 1;
                 }
             }
             // A shooter spends a whole volley at once, so where exactly the pool crosses empty is
             // noise and the original < 0 is preserved byte for byte. A mage is one model spending
             // one charge per cast, so that same rule would hand it one cast more than its authored
             // charge count - a third again as many on a 3-charge mage. Hence the separate boundary.
-            int depletedAt = entityManager.HasComponent<MageSquad>(squad.ValueRO.SelfEntity) ? 0 : -1;
+            int depletedAt = isMage ? 0 : -1;
             //update healthbar ammo count
             if (ammunition.ValueRO.Value <= depletedAt)
             {

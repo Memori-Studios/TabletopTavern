@@ -14,8 +14,6 @@ partial struct BiomeApplicationSystem : ISystem
     public void OnUpdate(ref SystemState state)
     {
         EntityCommandBuffer entityCommandBuffer = SystemAPI.GetSingleton<EndSimulationEntityCommandBufferSystem.Singleton>().CreateCommandBuffer(state.WorldUnmanaged);
-        var statsData = SystemAPI.GetSingleton<SquadStatsData>();
-        ref var statsBlob = ref statsData.StatsBlob.Value; 
 
         foreach (var (squad, BattlefieldBonusBufferElement, ApplyBiomeBonus)
             in SystemAPI.Query<
@@ -25,11 +23,7 @@ partial struct BiomeApplicationSystem : ISystem
             >())
         {
             float swampSpeedModifier = TabletopTavernConstants.SWAMP_SPEED_MODIFIER;
-            SquadStats squadStats = statsBlob.GetStats(squad.UnitName);
-
-            if(squadStats.SquadAttributes.SwampCreature ||
-                squadStats.SquadAttributes.Ethereal ||
-                squadStats.SquadAttributes.ChickenFlight)
+            if(ApplyBiomeBonus.IgnoresSwamp)
             {
                 swampSpeedModifier = 0f;
             }

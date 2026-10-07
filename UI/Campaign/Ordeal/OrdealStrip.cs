@@ -32,7 +32,10 @@ namespace TJ.Ordeals
                 if (icon != null) Destroy(icon.gameObject);
             icons.Clear();
 
-            List<OrdealId> held = campaignSaveManager.SaveData.ordeals ?? new List<OrdealId>();
+            // The March's two laws lead the row, so every greyed potion and gear slot has its reason one hover away.
+            List<OrdealId> held = new();
+            if (campaignSaveManager.SaveData.InMarch) held.AddRange(OrdealRegistry.MarchLaws);
+            if (campaignSaveManager.SaveData.ordeals != null) held.AddRange(campaignSaveManager.SaveData.ordeals);
             gameObject.SetActive(held.Count > 0);
 
             int shown = held.Count > MAX_ICONS ? MAX_ICONS - 1 : held.Count;

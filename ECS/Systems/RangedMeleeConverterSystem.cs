@@ -5,7 +5,7 @@ using UnityEngine;
 using Unity.Transforms;
 using ProjectDawn.Navigation;
 using System.Collections.Generic;
-using GPUECSAnimationBaker.Engine.AnimatorSystem;
+using TabletopTavern.GpuAnim;
 
 partial struct RangedMeleeConverterSystem : ISystem
 {
@@ -36,8 +36,8 @@ partial struct RangedMeleeConverterSystem : ISystem
                 AnimationDataHolder.ValueRW.attackanimationId = TabletopTavernConstants.MELEE_ATTACK_ID;
                 AnimationDataHolder.ValueRW.currentIdleAnimationId = AnimationDataHolder.ValueRO.attackIdleAnimationId;
 
-                GpuEcsAnimatorControlComponent controlComp = entityManager.GetComponentData<GpuEcsAnimatorControlComponent>(AnimationDataHolder.ValueRO.gpuEcsAnimatorEntity);
-                controlComp.animatorInfo.animationID = AnimationDataHolder.ValueRO.attackIdleAnimationId;
+                GpuAnimControl controlComp = entityManager.GetComponentData<GpuAnimControl>(AnimationDataHolder.ValueRO.gpuEcsAnimatorEntity);
+                controlComp.Slot = AnimationDataHolder.ValueRO.attackIdleAnimationId;
                 entityManager.SetComponentData(AnimationDataHolder.ValueRO.gpuEcsAnimatorEntity, controlComp);
 
                 LocalTransform bowTransform = entityManager.GetComponentData<LocalTransform>(RangedMeleeConverter.ValueRO.BowEntity);
@@ -71,8 +71,8 @@ partial struct RangedMeleeConverterSystem : ISystem
                 AnimationDataHolder.ValueRW.attackanimationId = TabletopTavernConstants.RANGED_ATTACK_ID;
                 AnimationDataHolder.ValueRW.currentIdleAnimationId = AnimationDataHolder.ValueRO.idleAnimationId;
 
-                GpuEcsAnimatorControlComponent controlComp = entityManager.GetComponentData<GpuEcsAnimatorControlComponent>(AnimationDataHolder.ValueRO.gpuEcsAnimatorEntity);
-                controlComp.animatorInfo.animationID = AnimationDataHolder.ValueRO.idleAnimationId;
+                GpuAnimControl controlComp = entityManager.GetComponentData<GpuAnimControl>(AnimationDataHolder.ValueRO.gpuEcsAnimatorEntity);
+                controlComp.Slot = AnimationDataHolder.ValueRO.idleAnimationId;
                 entityManager.SetComponentData(AnimationDataHolder.ValueRO.gpuEcsAnimatorEntity, controlComp);
 
                 LocalTransform bowTransform = entityManager.GetComponentData<LocalTransform>(RangedMeleeConverter.ValueRO.BowEntity);

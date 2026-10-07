@@ -64,6 +64,7 @@ namespace TJ
         [SerializeField] private MemoriCanvasGroup infoCanvasGroup, gameSettingsCanvasGroup, audioSettingsCanvasGroup, graphicsSettingsCanvasGroup, controlsSettingsCanvasGroup, creditsCanvasGroup;
         [SerializeField] private SettingsToggleV2 hideUnitInfoInBattleToggle;
         [SerializeField] private SettingsToggleV2 cameraShakeToggle;
+        [SerializeField] private SettingsToggleV2 followHeadBobToggle;
         [SerializeField] private SettingsToggleV2 autoRollInitiativeToggle;
         [SerializeField] private SettingsToggleV2 invertMouseToggle;
         [SerializeField] private SettingsToggleV2 colorblindModeToggle;
@@ -73,6 +74,7 @@ namespace TJ
 
         public MonitoredData<bool> HideSquadInfoInBattle = new();
         public MonitoredData<bool> CameraShakeEnabled = new();
+        public MonitoredData<bool> FollowHeadBob = new();
         public MonitoredData<bool> AutoRollInitiative = new();
         public MonitoredData<bool> InvertMouseY = new();
 
@@ -163,6 +165,9 @@ namespace TJ
             hideUnitInfoInBattleToggle.OnToggle.onValueChanged.AddListener(SetHideSquadInfoInBattle);
             CameraShakeEnabled.Value = cameraShakeToggle.OnToggle.isOn;
             cameraShakeToggle.OnToggle.onValueChanged.AddListener(val => CameraShakeEnabled.Value = val);
+            followHeadBobToggle.Load();
+            FollowHeadBob.Value = followHeadBobToggle.OnToggle.isOn;
+            followHeadBobToggle.OnToggle.onValueChanged.AddListener(val => FollowHeadBob.Value = val);
 
             AutoRollInitiative.Value = autoRollInitiativeToggle.OnToggle.isOn;
             autoRollInitiativeToggle.OnToggle.onValueChanged.AddListener(val => AutoRollInitiative.Value = val);
@@ -245,6 +250,18 @@ namespace TJ
             // run CloseSettingsPanel and unpause the fight behind a still-open Collection, and in
             // the main menu it would fire OnSettingsPanelToggled into MainMenu.ReturnToMainMenu.
             if (SceneHandler.Instance.OverlaySceneOpen) return;
+            // Esc leaves photo mode; Settings never opens over it.
+            if (PhotoMode.IsActive)
+            {
+                PhotoMode.RequestExit();
+                return;
+            }
+            // Esc leaves the follow camera too.
+            if (FollowCamera.IsActive)
+            {
+                FollowCamera.RequestExit();
+                return;
+            }
 
             Debug.Log($"SettingsManager.SettingsHotkeyPressed() - SettingsPanelOpen: {SettingsPanelOpen}");
             if(SceneHandler.Instance.CurrentGameState == GameStateEnum.MainMenu)
@@ -263,6 +280,8 @@ namespace TJ
         }
         public void OpenSettingsPanel()
         {
+            // Opening would cache photo mode's frozen time scale and restore it on close.
+            if (PhotoMode.IsActive) return;
             SwitchSettingsFocus(gameSettingsCanvasGroup);
             bool inMainMenu = SceneHandler.Instance.CurrentGameState == GameStateEnum.MainMenu;
             closeLabel.text = LocalizationManager.Instance.GetText(inMainMenu ? "Close" : "resumeGameButton");
@@ -378,6 +397,26 @@ namespace TJ
             }
             guide.OpenBrowser(topicId);
         }
+        #region Dev Tools
+        // Read straight from the keyboard so the dev key needs no input action, no rebinding row and no saved binding.
+        private void Update()
+        {
+            UnityEngine.InputSystem.Keyboard keyboard = UnityEngine.InputSystem.Keyboard.current;
+            if (keyboard == null || !Application.isFocused || !keyboard.f1Key.wasPressedThisFrame) return;
+            if (!SaveDataHandler.IsDevToolUser()) return;
+            if (settingsOpen && activeCanvasGroup == devToolsCanvasGroup) CloseSettingsPanel();
+            else OpenDevTools();
+        }
+        /// <summary>Opens Settings on the Dev Tools page.</summary>
+        public void OpenDevTools()
+        {
+            if (SceneHandler.Instance.OverlaySceneOpen) return;
+            // Opening twice in a battle would cache the paused time scale and restore it on close.
+            if (!SettingsPanelOpen) OpenSettingsPanel();
+            if (!SettingsPanelOpen) return;
+            SwitchSettingsFocus(devToolsCanvasGroup);
+        }
+        #endregion
         public void SwitchSettingsFocus(MemoriCanvasGroup _canvasGroup)
         {
             // A hidden page is switched off, not just transparent, so its rows only start once it is shown.
@@ -455,11 +494,12 @@ namespace TJ
             }
             mainMenu.OpenDemoSaveImportPrompt();
         }
-        private void ResetTutorial()
+        public void ResetTutorial()
         {
             PlayerSaveData saveData = SaveDataHandler.LoadPlayerSaveData();
             saveData.tutorialStepCompleted.Clear();
             saveData.BattlefieldInfoSectionsViewed.Clear();
+            saveData.hideMarchGuide = false;
             SaveDataHandler.SavePlayerSaveData(saveData);
 
             string notificationText = LocalizationManager.Instance.GetText("tutorialprogressreset");

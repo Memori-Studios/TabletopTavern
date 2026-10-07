@@ -172,6 +172,13 @@ namespace TJ
             huntersMarkGO.SetActive(false);
 
             int used = 0;
+            // The only battle readout of the Prestige III trait while Hide Unit Info in Battle is on.
+            UnitAttribute prestigeTrait = BattleManager.Instance.SquadManager.GetSquadPrestigeTrait(squadEntity.SquadId);
+            if (prestigeTrait != UnitAttribute.None)
+            {
+                Color gold = ColorData.HexToRgba(ColorData.Gold);
+                SetSpellRow(used++, SpriteData.GetSprite("Prestige"), gold, LocalizationManager.Instance.GetText(prestigeTrait.ToString()), gold, false);
+            }
             if (entityManager.HasBuffer<SpellStatusBufferElement>(squadEntity.SelfEntity))
             {
                 DynamicBuffer<SpellStatusBufferElement> buffer = entityManager.GetBuffer<SpellStatusBufferElement>(squadEntity.SelfEntity, true);

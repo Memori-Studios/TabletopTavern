@@ -4,7 +4,7 @@ using Unity.Entities;
 using TJ;
 using Unity.Mathematics;
 using Unity.Transforms;
-using GPUECSAnimationBaker.Engine.AnimatorSystem;
+using TabletopTavern.GpuAnim;
 using Memori.Audio;
 using ProjectDawn.Navigation;
 
@@ -15,6 +15,7 @@ partial struct MeleeUnitAttackSystem : ISystem
     private ComponentLookup<MoveOverride> moveOverrideComponentLookup;
     private ComponentLookup<InMeleeRange> inMeleeRangeLookup;
     private ComponentLookup<AgentShape> agentShapeLookup;
+    private ComponentLookup<ChargePenetration> penetrationLookup;
     private Unity.Mathematics.Random _random;
     private EntityQuery _infantryMeleeQuery;
     private EntityQuery _largeMeleeQuery;
@@ -27,6 +28,7 @@ partial struct MeleeUnitAttackSystem : ISystem
         moveOverrideComponentLookup = state.GetComponentLookup<MoveOverride>(true);
         inMeleeRangeLookup = state.GetComponentLookup<InMeleeRange>(false);
         agentShapeLookup = state.GetComponentLookup<AgentShape>(true);
+        penetrationLookup = state.GetComponentLookup<ChargePenetration>(true);
         _random = Unity.Mathematics.Random.CreateFromIndex(0);
         _infantryMeleeQuery = SystemAPI.QueryBuilder()
             .WithAll<MeleeAttack, Target, SetDestination, UnitCollisionBody>()
@@ -101,7 +103,10 @@ partial struct MeleeUnitAttackSystem : ISystem
 
             //reset timer
             meleeAttack.ValueRW.timer = meleeAttack.ValueRO.timerMax + _random.NextFloat(-0.2f, 0.2f);
-            
+
+            if (SystemAPI.HasComponent<UnitRecoil>(entity))
+                SystemAPI.GetComponentRW<UnitRecoil>(entity).ValueRW.LungeIn = TabletopTavernConstants.RECOIL_LUNGE_DELAY;
+
             //flanking check
             bool flankAttack = entityManager.IsComponentEnabled<DealFlankingDamageTag>(entity);
 
@@ -109,19 +114,18 @@ partial struct MeleeUnitAttackSystem : ISystem
 
             //play attack animation
             RefRO<AnimationDataHolder> gpuEcsAnimatorAspect = SystemAPI.GetComponentRO<AnimationDataHolder>(entity);
-            RefRW<GpuEcsAnimatorControlComponent> controlComp = SystemAPI.GetComponentRW<GpuEcsAnimatorControlComponent>(gpuEcsAnimatorAspect.ValueRO.gpuEcsAnimatorEntity);
-            int animationId = _random.NextInt(0, 100) > 10 ? 
+            RefRW<GpuAnimControl> controlComp = SystemAPI.GetComponentRW<GpuAnimControl>(gpuEcsAnimatorAspect.ValueRO.gpuEcsAnimatorEntity);
+            int animationId = _random.NextInt(0, 100) > 10 ?
                 gpuEcsAnimatorAspect.ValueRO.attackanimationId : gpuEcsAnimatorAspect.ValueRO.altattackanimationId;
 
-            controlComp.ValueRW.animatorInfo.animationID = animationId;
-            RefRW<GpuEcsAnimatorControlStateComponent> controlStateComp = SystemAPI.GetComponentRW<GpuEcsAnimatorControlStateComponent>(gpuEcsAnimatorAspect.ValueRO.gpuEcsAnimatorEntity);
-            controlStateComp.ValueRW.state = GpuEcsAnimatorControlStates.Start;
+            controlComp.ValueRW.Slot = animationId;
+            SystemAPI.GetComponentRW<GpuAnimRestart>(gpuEcsAnimatorAspect.ValueRO.gpuEcsAnimatorEntity).ValueRW.Value = true;
 
             //if cavalry, play rider attack animation
             if(SystemAPI.HasComponent<Cavalry>(entity)) {
                 Cavalry cavalry = SystemAPI.GetComponent<Cavalry>(entity);
-                RefRW<GpuEcsAnimatorControlComponent> controlComp2 = SystemAPI.GetComponentRW<GpuEcsAnimatorControlComponent>(cavalry.riderEntity);
-                controlComp2.ValueRW.animatorInfo.animationID = 1;
+                RefRW<GpuAnimControl> controlComp2 = SystemAPI.GetComponentRW<GpuAnimControl>(cavalry.riderEntity);
+                controlComp2.ValueRW.Slot = 1;
             }
 
             //sfx
@@ -148,6 +152,21 @@ partial struct MeleeUnitAttackSystem : ISystem
             if(_random.NextInt(0, 100) > hitChance) {
                 // Debug.Log($"MeleeUnitAttackSystem: {entity} missed the attack");
                 continue;
+            }
+
+            // The struck model rocks away from the blow; heavier bodies move less.
+            if (SystemAPI.HasComponent<UnitRecoil>(target.ValueRO.targetEntity))
+            {
+                LocalTransform targetTransform = SystemAPI.GetComponent<LocalTransform>(target.ValueRO.targetEntity);
+                float3 push = targetTransform.Position - localTransform.ValueRO.Position;
+                push.y = 0f;
+                float3 localPush = math.mul(math.inverse(targetTransform.Rotation), math.normalizesafe(push));
+                float weight = SystemAPI.HasComponent<UnitCollisionBody>(target.ValueRO.targetEntity)
+                    ? 1f / math.sqrt(math.max(1f, SystemAPI.GetComponent<UnitCollisionBody>(target.ValueRO.targetEntity).Mass)) : 1f;
+                SystemAPI.GetComponentRW<UnitRecoil>(target.ValueRO.targetEntity).ValueRW.Kick(
+                    localPush * (TabletopTavernConstants.RECOIL_HIT_DISTANCE * weight),
+                    math.radians(TabletopTavernConstants.RECOIL_HIT_TILT_DEGREES) * localPush.z * weight,
+                    TabletopTavernConstants.RECOIL_HIT_TIME);
             }
 
             //apply damage
@@ -197,9 +216,9 @@ partial struct MeleeUnitAttackSystem : ISystem
                 AnimationDataHolder animationDataHolder = entityManager.GetComponentData<AnimationDataHolder>(target.ValueRO.targetEntity);
                 Entity childEntity = animationDataHolder.gpuEcsAnimatorEntity;
 
-                GpuEcsAnimatorControlComponent controlComp3 = entityManager.GetComponentData<GpuEcsAnimatorControlComponent>(animationDataHolder.gpuEcsAnimatorEntity);
-                controlComp3.transitionSpeed = 0f;
-                controlComp3.animatorInfo.animationID = animationDataHolder.thrownAnimationId;
+                GpuAnimControl controlComp3 = entityManager.GetComponentData<GpuAnimControl>(animationDataHolder.gpuEcsAnimatorEntity);
+                controlComp3.TransitionSeconds = 0f;
+                controlComp3.Slot = animationDataHolder.thrownAnimationId;
 
                 RefRW<AgentBody> agentBody = SystemAPI.GetComponentRW<AgentBody>(target.ValueRO.targetEntity);
                 agentBody.ValueRW.IsStopped = true;
@@ -224,7 +243,8 @@ partial struct MeleeUnitAttackSystem : ISystem
                 TeamOfSource = unit.ValueRO.Team,
                 DamageSourceSquadId = unit.ValueRO.squadId,
                 DamageAttributes = DamageAttributes,
-                FlankAttack = flankAttack
+                FlankAttack = flankAttack,
+                Lifesteal = SystemAPI.HasComponent<BloodDrinkerTag>(entity)
             });
             // UnityEngine.Debug.Log($"MeleeUnitAttackSystem: {unit.ValueRO.unitName} attacked {target.ValueRO.targetEntity} with {meleeAttackValue} damage and attributes {DamageAttributes}");     
         }
@@ -233,12 +253,14 @@ partial struct MeleeUnitAttackSystem : ISystem
         moveOverrideComponentLookup.Update(ref state);
         inMeleeRangeLookup.Update(ref state);
         agentShapeLookup.Update(ref state);
+        penetrationLookup.Update(ref state);
 
         MeleeUnitCombatJob infantryJob = new MeleeUnitCombatJob {
             LocalTransformComponentLookup = localTransformComponentLookup,
             MoveOverrideComponentLookup = moveOverrideComponentLookup,
             InMeleeRangeLookup = inMeleeRangeLookup,
             AgentShapeLookup = agentShapeLookup,
+            PenetrationLookup = penetrationLookup,
             DeltaTime = SystemAPI.Time.DeltaTime,
             random = _random,
         };
@@ -249,6 +271,7 @@ partial struct MeleeUnitAttackSystem : ISystem
             MoveOverrideComponentLookup = moveOverrideComponentLookup,
             InMeleeRangeLookup = inMeleeRangeLookup,
             AgentShapeLookup = agentShapeLookup,
+            PenetrationLookup = penetrationLookup,
             DeltaTime = SystemAPI.Time.DeltaTime,
             random = _random,
         };
@@ -265,6 +288,7 @@ public partial struct MeleeUnitCombatJob : IJobEntity {
     [ReadOnly] public ComponentLookup<MoveOverride> MoveOverrideComponentLookup;
     public ComponentLookup<InMeleeRange> InMeleeRangeLookup;
     [ReadOnly] public ComponentLookup<AgentShape> AgentShapeLookup;
+    [ReadOnly] public ComponentLookup<ChargePenetration> PenetrationLookup;
     [ReadOnly] public float DeltaTime;
     public Unity.Mathematics.Random random;
 
@@ -296,14 +320,18 @@ public partial struct MeleeUnitCombatJob : IJobEntity {
         if (InMeleeRangeLookup.HasComponent(entity))
             InMeleeRangeLookup.SetComponentEnabled(entity, isCloseEnoughToAttack);
 
+        // A model still driving into the line keeps heading along the charge instead of stopping at its target.
+        bool penetrating = PenetrationLookup.HasComponent(entity) && PenetrationLookup.IsComponentEnabled(entity);
+        float3 driveGoal = penetrating ? localTransform.Position + PenetrationLookup[entity].Direction * 4f : float3.zero;
+
         if (!isCloseEnoughToAttack)
         {
-            setDestination.destinationPosition = targetLocalTransform.Position;
+            setDestination.destinationPosition = penetrating ? driveGoal : targetLocalTransform.Position;
             return;
         }
 
         // In attack range — hold position so the nav agent stops and IsStopped can fire.
-        setDestination.destinationPosition = localTransform.Position;
+        setDestination.destinationPosition = penetrating ? driveGoal : localTransform.Position;
 
         if (meleeAttack.timer > 0) return;
 

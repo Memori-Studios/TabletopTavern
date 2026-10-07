@@ -29,6 +29,8 @@ namespace Memori.SaveData
         public int actReached;
         public int chaptersCompleted;
         public int battlesFought;
+        /// <summary>Battles survived on the March after the act 3 win; 0 for a run that never marched on.</summary>
+        public int marchBattles;
         /// <summary>Gold in the purse when the run ended.</summary>
         public int goldAtEnd;
         public int goldEarned;
