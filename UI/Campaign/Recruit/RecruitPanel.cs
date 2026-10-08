@@ -220,7 +220,7 @@ namespace TJ.Recruit
                 if (token.IsCancellationRequested) break;
                 RecruitCard recruitCard = Instantiate(recruitCardPrefab, recruitCardsParent);
                 // bool isPurchased = campaignSaveManager.SaveData.townData.recruitedIndices.Contains(i);
-                recruitCard.SetUp(recruitmentOptions[i], this, i, GetRawImage(i), false);
+                recruitCard.SetUp(recruitmentOptions[i], this, i, GetRawImage(i), false, ShopGoblinPrestige(recruitmentOptions[i].unitName));
                 recruitCards.Add(recruitCard);
                 await Task.Delay(200);
             }
@@ -318,7 +318,9 @@ namespace TJ.Recruit
                 hasSelectedRecruitCard = true;
                 LogPick(_squadStats.unitName.ToString(), false);
                 campaignSaveManager.RecruitSquad(_squadStats, conscriptedHealth, _conscripted: recruitmentType == RecruitmentType.Conscription,
-                    _prestige: recruitmentType == RecruitmentType.Town ? townRecruitPrestige : 0);
+                    _prestige: recruitmentType == RecruitmentType.Town ? townRecruitPrestige : ShopGoblinPrestige(_squadStats.unitName));
+                // A goblin recruited at max prestige still needs its trait picked.
+                mapSceneUIManager.TryDrainPendingPrestigeChoices();
             }
 
             IAudioRequester.Instance.PlaySFX(SFXData.RecruitUnit);
@@ -371,6 +373,13 @@ namespace TJ.Recruit
             CloseRecruitPanel();
         }
         
+        // Drums in the Deep (Boblin): a goblin from a shop pack joins one prestige higher per act after the first, up to the max.
+        int ShopGoblinPrestige(UnitName unitName)
+        {
+            if (recruitmentType != RecruitmentType.Shop || !TabletopTavernConstants.IsTrueGoblin(unitName)) return 0;
+            if (campaignSaveManager.SaveData.heroID != CampaignSaveManager.BOBLIN_HERO_ID) return 0;
+            return Mathf.Clamp(campaignSaveManager.SaveData.bookNumber - 1, 0, 2);
+        }
         // The health a conscripted unit joins at; the Engagement panel's Conscript text reads the same rule.
         public float ConscriptHealth()
         {

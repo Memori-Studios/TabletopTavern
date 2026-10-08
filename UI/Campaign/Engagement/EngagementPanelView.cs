@@ -121,6 +121,11 @@ namespace TJ.Engagement
         [SerializeField] private float slideDelaySeconds = 0.2f;
         [SerializeField] private float slideSeconds = 0.5f;
         [SerializeField] private float closeSeconds = 0.25f;
+        // Canvas units above the screen bottom the card must clear: the army bar's loss badges reach about 281 at every UI scale.
+        [SerializeField] private float bottomClearance = 295f;
+        // Canvas units below the screen top the card's edge may rise to: the top bar's 50 plus the 25 the crest stands above the edge.
+        [SerializeField] private float topClearance = 75f;
+        [SerializeField] private float minFitScale = 0.6f;
         #endregion
 
         // Cards are 60 wide with 5 between, the army bar's pitch; the fallen strip draws them at half size.
@@ -134,6 +139,8 @@ namespace TJ.Engagement
         private readonly List<EngagementSpoilRow> spoilRows = new();
         private readonly List<EngagementChoiceRow> choiceRows = new();
         private Vector2 cardRest;
+        private float cardLift;
+        private Vector3 fittedFor;
         private Coroutine rise;
         private Coroutine popup;
         private static readonly int ActiveParameter = Animator.StringToHash("Active");
@@ -147,6 +154,7 @@ namespace TJ.Engagement
         public MemoriTooltipTrigger AutoResolveTooltip => autoResolveTooltip;
         public MemoriTooltipTrigger FightTooltip => fightTooltip;
         public Sprite DamageIcon => damageIcon;
+        private Vector2 Rest => cardRest + new Vector2(0f, cardLift);
 
         public enum RewardIcon { Gold, Recruit, Ransom, Conscript, RaiseDead, Consume, Purge, HourOfDestiny }
 
@@ -167,6 +175,26 @@ namespace TJ.Engagement
             cardRest = card.anchoredPosition;
         }
 
+        private void LateUpdate() => FitCard();
+
+        // A card too tall for the room above the army bar first rises toward the top bar, then shrinks only by what is still missing.
+        private void FitCard()
+        {
+            Vector2 area = ((RectTransform)card.parent).rect.size;
+            Vector2 size = card.rect.size;
+            var key = new Vector3(area.x, area.y, size.y);
+            if (key == fittedFor || size.y <= 0f) return;
+            fittedFor = key;
+            float restTop = area.y * card.anchorMin.y + cardRest.y;
+            float maxLift = Mathf.Max(0f, area.y - topClearance - restTop);
+            float lift = Mathf.Clamp(size.y + bottomClearance - restTop, 0f, maxLift);
+            float room = restTop + lift - bottomClearance;
+            float scale = Mathf.Clamp(Mathf.Min(room / size.y, area.x / size.x), minFitScale, 1f);
+            card.anchoredPosition += new Vector2(0f, lift - cardLift);
+            cardLift = lift;
+            card.localScale = new Vector3(scale, scale, 1f);
+        }
+
         // How long the card takes to land, so the enemy cards and the result wait for it.
         public float OpenSeconds => slideDelaySeconds + slideSeconds;
         public float CloseSeconds => closeSeconds;
@@ -182,7 +210,7 @@ namespace TJ.Engagement
             rise = null;
             if (!isActiveAndEnabled)
             {
-                card.anchoredPosition = cardRest + new Vector2(0f, to);
+                card.anchoredPosition = Rest + new Vector2(0f, to);
                 return;
             }
             rise = StartCoroutine(SlideCard(from, to, delay, seconds, curve));
@@ -190,15 +218,15 @@ namespace TJ.Engagement
 
         private IEnumerator SlideCard(float from, float to, float delay, float seconds, MMTween.MMTweenCurve curve)
         {
-            card.anchoredPosition = cardRest + new Vector2(0f, from);
+            card.anchoredPosition = Rest + new Vector2(0f, from);
             if (delay > 0f) yield return new WaitForSecondsRealtime(delay);
             for (float t = 0f; t < seconds; t += Time.unscaledDeltaTime)
             {
                 float k = MMTween.Evaluate(t / seconds, curve);
-                card.anchoredPosition = cardRest + new Vector2(0f, Mathf.LerpUnclamped(from, to, k));
+                card.anchoredPosition = Rest + new Vector2(0f, Mathf.LerpUnclamped(from, to, k));
                 yield return null;
             }
-            card.anchoredPosition = cardRest + new Vector2(0f, to);
+            card.anchoredPosition = Rest + new Vector2(0f, to);
             rise = null;
         }
 

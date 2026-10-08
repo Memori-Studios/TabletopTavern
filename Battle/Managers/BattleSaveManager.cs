@@ -13,6 +13,10 @@ namespace TJ.Battle
         public bool IsCustomBattle => isCustomBattle;
         private bool isGarrisonBattle;
         public bool IsGarrisonBattle => isGarrisonBattle;
+        // A custom battle has no town, so its wall size lives here; -1 means no walls.
+        private int customGarrison = -1;
+        public int CustomGarrison => customGarrison;
+        public TownSize GarrisonTownSize => isCustomBattle ? (TownSize)customGarrison : SaveDataHandler.Load().townData.townSize;
         private int seed;
         public int Seed => seed;
         public int EnemiesToSpawn;
@@ -33,7 +37,12 @@ namespace TJ.Battle
             isCustomBattle = SceneHandler.Instance.EditorLoadCustomBattleSaveData || SaveDataHandler.LoadPlayerSaveData().customBattle;
             isGarrisonBattle = saveData.townData != null && saveData.townData.townInteractionStatus == TownInteractionStatus.GarrisonBattleStarted;
 
-            if(isCustomBattle) isGarrisonBattle = false;
+            if (isCustomBattle) SetCustomGarrison(SaveDataHandler.LoadCustomBattleSaveData().customBattleGarrison);
+        }
+        public void SetCustomGarrison(int townSize)
+        {
+            customGarrison = townSize;
+            isGarrisonBattle = townSize >= 0;
         }
         public (SquadToLoad[], Dictionary<string, SquadBattlePosition>) GetArmyFromSaveData(bool requestingPlayerArmy)
         {
@@ -81,7 +90,11 @@ namespace TJ.Battle
             else 
             {
                 for (int i = 0; i < armyToLoad.Length; i++) {
-                    if (armyToLoad[i].UnitIndex != -1 && armyToLoad[i].UnitIndex < 10) {
+                    // Custom battles have no reserves; a campaign army also brings its goblin reserves.
+                    bool fights = isCustomBattle
+                        ? armyToLoad[i].UnitIndex != -1 && armyToLoad[i].UnitIndex < 10
+                        : SaveDataHandler.TakesTheField(armyToLoad[i]);
+                    if (fights) {
                         temp.Add(armyToLoad[i]);
                     }
                 }

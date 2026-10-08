@@ -15,6 +15,8 @@ namespace TJ
     public static class UnitVisualOverrideLoader
     {
         public const string FolderName = "unit_visuals";
+        // The game's own re-baked units, under StreamingAssets so the build copies the files as they are.
+        public const string BuiltInFolderName = "UnitVisuals";
         public const string IconFileName = "icon.png";
         public const int IconSize = 256;
         public const int ShootingSlotCount = 15;
@@ -30,6 +32,19 @@ namespace TJ
         {
             UnitVisualOverrides.Clear();
             s_iconPathByUnit.Clear();
+        }
+
+        /// <summary>Registers the game's own TJBake units. Called before the mod loop so a mod still wins.</summary>
+        public static void RegisterBuiltIns(Dictionary<UnitName, SquadStats> stats)
+        {
+            string root = Path.Combine(Application.streamingAssetsPath, BuiltInFolderName);
+            if (!Directory.Exists(root)) return;
+            string[] folders = Directory.GetDirectories(root);
+            Array.Sort(folders, StringComparer.Ordinal);
+            int applied = 0;
+            foreach (string folder in folders)
+                if (TryRegister(folder, "built-in", stats, builtIn: true)) applied++;
+            if (applied > 0) Debug.Log($"[UnitVisuals] {applied} built-in TJBake unit visual(s) registered.");
         }
 
         public static void ApplyOverridesFromModFolder(string modFolderPath, Dictionary<UnitName, SquadStats> stats)
@@ -53,7 +68,7 @@ namespace TJ
             if (applied > 0) Debug.Log($"[ModOverride] Unit visuals ({modLabel}): {applied} unit visual(s) registered.");
         }
 
-        private static bool TryRegister(string folder, string modLabel, Dictionary<UnitName, SquadStats> stats)
+        private static bool TryRegister(string folder, string modLabel, Dictionary<UnitName, SquadStats> stats, bool builtIn = false)
         {
             string name = Path.GetFileName(folder);
             if (name.StartsWith("_")) return false;
@@ -63,22 +78,28 @@ namespace TJ
                 Debug.LogWarning($"{context}: no unit has this name in this build. Skipping.");
                 return false;
             }
-            if (unitStats.unitType == UnitType.Artillery || unitStats.unitType == UnitType.Structure || unitStats.unitSize == UnitSize.Artillery)
+            if (!builtIn && (unitStats.unitType == UnitType.Artillery || unitStats.unitType == UnitType.Structure || unitStats.unitSize == UnitSize.Artillery))
             {
                 Debug.LogWarning($"{context}: artillery and gates cannot take a unit visual yet. Skipping.");
                 return false;
             }
-            UnitJson json = TJBakeVisualLoader.ReadManifest(folder, out string error);
+            UnitJson json = TJBakeVisualLoader.ReadManifest(folder, out string error, hostTextures: builtIn);
             if (json == null)
             {
                 Debug.LogError($"{context}: {error}. The built-in visual stays.");
                 return false;
             }
-            string problem = CheckAgainstUnit(json, name, unitStats);
+            // The game's own bakes load exactly as the old ones did; the slot rule protects against incomplete mods.
+            string problem = builtIn ? (json.kind != "unit" ? $"kind is '{json.kind}'" : null) : CheckAgainstUnit(json, name, unitStats);
             if (problem != null)
             {
                 Debug.LogError($"{context}: {problem}. The built-in visual stays.");
                 return false;
+            }
+            if (builtIn)
+            {
+                UnitVisualOverrides.RegisterBuiltIn(name, folder);
+                return true;
             }
             UnitVisualOverrides.Register(name, folder);
             string icon = Path.Combine(folder, IconFileName);

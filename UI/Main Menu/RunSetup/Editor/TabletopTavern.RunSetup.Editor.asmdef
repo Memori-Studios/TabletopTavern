@@ -4,6 +4,7 @@
     "references": [
         "TabletopTavern.Core",
         "Memori.Tooltip",
+        "Memori.UI",
         "Unity.TextMeshPro",
         "UnityEngine.UI",
         "Unity.Localization",

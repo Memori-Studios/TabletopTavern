@@ -112,7 +112,7 @@ public class TutorialManager : Memori.Utilities.Singleton<TutorialManager>
     }
     public void LoadStep()
     {
-        stepDescription.text = LocalizationManager.Instance.GetText($"tutorialStep{activeTutorialSteps[activeStepNumber].stepID}Desc");
+        stepDescription.text = InputText.Tutorial($"tutorialStep{activeTutorialSteps[activeStepNumber].stepID}Desc");
         activeStepEnum = activeTutorialSteps[activeStepNumber].tutorialStepEnum;
 
         completeStepButton.gameObject.SetActive(true);
@@ -128,7 +128,7 @@ public class TutorialManager : Memori.Utilities.Singleton<TutorialManager>
         saveData.tutorialStepCompleted.Add(_tutorialStep.stepID);
         SaveDataHandler.SavePlayerSaveData(saveData);
 
-        string text = LocalizationManager.Instance.GetText($"tutorialStep{_tutorialStep.stepID}Desc");
+        string text = InputText.Tutorial($"tutorialStep{_tutorialStep.stepID}Desc");
         tooltipText.text = _formatArgs.Length > 0 ? string.Format(text, _formatArgs) : text;
 
         // Activate before setting the bool: enabling an Animator resets its parameters.

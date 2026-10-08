@@ -262,6 +262,12 @@ namespace TJ
                 FollowCamera.RequestExit();
                 return;
             }
+            // Esc shows a hidden battle UI, like Total War; Settings never opens unseen.
+            if (UIManager.BattleUIHidden)
+            {
+                UIManager.RequestShowBattleUI();
+                return;
+            }
 
             Debug.Log($"SettingsManager.SettingsHotkeyPressed() - SettingsPanelOpen: {SettingsPanelOpen}");
             if(SceneHandler.Instance.CurrentGameState == GameStateEnum.MainMenu)
@@ -428,6 +434,8 @@ namespace TJ
             bool changed = activeCanvasGroup != _canvasGroup;
             _canvasGroup.gameObject.SetActive(true);
             _canvasGroup.CGEnable();
+            // Before the page slide starts: the slide returns the page to wherever it was when it began.
+            FitGuideToShortCanvas(_canvasGroup == infoCanvasGroup);
             if (changed)
             {
                 if (pageFade != null) StopCoroutine(pageFade);
@@ -437,6 +445,35 @@ namespace TJ
             activeCanvasGroup = _canvasGroup;
             RefreshRail();
         }
+
+        #region Battle Guide width
+        // The guide is laid out 1500 wide; in a narrower content area it shrinks below readable size on the Steam Deck.
+        private const float GuideDesignWidth = 1500f;
+        private bool guideWidened;
+
+        // On a narrow canvas the guide also takes the rail's space; reopening Settings always lands on the Game page.
+        private void FitGuideToShortCanvas(bool guideShown)
+        {
+            if (railEntries == null || railEntries.Length == 0) return;
+            var page = (RectTransform)infoCanvasGroup.transform;
+            var content = page.parent as RectTransform;
+            var rail = railEntries[0].row.transform.parent as RectTransform;
+            if (content == null || rail == null) return;
+
+            bool widen = guideShown && content.rect.width < GuideDesignWidth;
+            if (widen == guideWidened) return;
+            guideWidened = widen;
+
+            CanvasGroup railGroup = rail.GetComponent<CanvasGroup>();
+            if (railGroup == null) railGroup = rail.gameObject.AddComponent<CanvasGroup>();
+            railGroup.alpha = widen ? 0f : 1f;
+            railGroup.interactable = !widen;
+            railGroup.blocksRaycasts = !widen;
+
+            float railLeft = content.InverseTransformPoint(rail.TransformPoint(new Vector3(rail.rect.xMin, 0f, 0f))).x;
+            page.offsetMin = new Vector2(widen ? railLeft - content.rect.xMin : 0f, page.offsetMin.y);
+        }
+        #endregion
 
         #region Settings fades
         private Coroutine settingsFade, pageFade;

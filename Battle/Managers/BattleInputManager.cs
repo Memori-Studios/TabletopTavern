@@ -74,12 +74,12 @@ public class BattleInputManager : MonoBehaviour
     public CursorMode CursorMode => cursorMode;
 
     // Photo mode uses the mouse for its camera and focus, so the battlefield never sees a button while it is open.
-    private bool _leftClickDownThisFrame => !TJ.BattleViewModes.OrdersBlocked && Input.GetMouseButtonDown(0);
-    private bool _rightClickDownThisFrame => !TJ.BattleViewModes.OrdersBlocked && Input.GetMouseButtonDown(1);
-    private bool _rightClickUpThisFrame => !TJ.BattleViewModes.OrdersBlocked && Input.GetMouseButtonUp(1);
-    private bool _leftClickUpThisFrame => !TJ.BattleViewModes.OrdersBlocked && Input.GetMouseButtonUp(0);
-    private bool _leftClickHeldDown => !TJ.BattleViewModes.OrdersBlocked && Input.GetMouseButton(0);
-    private bool _rightClickHeldDown => !TJ.BattleViewModes.OrdersBlocked && Input.GetMouseButton(1);
+    private bool _leftClickDownThisFrame => !TJ.BattleViewModes.OrdersBlocked && global::Memori.Input.GameCursor.GetButtonDown(0);
+    private bool _rightClickDownThisFrame => !TJ.BattleViewModes.OrdersBlocked && global::Memori.Input.GameCursor.GetButtonDown(1);
+    private bool _rightClickUpThisFrame => !TJ.BattleViewModes.OrdersBlocked && global::Memori.Input.GameCursor.GetButtonUp(1);
+    private bool _leftClickUpThisFrame => !TJ.BattleViewModes.OrdersBlocked && global::Memori.Input.GameCursor.GetButtonUp(0);
+    private bool _leftClickHeldDown => !TJ.BattleViewModes.OrdersBlocked && global::Memori.Input.GameCursor.GetButton(0);
+    private bool _rightClickHeldDown => !TJ.BattleViewModes.OrdersBlocked && global::Memori.Input.GameCursor.GetButton(1);
     private SpawnManager spawnManager;
     private PositionDrawer positionDrawer;
     private UnitPositioningManager unitPositioningManager;

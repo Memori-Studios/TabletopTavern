@@ -30,6 +30,8 @@ namespace TJ
         public static string TroopHealth = "#E37188";
         public static string GearDrop = "#95A5A6";
         public static string UnitStat = "#E3BB71";
+        // Campaign Trait chips: apart from trait green, its Colorblind Mode blue, prestige gold and every rarity.
+        public static string CampaignTrait = "#EAD8A8";
 
         // Battlefield
         public static string MinimapPlayer => Pick(MinimapPlayerColors);

@@ -18,7 +18,7 @@ namespace TJ.Map
         public void UseConsumable(ConsumableEnum _consumable)
         {
             CampaignManager.Instance.CampaignSaveManager.RemoveConsumable(_consumable);
-            CampaignManager.Instance.CampaignSaveManager.MarkConsumableUsed();
+            CampaignManager.Instance.CampaignSaveManager.MarkConsumableUsed(_consumable);
 
             switch (_consumable)
             {

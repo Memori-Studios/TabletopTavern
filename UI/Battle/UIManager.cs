@@ -2,6 +2,7 @@ using UnityEngine;
 using UnityEngine.UI;
 using Unity.Collections;
 using TMPro;
+using System.Collections;
 using System.Collections.Generic;
 using Memori.Utilities;
 using Unity.Mathematics;
@@ -153,6 +154,10 @@ namespace TJ
             BattleManager.Instance.SquadManager.OnSquadUpdated += OnSquadUpdated;
             SettingsManager.Instance.OnSettingsPanelToggled += OnSettingsPanelToggled;
             InputHandler.Instance.onHideUI += HideUI;
+            SceneHandler.Instance.OnSceneSetUpComplete -= OnSceneSetUpComplete;
+            SceneHandler.Instance.OnSceneSetUpComplete += OnSceneSetUpComplete;
+            InputDevices.Changed -= OnInputDeviceChanged;
+            InputDevices.Changed += OnInputDeviceChanged;
             deploymentCanvasGroup.CGEnable();
 
             squadBattleInfo.Unhover();
@@ -221,6 +226,7 @@ namespace TJ
                     healthBar.transform.position = Vector3.down * 1000;
                 }
             }
+            RescanWhileHidden();
         }
         private void HideUI()
         {
@@ -229,41 +235,170 @@ namespace TJ
             //check if bug report open
             ReportABugScreen bugScreen = FindFirstObjectByType<ReportABugScreen>();
             if (bugScreen != null && bugScreen.GetComponent<CanvasGroup>().alpha > 0) return;
-            
 
-            Canvas[] canvases = FindObjectsByType<Canvas>(FindObjectsSortMode.None);
+            SetBattleUIHidden(s_hiddenBy != this);
+        }
+        #region Hide UI
+        // The UIManager whose Hide UI key last hid the battle UI; null while it is shown.
+        private static UIManager s_hiddenBy;
+        /// <summary>True while the player has hidden the battle UI. Esc shows it again instead of opening Settings.</summary>
+        public static bool BattleUIHidden => s_hiddenBy != null;
+        public static void RequestShowBattleUI()
+        {
+            if (s_hiddenBy != null) s_hiddenBy.SetBattleUIHidden(false);
+        }
+        private const float HiddenRescanSeconds = 0.25f;
+        private readonly BattleViewHider hiddenViewHider = new();
+        private float nextHiddenRescan;
 
-            foreach (Canvas canvas in canvases)
+        // Markers and every other canvas go at once; the HUD panels slide off their nearest edge, like Total War.
+        private void SetBattleUIHidden(bool hide)
+        {
+            s_hiddenBy = hide ? this : null;
+            if (hide)
             {
-                canvas.enabled = !canvas.enabled;
-            }
-
-            int layerToToggle = LayerMask.NameToLayer("Shapes");
-            Camera targetCamera = BattleManager.Instance.BattleCamera;
-
-            bool IsLayerEnabled()
-            {
-                return (targetCamera.cullingMask & (1 << layerToToggle)) != 0; // Check if the layer's bit is set in the culling mask
-            }
-            if (IsLayerEnabled())
-            {
-                targetCamera.cullingMask &= ~(1 << layerToToggle);// Enable the layer by setting the corresponding bit to 1
+                hiddenViewHider.Hide(null, showFlags: false, slidingHud: HudRootCanvas);
+                Cursor.visible = false;
+                SetShapesLayerVisible(false);
+                nextHiddenRescan = Time.unscaledTime + HiddenRescanSeconds;
             }
             else
             {
-                targetCamera.cullingMask |= (1 << layerToToggle); // Disable the layer by setting the corresponding bit to 0
+                hiddenViewHider.Restore();
+                SetShapesLayerVisible(true);
             }
-            // The unit outline and ground chevrons are a render feature, not a layer, so they follow this flag.
-            BattleMarkers.Hidden = !IsLayerEnabled();
-            SquadFlagGameObjectTag[] flagGameObjectTags = FindObjectsByType<SquadFlagGameObjectTag>(FindObjectsSortMode.None);
-
-            foreach (SquadFlagGameObjectTag flag in flagGameObjectTags)
-            {
-                flag.FlagMeshRenderer.enabled = !flag.FlagMeshRenderer.enabled;
-            }
-
-            Cursor.visible = !Cursor.visible;
+            SetHudHidden(this, hide);
         }
+        private void SetShapesLayerVisible(bool visible)
+        {
+            int bit = 1 << LayerMask.NameToLayer("Shapes");
+            Camera battleCamera = BattleManager.Instance.BattleCamera;
+            if (visible) battleCamera.cullingMask |= bit;
+            else battleCamera.cullingMask &= ~bit;
+        }
+        // The battle keeps running, so markers, flags and canvases that switch on while hidden are caught as they appear.
+        private void RescanWhileHidden()
+        {
+            if (hudHiders.Count == 0 || Time.unscaledTime < nextHiddenRescan) return;
+            nextHiddenRescan = Time.unscaledTime + HiddenRescanSeconds;
+            if (s_hiddenBy == this)
+            {
+                // Leaving photo mode or the follow camera clears this flag even while the Hide UI key holds the view.
+                BattleMarkers.Hidden = true;
+                hiddenViewHider.RescanCanvases();
+                hiddenViewHider.Rescan();
+            }
+            if (hudFullyOut) SwitchOffHudCanvases();
+        }
+        #endregion
+
+        #region HUD slide
+        // How far the door is open before the HUD starts in, so it lands as the door clears.
+        private const float RevealDoorProgress = 0.4f;
+        // A door that never reports progress must not keep the HUD away.
+        private const float RevealWaitCap = 1.5f;
+        // Everyone who wants the HUD away: the Hide UI key, photo mode, the follow camera.
+        private readonly HashSet<object> hudHiders = new();
+        // Battle HUD canvases this script switched off, so showing puts back exactly those.
+        private readonly List<Canvas> hiddenHudCanvases = new();
+        private BattleHudSlide hudSlide;
+        private Coroutine hudSlideRoutine;
+        private bool hudFullyOut;
+
+        /// <summary>The battle HUD's root canvas. A view hider leaves it on, because this script slides it away.</summary>
+        public Canvas HudRootCanvas => mainCanvasGroup.GetComponentInParent<Canvas>().rootCanvas;
+        private BattleHudSlide HudSlide => hudSlide ??= new BattleHudSlide((RectTransform)mainCanvasGroup.transform, healthBarParent, cursorPopupParent);
+
+        /// <summary>Slides the HUD off screen while any owner wants it hidden, and back once none does. Health bars go at once.</summary>
+        public void SetHudHidden(object owner, bool hidden)
+        {
+            bool wasHidden = hudHiders.Count > 0;
+            if (hidden) hudHiders.Add(owner);
+            else hudHiders.Remove(owner);
+            if ((hudHiders.Count > 0) == wasHidden) return;
+
+            if (hudSlideRoutine != null) StopCoroutine(hudSlideRoutine);
+            hudFullyOut = false;
+            if (!wasHidden)
+            {
+                SwitchOffHudCanvas(healthBarParent.GetComponent<Canvas>());
+                SwitchOffHudCanvas(cursorPopupParent.GetComponent<Canvas>());
+                hudSlideRoutine = StartCoroutine(SlideHudOut());
+            }
+            else
+            {
+                foreach (Canvas canvas in hiddenHudCanvases)
+                    if (canvas != null) canvas.enabled = true;
+                hiddenHudCanvases.Clear();
+                hudSlideRoutine = StartCoroutine(HudSlide.Slide(false));
+            }
+        }
+        private IEnumerator SlideHudOut()
+        {
+            yield return HudSlide.Slide(true);
+            hudFullyOut = true;
+            SwitchOffHudCanvases();
+        }
+        // Off screen is not enough: a panel that switches on while hidden must not appear.
+        private void SwitchOffHudCanvases()
+        {
+            foreach (Canvas canvas in HudRootCanvas.GetComponentsInChildren<Canvas>())
+                SwitchOffHudCanvas(canvas);
+        }
+        private void SwitchOffHudCanvas(Canvas canvas)
+        {
+            if (canvas == null || !canvas.enabled) return;
+            canvas.enabled = false;
+            hiddenHudCanvases.Add(canvas);
+        }
+        // The HUD waits off screen behind the closed door and slides in as it opens.
+        private void OnSceneSetUpComplete()
+        {
+            if (hudHiders.Count > 0) return;
+            if (hudSlideRoutine != null) StopCoroutine(hudSlideRoutine);
+            HudSlide.SnapOut();
+            hudSlideRoutine = StartCoroutine(SlideHudInWithDoor());
+        }
+        private IEnumerator SlideHudInWithDoor()
+        {
+            // This event fires before the door is told to open, so its progress is read from the next frame.
+            yield return null;
+            float waited = 0f;
+            while (SceneHandler.Instance.DoorOpenProgress < RevealDoorProgress && waited < RevealWaitCap)
+            {
+                waited += Time.unscaledDeltaTime;
+                yield return null;
+            }
+            yield return HudSlide.Slide(false);
+        }
+        #endregion
+
+        #region Deployment slide
+        private BattleHudSlide deploymentSlide;
+        private Coroutine deploymentSlideRoutine;
+
+        // Clicks and keys stop the moment the battle starts, so nothing on the leaving panels can be pressed late.
+        private void SlideDeploymentOut()
+        {
+            deploymentCanvasGroup.interactable = false;
+            deploymentCanvasGroup.blocksRaycasts = false;
+            deploymentSlide ??= new BattleHudSlide((RectTransform)deploymentCanvasGroup.transform);
+            if (deploymentSlideRoutine != null) StopCoroutine(deploymentSlideRoutine);
+            deploymentSlideRoutine = StartCoroutine(SlideDeploymentOutThenDisable());
+        }
+        private IEnumerator SlideDeploymentOutThenDisable()
+        {
+            yield return deploymentSlide.Slide(true);
+            deploymentCanvasGroup.CGDisable();
+        }
+        private void SlideDeploymentIn()
+        {
+            deploymentCanvasGroup.CGEnable();
+            if (deploymentSlide == null) return;
+            if (deploymentSlideRoutine != null) StopCoroutine(deploymentSlideRoutine);
+            deploymentSlideRoutine = StartCoroutine(deploymentSlide.Slide(false));
+        }
+        #endregion
         private void OnSettingsPanelToggled(bool _open)
         {
             if (_open)
@@ -408,8 +543,8 @@ namespace TJ
         private void StartBattle()
         {
             IAudioRequester.Instance.PlaySFX("start-battle");
+            // The button slides away with the deployment panels, switched off so it cannot be pressed twice.
             startBattleButton.interactable = false;
-            startBattleButton.gameObject.SetActive(false);
             saveFormationButton.gameObject.SetActive(false);
             loadFormationButton.gameObject.SetActive(false);
 
@@ -523,12 +658,12 @@ namespace TJ
             switch (_gamePhase)
             {
                 case GamePhase.Deployment:
-                    deploymentCanvasGroup.CGEnable();
+                    SlideDeploymentIn();
                     if (!BattleManager.Instance.BattleSaveManager.IsCustomBattle)
                         startBattleButton.gameObject.SetActive(true);
                     break;
                 case GamePhase.Battle:
-                    deploymentCanvasGroup.FadeOutAsync(0.25f, false, false);
+                    SlideDeploymentOut();
                     break;
                 case GamePhase.PostGame:
                     HandleEndBattle();
@@ -769,6 +904,50 @@ namespace TJ
         }
         #endregion
 
+        #region Action button keys
+        // A pad with no button for an action leaves the bracket off, since the tooltip already sits on the button.
+        private static string Titled(string title, UnityEngine.InputSystem.InputAction action)
+        {
+            string key = InputGlyphs.For(action);
+            return key == null ? title : $"{title} ({key})";
+        }
+
+        private void RetitleAutoRetarget()
+        {
+            autoRetargetButton.SetTooltip(
+                Titled(LocalizationManager.Instance.GetText(autoRetargetReadsAsFreeCast ? "MageFreeCastTitle" : "AutoRetargetTitle"), InputHandler.Instance.GameControls.Battle.ToggleAutoRetarget),
+                LocalizationManager.Instance.GetText(autoRetargetReadsAsFreeCast ? "MageFreeCastDesc" : "AutoRetargetDesc"));
+        }
+
+        private void RetitleCeaseFire()
+        {
+            ceaseFireButton.SetTooltip(
+                Titled(LocalizationManager.Instance.GetText(ceaseFireReadsAsHoldSpells ? "MageHoldSpellsTitle" : "CeaseFireTitle"), InputHandler.Instance.GameControls.Battle.CeaseFireCommand),
+                LocalizationManager.Instance.GetText(ceaseFireReadsAsHoldSpells ? "MageHoldSpellsDesc" : "CeaseFireDesc"));
+        }
+
+        // Rewrites the titles only, so a device switch mid-battle keeps every button's on or off state.
+        private void OnInputDeviceChanged()
+        {
+            var battle = InputHandler.Instance.GameControls.Battle;
+            void Retitle(BattleButton button, string titleKey, string descKey, UnityEngine.InputSystem.InputAction action, bool keyword = false)
+            {
+                string desc = LocalizationManager.Instance.GetText(descKey);
+                button.SetTooltip(Titled(LocalizationManager.Instance.GetText(titleKey), action), keyword ? KeywordText.ForTooltip(desc) : desc);
+            }
+            Retitle(guardModeButton, "GuardModeTitle", "GuardModeDesc", battle.ToggleGuardMode);
+            Retitle(haltButton, "HaltSquad", "HaltSquadDesc", battle.Halt);
+            Retitle(withdrawButton, "WithdrawSquad", "WithdrawSquadDesc", battle.Withdraw);
+            Retitle(meleeModeButton, "MeleeModeTitle", "MeleeModeDesc", battle.ToggleMeleeMode);
+            Retitle(volleyFireButton, "VolleyFireTitle", "VolleyFireDesc", battle.ToggleVolleyFireMode);
+            Retitle(fireAtWillButton, "FireAtWillTitle", "FireAtWillDesc", battle.ToggleFireAtWillMode);
+            Retitle(balancedStanceButton, "BalancedStanceTitle", "BalancedStanceDesc", battle.SetBalancedStance, true);
+            Retitle(defensiveStanceButton, "DefensiveStanceTitle", "DefensiveStanceDesc", battle.SetDefensiveStance, true);
+            RetitleAutoRetarget();
+            RetitleCeaseFire();
+        }
+        #endregion
+
         private void SetUpBattleButtons()
         {
             string guardModeTitleLocalized = LocalizationManager.Instance.GetText("GuardModeTitle");
@@ -800,57 +979,17 @@ namespace TJ
             string defensiveStanceTitleLocalized = LocalizationManager.Instance.GetText("DefensiveStanceTitle");
             string defensiveStanceDescLocalized = KeywordText.ForTooltip(LocalizationManager.Instance.GetText("DefensiveStanceDesc"));
 
-            string toggleGuardModeKey = InputControlPath.ToHumanReadableString(
-                InputHandler.Instance.GameControls.Battle.ToggleGuardMode.bindings[0].effectivePath, 
-                InputControlPath.HumanReadableStringOptions.OmitDevice
-            );
-            string toggleFireAtWillKey = InputControlPath.ToHumanReadableString(
-                InputHandler.Instance.GameControls.Battle.ToggleFireAtWillMode.bindings[0].effectivePath, 
-                InputControlPath.HumanReadableStringOptions.OmitDevice
-            );
-            string toggleVolleyFireKey = InputControlPath.ToHumanReadableString(
-                InputHandler.Instance.GameControls.Battle.ToggleVolleyFireMode.bindings[0].effectivePath, 
-                InputControlPath.HumanReadableStringOptions.OmitDevice
-            );
-            string toggleMeleeModeKey = InputControlPath.ToHumanReadableString(
-                InputHandler.Instance.GameControls.Battle.ToggleMeleeMode.bindings[0].effectivePath, 
-                InputControlPath.HumanReadableStringOptions.OmitDevice
-            );
-            string toggleWithdrawKey = InputControlPath.ToHumanReadableString(
-                InputHandler.Instance.GameControls.Battle.Withdraw.bindings[0].effectivePath, 
-                InputControlPath.HumanReadableStringOptions.OmitDevice
-            );  
-            string toggleHaltKey = InputControlPath.ToHumanReadableString(
-                InputHandler.Instance.GameControls.Battle.Halt.bindings[0].effectivePath, 
-                InputControlPath.HumanReadableStringOptions.OmitDevice
-            );
-            string toggleAutoRetargetKey = InputControlPath.ToHumanReadableString(
-                InputHandler.Instance.GameControls.Battle.ToggleAutoRetarget.bindings[0].effectivePath, 
-                InputControlPath.HumanReadableStringOptions.OmitDevice
-            );
-            string toggleBalancedStanceKey = InputControlPath.ToHumanReadableString(
-                InputHandler.Instance.GameControls.Battle.SetBalancedStance.bindings[0].effectivePath, 
-                InputControlPath.HumanReadableStringOptions.OmitDevice
-            );
-            string toggleDefensiveStanceKey = InputControlPath.ToHumanReadableString(
-                InputHandler.Instance.GameControls.Battle.SetDefensiveStance.bindings[0].effectivePath, 
-                InputControlPath.HumanReadableStringOptions.OmitDevice
-            );
-            string ceaseFireKey = InputControlPath.ToHumanReadableString(
-                InputHandler.Instance.GameControls.Battle.CeaseFireCommand.bindings[0].effectivePath, 
-                InputControlPath.HumanReadableStringOptions.OmitDevice
-            );
             
-            guardModeButton.SetUp($"{ guardModeTitleLocalized} ({toggleGuardModeKey})", guardModeDescLocalized, SetGuardMode);
-            haltButton.SetUp($"{haltTitleLocalized} ({toggleHaltKey})", haltDescLocalized, onClickAction: () => IssueHaltCommand());
-            withdrawButton.SetUp($"{withdrawTitleLocalized} ({toggleWithdrawKey})", withdrawDescLocalized, onClickAction: () => OnWithdrawSquadButtonClicked());
-            autoRetargetButton.SetUp($"{autoRetargetTitleLocalized} ({toggleAutoRetargetKey})", autoRetargetDescLocalized, SetAutoRetarget);
-            meleeModeButton.SetUp($"{meleeModeTitleLocalized} ({toggleMeleeModeKey})", meleeModeDescLocalized, SetMeleeMode);
-            volleyFireButton.SetUp($"{volleyFireTitleLocalized} ({toggleVolleyFireKey})", volleyFireDescLocalized, onClickAction: () => SetVolleyFireMode());
-            fireAtWillButton.SetUp($"{fireAtWillTitleLocalized} ({toggleFireAtWillKey})", fireAtWillDescLocalized, onClickAction: () => SetFireAtWillMode());
-            balancedStanceButton.SetUp($"{balancedStanceTitleLocalized} ({toggleBalancedStanceKey})", balancedStanceDescLocalized, onClickAction: () => SetBalancedStance());
-            defensiveStanceButton.SetUp($"{defensiveStanceTitleLocalized} ({toggleDefensiveStanceKey})", defensiveStanceDescLocalized, onClickAction: () => SetDefensiveStance());
-            ceaseFireButton.SetUp($"{ceaseFireTitleLocalized} ({ceaseFireKey})", ceaseFireDescLocalized, onClickAction: () => IssueCeaseFireCommand());
+            guardModeButton.SetUp(Titled(guardModeTitleLocalized, InputHandler.Instance.GameControls.Battle.ToggleGuardMode), guardModeDescLocalized, SetGuardMode);
+            haltButton.SetUp(Titled(haltTitleLocalized, InputHandler.Instance.GameControls.Battle.Halt), haltDescLocalized, onClickAction: () => IssueHaltCommand());
+            withdrawButton.SetUp(Titled(withdrawTitleLocalized, InputHandler.Instance.GameControls.Battle.Withdraw), withdrawDescLocalized, onClickAction: () => OnWithdrawSquadButtonClicked());
+            autoRetargetButton.SetUp(Titled(autoRetargetTitleLocalized, InputHandler.Instance.GameControls.Battle.ToggleAutoRetarget), autoRetargetDescLocalized, SetAutoRetarget);
+            meleeModeButton.SetUp(Titled(meleeModeTitleLocalized, InputHandler.Instance.GameControls.Battle.ToggleMeleeMode), meleeModeDescLocalized, SetMeleeMode);
+            volleyFireButton.SetUp(Titled(volleyFireTitleLocalized, InputHandler.Instance.GameControls.Battle.ToggleVolleyFireMode), volleyFireDescLocalized, onClickAction: () => SetVolleyFireMode());
+            fireAtWillButton.SetUp(Titled(fireAtWillTitleLocalized, InputHandler.Instance.GameControls.Battle.ToggleFireAtWillMode), fireAtWillDescLocalized, onClickAction: () => SetFireAtWillMode());
+            balancedStanceButton.SetUp(Titled(balancedStanceTitleLocalized, InputHandler.Instance.GameControls.Battle.SetBalancedStance), balancedStanceDescLocalized, onClickAction: () => SetBalancedStance());
+            defensiveStanceButton.SetUp(Titled(defensiveStanceTitleLocalized, InputHandler.Instance.GameControls.Battle.SetDefensiveStance), defensiveStanceDescLocalized, onClickAction: () => SetDefensiveStance());
+            ceaseFireButton.SetUp(Titled(ceaseFireTitleLocalized, InputHandler.Instance.GameControls.Battle.CeaseFireCommand), ceaseFireDescLocalized, onClickAction: () => IssueCeaseFireCommand());
 
             saveFormationButton.SetUp(
                 saveFormationTitleLocalized, 
@@ -914,12 +1053,7 @@ namespace TJ
             if (mageOnlyFreeCast != autoRetargetReadsAsFreeCast)
             {
                 autoRetargetReadsAsFreeCast = mageOnlyFreeCast;
-                string key = InputControlPath.ToHumanReadableString(
-                    InputHandler.Instance.GameControls.Battle.ToggleAutoRetarget.bindings[0].effectivePath,
-                    InputControlPath.HumanReadableStringOptions.OmitDevice);
-                autoRetargetButton.SetTooltip(
-                    $"{LocalizationManager.Instance.GetText(mageOnlyFreeCast ? "MageFreeCastTitle" : "AutoRetargetTitle")} ({key})",
-                    LocalizationManager.Instance.GetText(mageOnlyFreeCast ? "MageFreeCastDesc" : "AutoRetargetDesc"));
+                RetitleAutoRetarget();
             }
 
             // A mage-only selection reads the same button as "Hold Spells"; anything with a shooter in it keeps
@@ -928,12 +1062,7 @@ namespace TJ
             if (mageOnlyHoldSpells != ceaseFireReadsAsHoldSpells)
             {
                 ceaseFireReadsAsHoldSpells = mageOnlyHoldSpells;
-                string key = InputControlPath.ToHumanReadableString(
-                    InputHandler.Instance.GameControls.Battle.CeaseFireCommand.bindings[0].effectivePath,
-                    InputControlPath.HumanReadableStringOptions.OmitDevice);
-                ceaseFireButton.SetTooltip(
-                    $"{LocalizationManager.Instance.GetText(mageOnlyHoldSpells ? "MageHoldSpellsTitle" : "CeaseFireTitle")} ({key})",
-                    LocalizationManager.Instance.GetText(mageOnlyHoldSpells ? "MageHoldSpellsDesc" : "CeaseFireDesc"));
+                RetitleCeaseFire();
             }
 
             bool anySelectedSquadCanHoldFire = selectedSquadsContainArtilleryUnits || selectedSquadsContainRangedUnits || selectedSquadsContainMageUnits;
@@ -945,9 +1074,8 @@ namespace TJ
             // Shooters only: a mage-only selection reads this button as Hold Spells.
             if (selectedSquadsContainRangedUnits || selectedSquadsContainArtilleryUnits)
             {
-                string ceaseFireKey = InputControlPath.ToHumanReadableString(
-                    InputHandler.Instance.GameControls.Battle.CeaseFireCommand.bindings[0].effectivePath,
-                    InputControlPath.HumanReadableStringOptions.OmitDevice);
+                string ceaseFireKey = InputGlyphs.For(InputHandler.Instance.GameControls.Battle.CeaseFireCommand)
+                    ?? LocalizationManager.Instance.GetText("InputOnScreen");
                 // Open left: the unit card strip sits above the action row, right of this button.
                 TutorialManager.Instance.LoadTooltip(TutorialData.CeaseFire, ceaseFireButton.transform, CalloutSide.Left, ceaseFireKey);
             }
@@ -1001,6 +1129,11 @@ namespace TJ
         private void OnDestroy()
         {
             _isLoaded = false;
+            if (s_hiddenBy == this) s_hiddenBy = null;
+            // Core canvases, the cursor and the marker flag outlive the battle scene.
+            hiddenViewHider.Restore(sceneClosing: true);
+            if (SceneHandler.HasInstance) SceneHandler.Instance.OnSceneSetUpComplete -= OnSceneSetUpComplete;
+            InputDevices.Changed -= OnInputDeviceChanged;
             BattlefieldMarkerScale.Changed -= ApplyHealthBarScale;
             if (BattleManager.HasInstance)
             {

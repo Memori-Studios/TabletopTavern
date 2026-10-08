@@ -157,12 +157,15 @@ namespace TJ
             InputHandler.Instance.SetBattleBlock(KeptActions);
             _on = true;
             _manual = false;
-            _hider.Hide(view.Canvas, true);
+            UIManager ui = BattleManager.Instance.UIManager;
+            _hider.Hide(view.Canvas, true, ui.HudRootCanvas);
+            ui.SetHudHidden(this, true);
             _camera.EnterFollow();
             _follower.Lock(squad, SquadFollower.Framing.Behind);
 
             FindTakenKeys();
-            view.Show(KeyName("Settings"), Name(Key.Space), Name(Key.PageUp) + " / " + Name(Key.PageDown));
+            string cycle = InputDevices.UsingGamepad ? string.Empty : Name(Key.PageUp) + " / " + Name(Key.PageDown);
+            view.Show(KeyName("Settings"), Name(Key.Space), cycle);
             RefreshPanel();
         }
 
@@ -179,6 +182,7 @@ namespace TJ
             if (!sceneClosing) Guard(() => _camera.ExitFollow());
             Guard(() => view.Hide());
             Guard(() => _hider.Restore(sceneClosing));
+            if (!sceneClosing) Guard(() => BattleManager.Instance.UIManager.SetHudHidden(this, false));
             Guard(() => { if (InputHandler.HasInstance) InputHandler.Instance.ClearBattleBlock(); });
         }
 
@@ -290,8 +294,10 @@ namespace TJ
             }
         }
 
+        // Keys the follow camera reads straight from the keyboard; a pad has no prompt for them.
         private static string Name(Key key)
         {
+            if (InputDevices.UsingGamepad) return string.Empty;
             Keyboard keyboard = Keyboard.current;
             return keyboard != null ? keyboard[key].displayName : key.ToString();
         }
@@ -299,8 +305,7 @@ namespace TJ
         private static string KeyName(string actionName)
         {
             InputAction action = InputHandler.Instance.GameControls.Battle.Get().FindAction(actionName);
-            if (action == null || action.bindings.Count == 0) return string.Empty;
-            return InputControlPath.ToHumanReadableString(action.bindings[0].effectivePath, InputControlPath.HumanReadableStringOptions.OmitDevice);
+            return InputGlyphs.For(action) ?? string.Empty;
         }
         #endregion
     }

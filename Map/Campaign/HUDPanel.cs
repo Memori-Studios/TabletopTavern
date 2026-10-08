@@ -195,10 +195,9 @@ namespace TJ.Map
             ShowChapter(campaignSaveManager.SaveData.activeMapLayer);
 
             settingsTooltipTrigger.SetUpToolTip(_title: LocalizationManager.Instance.GetText("Settings"));
-            string freeCamKey = FreeCameraKey();
-            freeCameraTooltipTrigger.SetUpToolTip(_title: $"{LocalizationManager.Instance.GetText("FreeCameraMode")} [{freeCamKey}]");
-            returnFromFreeCameraTooltipTrigger.SetUpToolTip(_title: $"{LocalizationManager.Instance.GetText("exitButton")} {LocalizationManager.Instance.GetText("FreeCameraMode")} [{freeCamKey}]");
-            returnFromFreeCameraKeyText.text = $"{LocalizationManager.Instance.GetText("exitButton")} {LocalizationManager.Instance.GetText("FreeCameraMode")} - [{freeCamKey}]";
+            RefreshFreeCameraPrompts();
+            InputDevices.Changed -= RefreshFreeCameraPrompts;
+            InputDevices.Changed += RefreshFreeCameraPrompts;
             consumablesBlocker.SetActive(false);
             freeCameraOverlay.SetActive(false);
         }
@@ -333,6 +332,7 @@ namespace TJ.Map
 
                 SquadDisplayCardMenu squadDisplayCardMenu = Instantiate(squadDisplayCardMenuPrefab, unitParentTransform);
                 squadDisplayCardMenu.SetUp(playerSquads[i], !isDeployed, this);
+                squadDisplayCardMenu.EnableQuickMoveTooltip();
                 playerSquadsCards.Add(squadDisplayCardMenu);
 
                 if (isDeployed) deployedTroopsCount++;
@@ -348,6 +348,11 @@ namespace TJ.Map
             if (thirdReserveSlotLockedButton != null) thirdReserveSlotLockedButton.CheckLockedState();
 
             if(deployedTroopsCount + reserveTroopsCount == 10 + campaignSaveManager.MaxReserveSlots) SteamAchievements.Unlock(AchievementId.FullArmy);
+        }
+        public void PulseReservePennants()
+        {
+            foreach (SquadDisplayCardMenu card in playerSquadsCards)
+                if (card != null) card.PulseReservePennant();
         }
         public void HoverSquad(SquadToLoad squad, bool _hovered, Transform _squadCardTransform)
         {
@@ -456,7 +461,11 @@ namespace TJ.Map
                 if (isSingle)
                     c.SetOptionsVisibility(true, true);
                 else if (c == mostRecent)
+                {
+                    if (canMerge)
+                        c.SetMergeAvailable(CampaignSaveManager.MergeChangesArmy(selectedCards.ConvertAll(s => s.GetSquadToLoad())));
                     c.SetOptionsVisibility(true, false, canMerge, canPrestigeMulti);
+                }
                 else
                     c.SetOptionsVisibility(false, false);
             }
@@ -601,6 +610,8 @@ namespace TJ.Map
             renameSquadInputField.text = campaignSaveManager.GetUnitNameOrUnitNameOverride(_guID);
             renameSquadConfirmationPopup.CGEnable();
             mapSceneUIManager.MapSceneManager.SetMapInput(false);
+            renameSquadInputField.ActivateInputField();
+            renameSquadInputField.Select();
         }
         public void RenameSquad()
         {
@@ -663,6 +674,26 @@ namespace TJ.Map
         public bool RegionHasRoom(bool _deployedRegion, SquadDisplayCardMenu _exclude)
         {
             return GetFirstEmptySlotIndex(_deployedRegion, _exclude) >= 0;
+        }
+        // A full army gives up its most wounded squad, full reserves their healthiest. Health is a share of max, or the
+        // squads with the smallest health pool would always be picked.
+        public SquadDisplayCardMenu PickQuickMoveSwapTarget(bool _deployedRegion)
+        {
+            SquadDisplayCardMenu pick = null;
+            float pickShare = 0f;
+            foreach (SquadDisplayCardMenu card in playerSquadsCards)
+            {
+                if (card.InReserve == _deployedRegion) continue;
+                SquadToLoad cardSquad = card.GetSquadToLoad();
+                float share = cardSquad.SquadMaxHealth > 0 ? (float)cardSquad.SquadCurrentHealth / cardSquad.SquadMaxHealth : 0f;
+                bool better = _deployedRegion ? share < pickShare : share > pickShare;
+                if (pick == null || better)
+                {
+                    pick = card;
+                    pickShare = share;
+                }
+            }
+            return pick;
         }
         public void HighlightDeployedTroopsArea(bool _highlight)
         {
@@ -831,7 +862,7 @@ namespace TJ.Map
         }
         private void Update()
         {
-            if (!Input.GetMouseButtonDown(0)) return;
+            if (!global::Memori.Input.GameCursor.GetButtonDown(0)) return;
             if (selectedCards.Count == 0) return;
 
             PointerEventData pointerData = new(EventSystem.current) { position = Input.mousePosition };
@@ -852,13 +883,22 @@ namespace TJ.Map
             else EnterFreeCameraMode();
         }
 
-        private static string FreeCameraKey() => InputControlPath.ToHumanReadableString(
-            InputHandler.Instance.GameControls.Battle.ToggleFreeCameraMode.bindings[0].effectivePath,
-            InputControlPath.HumanReadableStringOptions.OmitDevice);
+        // Null on a pad, which leaves free camera through its on-screen button.
+        private static string FreeCameraKey() => InputGlyphs.For(InputHandler.Instance.GameControls.Battle.ToggleFreeCameraMode);
+
+        private void RefreshFreeCameraPrompts()
+        {
+            string freeCamKey = FreeCameraKey();
+            string mode = LocalizationManager.Instance.GetText("FreeCameraMode");
+            string exit = LocalizationManager.Instance.GetText("exitButton");
+            freeCameraTooltipTrigger.SetUpToolTip(_title: freeCamKey == null ? mode : $"{mode} [{freeCamKey}]");
+            returnFromFreeCameraTooltipTrigger.SetUpToolTip(_title: freeCamKey == null ? $"{exit} {mode}" : $"{exit} {mode} [{freeCamKey}]");
+            returnFromFreeCameraKeyText.text = freeCamKey == null ? $"{exit} {mode}" : $"{exit} {mode} - [{freeCamKey}]";
+        }
 
         public void ShowFreeCameraTip()
         {
-            TutorialManager.Instance.LoadTooltip(TutorialData.FreeCamera, freeCameraButton.transform, CalloutSide.TowardCenter, FreeCameraKey());
+            TutorialManager.Instance.LoadTooltip(TutorialData.FreeCamera, freeCameraButton.transform, CalloutSide.TowardCenter, FreeCameraKey() ?? LocalizationManager.Instance.GetText("InputOnScreen"));
         }
 
         private void EnterFreeCameraMode()
@@ -900,6 +940,7 @@ namespace TJ.Map
 
         public void OnDestroy()
         {
+            InputDevices.Changed -= RefreshFreeCameraPrompts;
             if (InputHandler.HasInstance) {
                 InputHandler.Instance.SecondaryActionPressed -= SecondaryAction;
                 InputHandler.Instance.OnToggleFreeCameraMode -= ToggleFreeCameraMode;

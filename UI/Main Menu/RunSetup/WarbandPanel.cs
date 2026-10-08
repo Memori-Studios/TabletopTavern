@@ -4,6 +4,7 @@ using Memori.Audio;
 using Memori.Localization;
 using Memori.Notifications;
 using Memori.Tooltip;
+using Memori.UI;
 using TJ.Spells;
 using TMPro;
 using UnityEngine;
@@ -117,7 +118,8 @@ namespace TJ.MainMenu
                 hoverArea.SetUp(SetFocus, OnSectionHovered);
             }
 
-            backToCommanderButton.onClick.RemoveAllListeners();
+            // Only this panel's own handler: RemoveAllListeners also took the button's click sound.
+            backToCommanderButton.onClick.RemoveListener(playPanel.ShowCommanderScreen);
             backToCommanderButton.onClick.AddListener(playPanel.ShowCommanderScreen);
 
             WireTab(armyTab, WarbandSection.Army);
@@ -147,13 +149,33 @@ namespace TJ.MainMenu
             RefreshSpellSlots();
             RefreshCommanderSummary(hero);
             buildView.ShowRecord(hero.HeroID);
+            // Opening shows the current numbers; only changes made on the screen count.
+            shownPurse = int.MinValue;
+            shownArmyLength = -1;
             RefreshPurse(startingArmySection.remainingTreasury.Value);
             // Re-applied even if Army was already focused, so every visit opens on the recruit list.
             focusApplied = false;
             // A hover left over from the last visit would otherwise reopen with a faint highlight.
             hoveredSection = null;
-            SetFocus(WarbandSection.Army);
+            ApplyFocus(WarbandSection.Army, false);
         }
+
+        #region Feel
+        private bool shown;
+        private int shownPurse = int.MinValue;
+        private int shownArmyLength = -1;
+        private Coroutine purseCount, sourceSwap, markSlide, countPop;
+        private readonly Dictionary<GameObject, Coroutine> highlightFades = new();
+        private readonly Dictionary<Graphic, Vector2> markRests = new();
+
+        /// <summary>Whether the warband screen is the one on show; hidden changes stay silent and still.</summary>
+        public void SetShown(bool isShown) => shown = isShown;
+
+        public void PlayArrival() => buildView.PlayArrival();
+
+        // The send-off on the warband side: a big flare and a sweep across Start Campaign.
+        public void PlaySendOff() => validation.PlaySendOff();
+        #endregion
 
         private void SetSourceText(Hero hero)
         {
@@ -194,26 +216,96 @@ namespace TJ.MainMenu
         }
 
         #region Focus
-        public void SetFocus(WarbandSection section)
+        public void SetFocus(WarbandSection section) => ApplyFocus(section, true);
+
+        private void ApplyFocus(WarbandSection section, bool animate)
         {
             // Clicking the block or tab already shown is a no-op, so it does not replay the sound or re-toggle the roots.
             // focusApplied forces the first call through, since Army is also the default value.
             if (focusApplied && focusedSection == section) return;
 
+            animate &= focusApplied && shown && isActiveAndEnabled;
+            WarbandSection previous = focusedSection;
             focusApplied = true;
             focusedSection = section;
 
-            armySourceRoot.SetActive(section == WarbandSection.Army);
-            gearSourceRoot.SetActive(section == WarbandSection.Gear);
-            spellSourceRoot.SetActive(section == WarbandSection.Spells);
+            SwapSource(SourceRoot(previous), SourceRoot(section), animate);
 
-            RefreshSectionHighlights();
+            RefreshSectionHighlights(animate);
 
             armyTab.SetActive(section == WarbandSection.Army);
             gearTab.SetActive(section == WarbandSection.Gear);
             spellTab.SetActive(section == WarbandSection.Spells);
+            if (animate) SlideTabMark(Tab(previous), Tab(section));
 
-            IAudioRequester.Instance.PlaySFX(SFXData.ButtonHover);
+            if (animate) IAudioRequester.Instance.PlaySFX(SFXData.TinyClick);
+        }
+
+        private GameObject SourceRoot(WarbandSection section) => section switch
+        {
+            WarbandSection.Gear => gearSourceRoot,
+            WarbandSection.Spells => spellSourceRoot,
+            _ => armySourceRoot,
+        };
+
+        private CollectionTab Tab(WarbandSection section) => section switch
+        {
+            WarbandSection.Gear => gearTab,
+            WarbandSection.Spells => spellTab,
+            _ => armyTab,
+        };
+
+        // The old list fades out quickly and the new one fades in with a small rise, instead of swapping in one frame.
+        private void SwapSource(GameObject from, GameObject to, bool animate)
+        {
+            if (sourceSwap != null) { StopCoroutine(sourceSwap); sourceSwap = null; }
+            foreach (GameObject root in new[] { armySourceRoot, gearSourceRoot, spellSourceRoot })
+            {
+                Group(root).alpha = 1f;
+                root.SetActive(root == to || (animate && root == from));
+            }
+            if (animate && from != to) sourceSwap = StartCoroutine(SwapSourceRoutine(from, to));
+        }
+
+        private System.Collections.IEnumerator SwapSourceRoutine(GameObject from, GameObject to)
+        {
+            CanvasGroup toGroup = Group(to);
+            toGroup.alpha = 0f;
+            yield return UIJuice.Close(Group(from), 0.08f);
+            from.SetActive(false);
+            Group(from).alpha = 1f;
+            yield return UIJuice.Open(toGroup, (RectTransform)to.transform, UIJuice.SwapTime, 8f);
+            sourceSwap = null;
+        }
+
+        private static CanvasGroup Group(GameObject go)
+        {
+            CanvasGroup group = go.GetComponent<CanvasGroup>();
+            return group != null ? group : go.AddComponent<CanvasGroup>();
+        }
+
+        // The gold underline travels from the old tab to the new one.
+        private void SlideTabMark(CollectionTab from, CollectionTab to)
+        {
+            Graphic fromMark = from.ActiveMark, toMark = to.ActiveMark;
+            if (fromMark == null || toMark == null || from == to) return;
+            RectTransform mark = toMark.rectTransform;
+            if (!markRests.TryGetValue(toMark, out Vector2 rest)) markRests[toMark] = rest = mark.anchoredPosition;
+            if (!markRests.ContainsKey(fromMark)) markRests[fromMark] = fromMark.rectTransform.anchoredPosition;
+            Vector3 offset = mark.parent.InverseTransformVector(fromMark.rectTransform.position - mark.position);
+            if (markSlide != null) StopCoroutine(markSlide);
+            markSlide = StartCoroutine(SlideMark(mark, rest + (Vector2)offset, rest));
+        }
+
+        private System.Collections.IEnumerator SlideMark(RectTransform mark, Vector2 from, Vector2 to)
+        {
+            for (float t = 0f; t < 1f; t += Mathf.Min(Time.unscaledDeltaTime, UIJuice.MaxStep) / UIJuice.SwapTime)
+            {
+                mark.anchoredPosition = Vector2.LerpUnclamped(from, to, UIJuice.EaseOutCubic(t));
+                yield return null;
+            }
+            mark.anchoredPosition = to;
+            markSlide = null;
         }
 
         private void OnSectionHovered(WarbandSection section, bool hovered)
@@ -229,21 +321,49 @@ namespace TJ.MainMenu
                 hoveredSection = null;
             }
 
-            RefreshSectionHighlights();
+            RefreshSectionHighlights(shown && isActiveAndEnabled);
         }
 
-        private void RefreshSectionHighlights()
+        private void RefreshSectionHighlights(bool animate)
         {
-            RefreshSectionHighlight(armySectionHighlight, WarbandSection.Army);
-            RefreshSectionHighlight(gearSectionHighlight, WarbandSection.Gear);
-            RefreshSectionHighlight(spellSectionHighlight, WarbandSection.Spells);
+            RefreshSectionHighlight(armySectionHighlight, WarbandSection.Army, animate);
+            RefreshSectionHighlight(gearSectionHighlight, WarbandSection.Gear, animate);
+            RefreshSectionHighlight(spellSectionHighlight, WarbandSection.Spells, animate);
         }
 
-        private void RefreshSectionHighlight(GameObject highlight, WarbandSection section)
+        private const float HighlightFadeTime = 0.12f;
+
+        // Highlights fade to their strength instead of snapping on and off.
+        private void RefreshSectionHighlight(GameObject highlight, WarbandSection section, bool animate)
         {
             bool focused = focusApplied && section == focusedSection;
-            highlight.SetActive(focused || section == hoveredSection);
-            highlight.GetComponent<CanvasGroup>().alpha = focused ? 1f : HoverHighlightAlpha;
+            bool show = focused || section == hoveredSection;
+            float target = focused ? 1f : HoverHighlightAlpha;
+            CanvasGroup group = highlight.GetComponent<CanvasGroup>();
+            if (highlightFades.TryGetValue(highlight, out Coroutine running) && running != null) StopCoroutine(running);
+            highlightFades.Remove(highlight);
+            if (!animate)
+            {
+                highlight.SetActive(show);
+                group.alpha = target;
+                return;
+            }
+            if (show && !highlight.activeSelf) { highlight.SetActive(true); group.alpha = 0f; }
+            if (!show && !highlight.activeSelf) return;
+            highlightFades[highlight] = StartCoroutine(FadeHighlight(highlight, group, show ? target : 0f, !show));
+        }
+
+        private System.Collections.IEnumerator FadeHighlight(GameObject highlight, CanvasGroup group, float target, bool hideAtEnd)
+        {
+            float from = group.alpha;
+            for (float t = 0f; t < 1f; t += Mathf.Min(Time.unscaledDeltaTime, UIJuice.MaxStep) / HighlightFadeTime)
+            {
+                group.alpha = Mathf.Lerp(from, target, t);
+                yield return null;
+            }
+            group.alpha = target;
+            if (hideAtEnd) highlight.SetActive(false);
+            highlightFades.Remove(highlight);
         }
 
         private void WireTab(CollectionTab tab, WarbandSection section)
@@ -264,13 +384,25 @@ namespace TJ.MainMenu
             int startingGold = startingArmySection.StartingGold;
             int armySpend = startingArmySection.ArmyGoldSpend;
             int gearSpend = startingArmySection.GearGoldSpend;
-
-            remainingTreasuryText.text =
-                $"<color={ColorData.Secondary}><size=75%><uppercase>{goldLeftLabel}</uppercase></size></color>  " +
-                $"<b><color={amountColor}><size=125%>{remaining}</size></color></b> <sprite name=GoldSprite>\n" +
-                $"<color={ColorData.Secondary}><size=80%>" +
+            string breakdown = $"<color={ColorData.Secondary}><size=80%>" +
                 string.Format(LocalizationManager.Instance.GetText("warbandPurseBreakdown"), startingGold, armySpend, gearSpend) +
                 "</size></color>";
+            string PurseText(int amount) =>
+                $"<color={ColorData.Secondary}><size=75%><uppercase>{goldLeftLabel}</uppercase></size></color>  " +
+                $"<b><color={amountColor}><size=125%>{amount}</size></color></b> <sprite name=GoldSprite>\n" + breakdown;
+
+            // Gold spent or refunded on the screen counts with coin ticks; the first overspend shakes the purse.
+            if (purseCount != null) { StopCoroutine(purseCount); purseCount = null; }
+            bool count = shown && isActiveAndEnabled && shownPurse != int.MinValue && shownPurse != remaining;
+            if (count)
+            {
+                purseCount = StartCoroutine(UIJuice.CountTo(remainingTreasuryText, shownPurse, remaining, 0.25f, PurseText,
+                    () => IAudioRequester.Instance.PlaySFX(SFXData.CoinClink)));
+                if (remaining < 0 && shownPurse >= 0)
+                    StartCoroutine(UIJuice.Shake((RectTransform)remainingTreasuryText.transform.parent, 5f));
+            }
+            else remainingTreasuryText.text = PurseText(remaining);
+            shownPurse = remaining;
 
             string bonus = startingArmySection.StartingGoldBonusFromMetaprogression > 0
                 ? $" <color={ColorData.Green}>(+{startingArmySection.StartingGoldBonusFromMetaprogression})</color>"
@@ -291,7 +423,16 @@ namespace TJ.MainMenu
 
         private void RefreshCounters()
         {
-            armyCountText.text = $"{startingArmySection.SelectedArmy.Length} / {StartingArmyManager.MaxStartingArmySize}";
+            int armyLength = startingArmySection.SelectedArmy.Length;
+            armyCountText.text = $"{armyLength} / {StartingArmyManager.MaxStartingArmySize}";
+            // The count pops when a squad joins or leaves on the screen.
+            if (shown && isActiveAndEnabled && shownArmyLength >= 0 && armyLength != shownArmyLength)
+            {
+                if (countPop != null) StopCoroutine(countPop);
+                armyCountText.transform.localScale = Vector3.one;
+                countPop = StartCoroutine(UIJuice.Punch(armyCountText.transform, 1.3f, 0.06f, 0.16f));
+            }
+            shownArmyLength = armyLength;
             gearCountText.text = playPanel.StartingGearID == GearID.None ? "0 / 1" : "1 / 1";
             // Counts against UNLOCKED slots, not the array length, so the readout is not permanently
             // short by however many slots the player has yet to buy.
@@ -376,7 +517,12 @@ namespace TJ.MainMenu
                     SpellData captured = spellData;
                     tile.SetUp(captured, () => PickSpell(captured), null, NotifySpellAlreadyEquipped);
                     grimoireTiles.Add(tile);
-                    if (Application.isPlaying) AddGrimoireTooltip(tile, captured);
+                    if (Application.isPlaying)
+                    {
+                        AddGrimoireTooltip(tile, captured);
+                        // A locked spell's tile is switched off; a click on it still says no.
+                        UIDenyFeedback.Attach(tile.SelectButton, (RectTransform)tile.transform);
+                    }
                 }
             }
 
@@ -512,12 +658,13 @@ namespace TJ.MainMenu
             }
 
             loadout[targetSpellSlot] = spellData.Spell;
-            IAudioRequester.Instance.PlaySFX(SFXData.AddGear);
+            IAudioRequester.Instance.PlaySFX(SFXData.ChoiceMade);
 
             // The armed slot deliberately stays put. Picking is nearly always "I want to change
             // THIS slot", so auto-advancing meant a second look at the same slot silently landed
             // on the next one instead.
             RefreshSpellSlots();
+            spellSlots[targetSpellSlot].PlayPicked();
             RefreshValidation();
         }
         #endregion
@@ -571,7 +718,7 @@ namespace TJ.MainMenu
 
         public void RefreshValidation()
         {
-            validation.Evaluate(playPanel, startingArmySection, loadout);
+            validation.Evaluate(playPanel, startingArmySection, loadout, shown && isActiveAndEnabled);
         }
 
 #if UNITY_EDITOR

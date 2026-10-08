@@ -22,15 +22,18 @@ namespace TJ
         private readonly HashSet<Renderer> _hiddenMarkers = new();
         private readonly HashSet<Renderer> _hiddenFlags = new();
         private Canvas _keepCanvas;
+        private Canvas _slidingHud;
         private bool _hidden;
         private bool _showFlags;
         private bool _savedCursorVisible;
 
-        public void Hide(Canvas keepCanvas, bool showFlags)
+        /// <param name="slidingHud">The battle HUD root, left on because UIManager slides it away and switches it off itself.</param>
+        public void Hide(Canvas keepCanvas, bool showFlags, Canvas slidingHud = null)
         {
             if (_hidden) return;
             _hidden = true;
             _keepCanvas = keepCanvas;
+            _slidingHud = slidingHud;
             _showFlags = showFlags;
 
             HideCanvases();
@@ -105,7 +108,7 @@ namespace TJ
         {
             Canvas root = canvas.rootCanvas;
             if (root.renderMode == RenderMode.WorldSpace) return true;
-            if (root == _keepCanvas) return true;
+            if (root == _keepCanvas || root == _slidingHud) return true;
             if (root.sortingOrder >= TransitionSortingOrder) return true;
             if (root.transform.IsChildOf(SettingsManager.Instance.transform)) return true;
             return root.GetComponentInChildren<ReportABugScreen>(true) != null;

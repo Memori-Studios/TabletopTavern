@@ -19,8 +19,7 @@ namespace TJ
         const float SteamDeckDefault = 1.25f;
         static readonly Vector2 ReferenceResolution = new(1920f, 1080f);
 
-        // Steam sets this variable on every game it launches on a Steam Deck.
-        public static bool IsSteamDeck => Environment.GetEnvironmentVariable("SteamDeck") == "1";
+        public static bool IsSteamDeck => Memori.Steamworks.SteamStatic.IsSteamDeck;
         public static float Default => IsSteamDeck ? SteamDeckDefault : 1f;
 
         public static void Apply(float scale)

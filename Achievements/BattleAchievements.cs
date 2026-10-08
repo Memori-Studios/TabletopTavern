@@ -51,12 +51,10 @@ namespace TJ.Achievements
                 outcome.EnemyModelsAtStart = ModelsAtStart(report.Enemy);
             }
 
-            // Slots 0-9 are the deployed row; the reserve never takes the field.
-            int deployedSlots = System.Math.Min(10, save.playerArmy.Length);
-            for (int i = 0; i < deployedSlots; i++)
+            for (int i = 0; i < save.playerArmy.Length; i++)
             {
                 SquadToLoad squad = save.playerArmy[i];
-                if (squad.UnitIndex == -1 || string.IsNullOrEmpty(squad.UniqueID)) continue;
+                if (!SaveDataHandler.FightsInBattle(squad) || string.IsNullOrEmpty(squad.UniqueID)) continue;
 
                 SquadStats stats = data.GetSquadStats(squad.UnitName);
                 outcome.Deployed.Add(new DeployedSquad
@@ -87,12 +85,13 @@ namespace TJ.Achievements
             return models;
         }
 
-        private static Race FirstFactionRace(SquadToLoad[] enemySquads, TabletopTavernData data)
+        // Enemy squads keep UnitIndex -1 from the SquadToLoad constructor, so only the unit count marks a real one.
+        public static Race FirstFactionRace(SquadToLoad[] enemySquads, TabletopTavernData data)
         {
             if (enemySquads == null) return Race.Special;
             foreach (SquadToLoad squad in enemySquads)
             {
-                if (squad.UnitIndex == -1) continue;
+                if (squad.isEmptySquad || squad.maxUnitCount <= 0) continue;
                 Race race = data.GetRaceFromUnitName(squad.UnitName);
                 if (race != Race.Special) return race;
             }

@@ -287,9 +287,12 @@ namespace TJ
             _pendingGates.Clear();
         }
 
+        // Same ground layers SquadManager samples; an unmasked ray hits the old gate squad's flag during a regenerate.
+        private static int GroundMask => LayerMask.GetMask("Tile", "Water", "Swamp", "Forest", "Path");
+
         private float SampleTerrainHeight(float x, float z)
         {
-            if (Physics.Raycast(new Vector3(x, 100f, z), Vector3.down, out RaycastHit hit, 110f))
+            if (Physics.Raycast(new Vector3(x, 100f, z), Vector3.down, out RaycastHit hit, 110f, GroundMask))
                 return hit.point.y;
             return 0f;
         }
@@ -340,6 +343,19 @@ namespace TJ
         {
             if (prefabs == null || prefabs.Count == 0) return null;
             return prefabs[Random.Range(0, prefabs.Count)];
+        }
+
+        public void ClearWalls()
+        {
+            if (wallsParent != null)
+            {
+                // Destroy lands at frame end and the next wall set can be placed this frame, so the height raycast would hit the old gates.
+                wallsParent.gameObject.SetActive(false);
+                Destroy(wallsParent.gameObject);
+            }
+            wallsParent = null;
+            _pendingGates.Clear();
+            _gateCount = 0;
         }
 
 #if UNITY_EDITOR

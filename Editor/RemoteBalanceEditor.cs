@@ -64,6 +64,7 @@ namespace TJ
 
         private static double s_uploadCheckedAt = -1;
         private static string s_uploadConcern;
+        private static bool s_uploadFetching;
 
         /// <summary>The push key from balance-setup.sh on the droplet. Kept in EditorPrefs, never in the project or a build.</summary>
         public static string AdminKey
@@ -137,11 +138,40 @@ namespace TJ
         #endregion
 
         #region Server calls
-        /// <summary>The server's newest revision, or null with a reason. A server with no revision yet answers rev 0.</summary>
+        /// <summary>The server's newest revision, or null with a reason. A server with no revision yet answers rev 0. Waits behind a cancelable progress bar.</summary>
         public static ServerRevision FetchLatest(out string error)
         {
             using UnityWebRequest request = UnityWebRequest.Get(AdminUrl);
-            if (!Send(request, out error)) return null;
+            return Send(request, out error, "Reading the server's newest unit stats", cancelable: true) ? ReadRevision(request, out error) : null;
+        }
+
+        /// <summary>FetchLatest without blocking: <paramref name="done"/> gets the revision, or null and a reason, on the main thread.</summary>
+        public static void FetchLatestAsync(Action<ServerRevision, string> done)
+        {
+            var request = UnityWebRequest.Get(AdminUrl);
+            if (!Prepare(request, out string error))
+            {
+                request.Dispose();
+                done(null, error);
+                return;
+            }
+            request.SendWebRequest().completed += _ =>
+            {
+                try
+                {
+                    ServerRevision latest = Answered(request, out string failure) ? ReadRevision(request, out failure) : null;
+                    done(latest, failure);
+                }
+                finally
+                {
+                    request.Dispose();
+                }
+            };
+        }
+
+        private static ServerRevision ReadRevision(UnityWebRequest request, out string error)
+        {
+            error = null;
             try
             {
                 ServerRevision latest = JsonUtility.FromJson<ServerRevision>(request.downloadHandler.text);
@@ -166,7 +196,8 @@ namespace TJ
                 downloadHandler = new DownloadHandlerBuffer(),
             };
             request.SetRequestHeader("Content-Type", "application/json");
-            if (!Send(request, out error)) return 0;
+            // Not cancelable: once sent, the server may already hold the revision, and only the answer says which.
+            if (!Send(request, out error, "Pushing unit stats to the server", cancelable: false)) return 0;
             PushAnswer answer = JsonUtility.FromJson<PushAnswer>(request.downloadHandler.text);
             if (answer == null || answer.rev <= 0)
             {
@@ -187,8 +218,36 @@ namespace TJ
             AssetDatabase.ImportAsset(BakedAssetPath);
         }
 
-        // Blocks the Editor until the server answers; these calls are small and only run on a button or the upload check.
-        private static bool Send(UnityWebRequest request, out string error)
+        // Blocks the Editor behind a progress bar until the server answers; only a button or a real upload check waits like this.
+        private static bool Send(UnityWebRequest request, out string error, string progress, bool cancelable)
+        {
+            if (!Prepare(request, out error)) return false;
+            UnityWebRequestAsyncOperation operation = request.SendWebRequest();
+            var watch = System.Diagnostics.Stopwatch.StartNew();
+            try
+            {
+                while (!operation.isDone)
+                {
+                    string info = $"{progress} ({(int)watch.Elapsed.TotalSeconds} s)";
+                    float fraction = Mathf.Clamp01((float)watch.Elapsed.TotalSeconds / RequestTimeoutSeconds);
+                    if (!cancelable) EditorUtility.DisplayProgressBar("Remote Balance", info, fraction);
+                    else if (EditorUtility.DisplayCancelableProgressBar("Remote Balance", info, fraction))
+                    {
+                        request.Abort();
+                        error = "Cancelled before the server answered.";
+                        return false;
+                    }
+                    Thread.Sleep(50);
+                }
+            }
+            finally
+            {
+                EditorUtility.ClearProgressBar();
+            }
+            return Answered(request, out error);
+        }
+
+        private static bool Prepare(UnityWebRequest request, out string error)
         {
             error = null;
             string key = AdminKey;
@@ -199,8 +258,12 @@ namespace TJ
             }
             request.SetRequestHeader("X-Admin-Key", key);
             request.timeout = RequestTimeoutSeconds;
-            UnityWebRequestAsyncOperation operation = request.SendWebRequest();
-            while (!operation.isDone) Thread.Sleep(10);
+            return true;
+        }
+
+        private static bool Answered(UnityWebRequest request, out string error)
+        {
+            error = null;
             if (request.result == UnityWebRequest.Result.Success) return true;
 
             string detail = request.downloadHandler != null ? request.downloadHandler.text : "";
@@ -234,34 +297,48 @@ namespace TJ
 
         // A build whose stats differ from the server's newest revision would ship numbers the server then overrides
         // or never learns about, so the upload asks for a push first.
-        private static string UploadConcern()
+        private static string UploadConcern(bool forUpload)
         {
             if (s_uploadCheckedAt >= 0 && EditorApplication.timeSinceStartup - s_uploadCheckedAt < UploadCheckSeconds) return s_uploadConcern;
-            s_uploadCheckedAt = EditorApplication.timeSinceStartup;
-            s_uploadConcern = null;
             if (string.IsNullOrEmpty(AdminKey))
+                return Remember("Remote Balance: this Editor has no push key, so unit stats were not compared with the server.");
+            if (forUpload)
             {
-                s_uploadConcern = "Remote Balance: this Editor has no push key, so unit stats were not compared with the server.";
-                return s_uploadConcern;
+                ServerRevision latest = FetchLatest(out string error);
+                return Remember(ConcernFrom(latest, error));
             }
-            ServerRevision latest = FetchLatest(out string error);
-            if (latest == null)
+            // The readout asks every few seconds and must not block, so it shows the last answer while a new one is on its way.
+            if (!s_uploadFetching)
             {
-                s_uploadConcern = $"Remote Balance: could not compare unit stats with the server. {error}";
-                return s_uploadConcern;
+                s_uploadFetching = true;
+                FetchLatestAsync((latest, error) =>
+                {
+                    s_uploadFetching = false;
+                    Remember(ConcernFrom(latest, error));
+                });
             }
+            return s_uploadCheckedAt >= 0 ? s_uploadConcern : "Remote Balance: comparing unit stats with the server...";
+        }
+
+        private static string Remember(string concern)
+        {
+            s_uploadConcern = concern;
+            s_uploadCheckedAt = EditorApplication.timeSinceStartup;
+            return concern;
+        }
+
+        private static string ConcernFrom(ServerRevision latest, string error)
+        {
+            if (latest == null) return $"Remote Balance: could not compare unit stats with the server. {error}";
             int differences = Compare(latest.units, BuildLocal()).Count;
             if (differences > 0)
             {
-                s_uploadConcern = $"Remote Balance: {differences} unit stat value(s) differ from the server's revision {latest.rev}. " +
-                                  $"Open Tabletop Tavern > Balance > Remote Balance and push with Minimum build {Application.version}, " +
-                                  "or players on this build will not match the server.";
+                return $"Remote Balance: {differences} unit stat value(s) differ from the server's revision {latest.rev}. " +
+                       $"Open Tabletop Tavern > Balance > Remote Balance and push with Minimum build {Application.version}, " +
+                       "or players on this build will not match the server.";
             }
-            else if (BakedRevision != latest.rev)
-            {
-                WriteBaked(latest.rev);
-            }
-            return s_uploadConcern;
+            if (BakedRevision != latest.rev) WriteBaked(latest.rev);
+            return null;
         }
         #endregion
     }

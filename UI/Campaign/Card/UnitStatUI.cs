@@ -243,6 +243,22 @@ namespace TJ
                     totalBonus -= cut;
                     description += $"\n<color {ColorData.Error}>{LocalizationManager.Instance.GetText(OrdealRegistry.Get(OrdealId.BluntedCharge).NameKey)}: -{cut}</color>";
                 }
+                // Same order and floor as SquadManager's Leadership setup: Burn the Wagons first, then Dread.
+                if (unitStat == UnitStat.Leadership && PlayerHoldsOrdeal(OrdealId.BurnTheWagons))
+                {
+                    totalBonus += OrdealMask.BURN_THE_WAGONS_LEADERSHIP;
+                    description += $"\n<color {ColorData.Green}>{LocalizationManager.Instance.GetText(OrdealRegistry.Get(OrdealId.BurnTheWagons).NameKey)}: +{OrdealMask.BURN_THE_WAGONS_LEADERSHIP}</color>";
+                }
+                if (unitStat == UnitStat.Leadership && PlayerHoldsOrdeal(OrdealId.Dread))
+                {
+                    int before = (int)(amount + totalBonus);
+                    int cut = before - Mathf.Max(before - OrdealMask.DREAD_LEADERSHIP, (int)(TabletopTavernConstants.MORALE_BREAK_THRESHOLD * 2));
+                    if (cut > 0)
+                    {
+                        totalBonus -= cut;
+                        description += $"\n<color {ColorData.Error}>{LocalizationManager.Instance.GetText(OrdealRegistry.Get(OrdealId.Dread).NameKey)}: -{cut}</color>";
+                    }
+                }
             }
 
             //if battle, check squad for battlefield bonuses and defensive stance

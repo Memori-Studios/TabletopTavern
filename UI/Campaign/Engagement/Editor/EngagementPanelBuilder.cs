@@ -45,11 +45,8 @@ namespace TJ.Engagement.EditorTools
         const string LootTownName = "Loot Town Button";
 
         const float PanelWidth = 1160f;
-        // The card's top edge sits 196 px below the top of a 1080 screen; the fit keeps the tallest state above the army bar on a 125% Deck.
-        // Low enough that the end-of-battle banner, at its old screen spot, sits clear above the card.
+        // Low enough that the end-of-battle banner, at its old screen spot, sits clear above the card; the view fits the card above the army bar.
         const float PanelTopY = 286f;
-        static readonly Vector2 FitDesign = new(1160f, 520f);
-        static readonly Vector2 FitReserved = new(0f, 371f);
         const float BandAlpha = 0.12f;
         const int OverlaySortingOrder = 104;
         const float BannerScreenY = 140f;
@@ -597,7 +594,8 @@ namespace TJ.Engagement.EditorTools
             TMP_Text detail = Text("Detail", titles, display, 13f, Soft, "Detail");
             Shrink(detail, 10f);
 
-            RectTransform tag = Rect("Tag", head);
+            // The rarity tag sits in the row, not the title line, so it centres on the row like the gold value.
+            RectTransform tag = Rect("Tag", content);
             HLayout(tag, 0f, TextAnchor.MiddleCenter, new RectOffset(10, 10, 0, 0));
             Fixed(tag.gameObject, -1f, 24f);
             Image tagFrame = Img(Stretch(Rect("Frame", tag)), squareSliced, Coin, Image.Type.Sliced);
@@ -772,12 +770,9 @@ namespace TJ.Engagement.EditorTools
             ContentSizeFitter fitter = GetOrAdd<ContentSizeFitter>(rootGo);
             fitter.horizontalFit = ContentSizeFitter.FitMode.Unconstrained;
             fitter.verticalFit = ContentSizeFitter.FitMode.PreferredSize;
-            UIFitToCanvas fit = GetOrAdd<UIFitToCanvas>(rootGo);
-            var fitSo = new SerializedObject(fit);
-            fitSo.FindProperty("designSize").vector2Value = FitDesign;
-            fitSo.FindProperty("reservedSize").vector2Value = FitReserved;
-            fitSo.FindProperty("minScale").floatValue = 0.6f;
-            fitSo.ApplyModifiedPropertiesWithoutUndo();
+            // A fixed design size cannot follow the card's height, so EngagementPanelView fits the card itself.
+            UIFitToCanvas staleFit = rootGo.GetComponent<UIFitToCanvas>();
+            if (staleFit != null) Object.DestroyImmediate(staleFit, true);
             EngagementPanelView view = GetOrAdd<EngagementPanelView>(rootGo);
             var so = new SerializedObject(view);
             Ref(so, "card", root);
@@ -1259,7 +1254,7 @@ namespace TJ.Engagement.EditorTools
             return label;
         }
 
-        // Row text shrinks to fit its line in every locale; the tag rides the title line so the detail keeps the full width.
+        // Row text shrinks to fit its line in every locale; a choice row's tag rides the title line so the detail keeps the full width.
         static void Shrink(TMP_Text label, float min)
         {
             Flexible(label.gameObject, 1f).preferredWidth = 0f;

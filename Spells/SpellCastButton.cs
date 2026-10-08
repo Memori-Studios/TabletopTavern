@@ -158,7 +158,8 @@ public class SpellCastButton : MonoBehaviour, IPointerEnterHandler, IPointerExit
         {
             // 10 is the 0 key; anything past the ten digits has no key and shows nothing.
             hotkeyText.text = hotkeyNumber >= 1 && hotkeyNumber <= 10 ? (hotkeyNumber % 10).ToString() : "";
-            hotkeyText.gameObject.SetActive(spellData != null);
+            // The digits are keyboard keys; a pad casts by clicking the slot.
+            hotkeyText.gameObject.SetActive(spellData != null && !Memori.Input.InputDevices.UsingGamepad);
         }
 
         // Assigned before SetSelected, which repaints the frame off it.

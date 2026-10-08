@@ -585,13 +585,10 @@ namespace TJ.Games.EditorTools
         static void BuildCard(RectTransform root, SerializedObject so)
         {
             RectTransform card = Panel(root, "Card", CardTop, CardWidth, out CanvasGroup cardGroup);
-            // On a shorter canvas (UI Scale 125%, Steam Deck) the card shrinks from its top edge to stay above the army bar.
-            UIFitToCanvas cardFit = GetOrAdd<UIFitToCanvas>(card.gameObject);
-            var cardFitSo = new SerializedObject(cardFit);
-            cardFitSo.FindProperty("designSize").vector2Value = new Vector2(CardWidth, 560f);
-            cardFitSo.FindProperty("reservedSize").vector2Value = new Vector2(0f, CardTop + 285f);
-            cardFitSo.FindProperty("minScale").floatValue = 0.6f;
-            cardFitSo.ApplyModifiedPropertiesWithoutUndo();
+            // The card moves up before it shrinks, so text stays readable on short canvases such as the Steam Deck's.
+            UIFitToCanvas oldCardFit = card.GetComponent<UIFitToCanvas>();
+            if (oldCardFit != null) UnityEngine.Object.DestroyImmediate(oldCardFit, true);
+            GetOrAdd<UIFitBetweenBars>(card.gameObject);
             Ref(so, "card", cardGroup);
             Frame(card, CardHeaderHeight);
 

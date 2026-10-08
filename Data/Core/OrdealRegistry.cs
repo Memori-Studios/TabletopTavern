@@ -75,7 +75,8 @@ namespace TJ
                     Id = OrdealId.IronCoffers, Group = OrdealGroup.RoadAndCoin, IconName = "Shop", Offered = false,
                     CounteredGear = new[] { GearID.PrivateeringPapers, GearID.CookieAndFowlCard },
                 },
-                new() { Id = OrdealId.NoQuarter, Group = OrdealGroup.RoadAndCoin, IconName = "engagement" },
+                // March wins pay no ransom, so the card has nothing left to take.
+                new() { Id = OrdealId.NoQuarter, Group = OrdealGroup.RoadAndCoin, IconName = "engagement", Offered = false },
                 new() { Id = OrdealId.Embargo, Group = OrdealGroup.RoadAndCoin, IconName = "Treasure", Offered = false },
                 new() { Id = OrdealId.ScorchedEarth, Group = OrdealGroup.RoadAndCoin, IconName = "Town", RedrawsMap = true, Offered = false },
                 new() { Id = OrdealId.FogOnTheRoad, Group = OrdealGroup.RoadAndCoin, IconName = "Unknown", RedrawsMap = true },
@@ -214,7 +215,7 @@ namespace TJ
         #region Card rules
         public const int TITHE_GOLD_PER_TURN = 3;
         public const int MERCENARY_CONTRACT_GOLD = 25;
-        public const int MERCENARY_CONTRACT_GOLD_PER_TURN = 1;
+        public const int MERCENARY_CONTRACT_GOLD_PER_TURN = 10;
         public const int IRON_COFFERS_PRICE_RISE = 5;
         public const int PRESS_GANGED_RECRUIT_RISE = 2;
         public const float GREEN_RECRUITS_HEALTH = 0.75f;

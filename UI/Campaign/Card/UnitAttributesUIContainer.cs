@@ -55,7 +55,9 @@ namespace TJ
             unitBonusesParent.transform.localScale = Vector3.one;
             overriden = true;
         }
-        public void Load(UnitName _unitName, bool _applyGearBonuses = false, UnitAttribute _prestigeTrait = UnitAttribute.None)
+        /// <param name="_showCampaignTrait">Adds the unit's Campaign Trait as the last chip; only the player's campaign army has one.</param>
+        public void Load(UnitName _unitName, bool _applyGearBonuses = false, UnitAttribute _prestigeTrait = UnitAttribute.None,
+            bool _showCampaignTrait = false)
         {
             // Resolve without creating: a hover during a scene transition sees the new game state
             // before that scene's manager exists, and Instance would fabricate an unconfigured one.
@@ -99,7 +101,13 @@ namespace TJ
                 }
             }
 
-            DisplayedAttributeCount = unitAttributes.Count;
+            // Campaign Traits sit after the battle traits.
+            unitAttributes = unitAttributes.OrderBy(a => TabletopTavernConstants.IsCampaignAttribute(a) ? 1 : 0).ToList();
+
+            string traitName = null, traitLines = null;
+            bool hasCampaignTrait = _showCampaignTrait && CampaignTraitText.TryGet(_unitName, out traitName, out traitLines);
+            int chipCount = unitAttributes.Count + (hasCampaignTrait ? 1 : 0);
+            DisplayedAttributeCount = chipCount;
 
             _unitAttributeUIs = unitAttributesParent.GetComponentsInChildren<UnitAttributesUI>().ToList();
             List<UnitBonusUI> unitBonusUIs = unitBonusesParent.GetComponentsInChildren<UnitBonusUI>().ToList();
@@ -124,13 +132,13 @@ namespace TJ
             }
 
             //if more attributes than the ones already loaded add them
-            if(unitAttributes.Count > _unitAttributeUIs.Count) {
-                for(int i = _unitAttributeUIs.Count; i < unitAttributes.Count; i++) {
+            if(chipCount > _unitAttributeUIs.Count) {
+                for(int i = _unitAttributeUIs.Count; i < chipCount; i++) {
                     bool useSpecialPrefab = i == prestigeIndex && prestigeTraitAttributePrefab != null;
                     _unitAttributeUIs.Add(Instantiate(useSpecialPrefab ? prestigeTraitAttributePrefab : unitAttributePrefab, unitAttributesParent));
                 }
-            } else if(unitAttributes.Count < _unitAttributeUIs.Count) {
-                for(int i = _unitAttributeUIs.Count - 1; i >= unitAttributes.Count; i--) {
+            } else if(chipCount < _unitAttributeUIs.Count) {
+                for(int i = _unitAttributeUIs.Count - 1; i >= chipCount; i--) {
                     TrimRow(_unitAttributeUIs[i]);
                     _unitAttributeUIs.RemoveAt(i);
                 }
@@ -152,8 +160,13 @@ namespace TJ
             _displayedBonusUIs.Clear();
             for (int i = 0; i < unitAttributes.Count; i++)
             {
-                _unitAttributeUIs[i].Load(unitAttributes[i]);
-                _unitAttributeUIs[i].SetUpTooltip();
+                if (TabletopTavernConstants.IsCampaignAttribute(unitAttributes[i]))
+                    _unitAttributeUIs[i].LoadCampaignTrait(unitAttributes[i]);
+                else
+                {
+                    _unitAttributeUIs[i].Load(unitAttributes[i]);
+                    _unitAttributeUIs[i].SetUpTooltip();
+                }
                 if (i >= stackCount) continue;
 
                 string unitAttributesLocalised = LocalizationManager.Instance.GetText(unitAttributes[i].ToString());
@@ -163,6 +176,8 @@ namespace TJ
                 if (unitAttributes[i] == UnitAttribute.Large) Destroy(unitBonusUIs[i].gameObject);
                 else _displayedBonusUIs.Add(unitBonusUIs[i]);
             }
+            if (hasCampaignTrait)
+                _unitAttributeUIs[unitAttributes.Count].LoadCampaignTrait(traitName, $"{CampaignTraitText.Caption}: {traitName}", traitLines);
     }
         public void Refresh()
         {

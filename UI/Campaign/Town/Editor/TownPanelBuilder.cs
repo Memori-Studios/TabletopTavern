@@ -64,8 +64,7 @@ namespace TJ.Town.EditorTools
         static readonly Color Positive = Hex("7BD66F");
         static readonly Color Negative = Hex("E3695E");
         static readonly Color Coin = Hex("E3BB71");
-        // The panel's tallest state in 1080 units, and its bottom edge: 273 of army panel plus a gap.
-        const float FitHeight = 785f;
+        // The panel's bottom edge: 273 of army panel plus a gap.
         const float FitBottom = 285f;
         static readonly Color Taken = Hex("8C9AA2");
         static readonly Color TakenTitle = Hex("8C9AA2");
@@ -519,11 +518,12 @@ namespace TJ.Town.EditorTools
             ContentSizeFitter fitter = GetOrAdd<ContentSizeFitter>(rootGo);
             fitter.horizontalFit = ContentSizeFitter.FitMode.Unconstrained;
             fitter.verticalFit = ContentSizeFitter.FitMode.PreferredSize;
-            UIFitToCanvas fit = GetOrAdd<UIFitToCanvas>(rootGo);
+            // A fixed design height cannot follow a panel that grows with its state, so it keeps between the bars instead.
+            UIFitToCanvas oldFit = rootGo.GetComponent<UIFitToCanvas>();
+            if (oldFit != null) UnityEngine.Object.DestroyImmediate(oldFit, true);
+            UIFitBetweenBars fit = GetOrAdd<UIFitBetweenBars>(rootGo);
             var fitSo = new SerializedObject(fit);
-            fitSo.FindProperty("designSize").vector2Value = new Vector2(PanelWidth, FitHeight);
-            fitSo.FindProperty("reservedSize").vector2Value = new Vector2(0f, FitBottom + 10f);
-            fitSo.FindProperty("minScale").floatValue = 0.6f;
+            fitSo.FindProperty("bottomClearance").floatValue = FitBottom;
             fitSo.ApplyModifiedPropertiesWithoutUndo();
             TownPanelView view = GetOrAdd<TownPanelView>(rootGo);
             var so = new SerializedObject(view);

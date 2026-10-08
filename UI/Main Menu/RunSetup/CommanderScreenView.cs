@@ -1,5 +1,8 @@
+using System.Collections.Generic;
+using Memori.Audio;
 using Memori.Localization;
 using Memori.Tooltip;
+using Memori.UI;
 using TJ.Spells;
 using TMPro;
 using UnityEngine;
@@ -89,7 +92,7 @@ namespace TJ.MainMenu
             return count;
         }
 
-        /// <summary>Shows a hero on the hero panel. Runs on every roster hover, so it only writes, never adds.</summary>
+        /// <summary>Shows the picked hero on the hero panel. It only writes, never adds.</summary>
         public void ShowHero(Hero hero, PlayPanel playPanel)
         {
             string heroName = T(hero.HeroName);
@@ -128,13 +131,88 @@ namespace TJ.MainMenu
 
         public void ShowTreasury(int total, int baseGold, int renownBonus)
         {
+            if (treasuryCount != null) { StopCoroutine(treasuryCount); treasuryCount = null; }
+            previousTotal = shownTotal < 0 ? total : shownTotal;
+            shownTotal = total;
+            shownBase = baseGold;
+            shownRenown = renownBonus;
+            treasuryText.text = TreasuryText(total);
+        }
+
+        // Counts from the last hero's treasury to this one's, with a few coin ticks.
+        public void CountTreasury()
+        {
+            if (!isActiveAndEnabled || previousTotal == shownTotal) return;
+            if (treasuryCount != null) StopCoroutine(treasuryCount);
+            treasuryCount = StartCoroutine(UIJuice.CountTo(treasuryText, previousTotal, shownTotal, 0.3f, TreasuryText,
+                () => IAudioRequester.Instance.PlaySFX(SFXData.CoinClink)));
+        }
+
+        private int shownTotal = -1, previousTotal, shownBase, shownRenown;
+        private Coroutine treasuryCount;
+
+        private string TreasuryText(int total)
+        {
             string label = $"<color={ColorData.Secondary}><size=75%><uppercase>{T("Treasury")}</uppercase></size></color>  ";
             string amount = $"<b><color={ColorData.Gold}><size=125%>{total}</size></color></b> <sprite name=GoldSprite>";
-            string breakdown = renownBonus > 0
-                ? $"\n<color={ColorData.Secondary}><size=80%>{string.Format(T("heroTreasuryBreakdown"), baseGold, $"<color={ColorData.Green}>+{renownBonus}</color>")}</size></color>"
+            string breakdown = shownRenown > 0
+                ? $"\n<color={ColorData.Secondary}><size=80%>{string.Format(T("heroTreasuryBreakdown"), shownBase, $"<color={ColorData.Green}>+{shownRenown}</color>")}</size></color>"
                 : "";
-            treasuryText.text = label + amount + breakdown;
+            return label + amount + breakdown;
         }
+
+        #region Arrival
+        private const float RevealTime = 0.2f, PairGap = 0.04f, BlockGap = 0.045f;
+        private Coroutine arrival, heroReveal;
+
+        // The roster deals in two tiles at a time, faction by faction, then the hero panel's blocks follow.
+        public void PlayArrival(float delay)
+        {
+            if (!isActiveAndEnabled) return;
+            if (arrival != null) StopCoroutine(arrival);
+            var items = new List<RectTransform>();
+            var delays = new List<float>();
+            for (int i = 0; i < tiles.Length; i++)
+            {
+                if (!tiles[i].gameObject.activeSelf) continue;
+                items.Add((RectTransform)tiles[i].transform);
+                delays.Add(delay + (i / 2) * PairGap);
+            }
+            AddPanelBlocks(items, delays, delay + 0.08f);
+            arrival = StartCoroutine(UIJuice.Reveal(items, delays, RevealTime));
+        }
+
+        // A new pick re-deals the hero panel top to bottom, so the eye reads that everything on it changed.
+        public void RevealHero()
+        {
+            if (!isActiveAndEnabled) return;
+            if (heroReveal != null) StopCoroutine(heroReveal);
+            var items = new List<RectTransform>();
+            var delays = new List<float>();
+            AddPanelBlocks(items, delays, 0.03f);
+            heroReveal = StartCoroutine(UIJuice.Reveal(items, delays, 0.18f));
+        }
+
+        // Every child of the hero panel, grouped into blocks that start at the name row and at each section heading.
+        private void AddPanelBlocks(List<RectTransform> items, List<float> delays, float start)
+        {
+            Transform panel = transform.Find(HeroPanelName);
+            if (panel == null) { Debug.LogError($"[CommanderScreenView] No '{HeroPanelName}' to reveal."); return; }
+            int block = 0;
+            for (int i = 0; i < panel.childCount; i++)
+            {
+                var child = (RectTransform)panel.GetChild(i);
+                if (!child.gameObject.activeSelf) continue;
+                LayoutElement layout = child.GetComponent<LayoutElement>();
+                if (layout != null && layout.ignoreLayout) continue;
+                if (child.name.StartsWith("Heading ")) block++;
+                items.Add(child);
+                delays.Add(start + block * BlockGap);
+            }
+        }
+
+        private const string HeroPanelName = "Hero Panel";
+        #endregion
 
         private void ShowSignature(Hero hero, PlayPanel playPanel)
         {

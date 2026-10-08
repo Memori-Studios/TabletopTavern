@@ -45,7 +45,7 @@ namespace Memori.SaveData
         List<SquadToLoad> withdrawnSquads = new();
 
         // Summoned squads are spawned mid-battle by a spell. They are deliberately given a UnitIndex
-        // far above any real army slot (player squadId == UnitIndex + 1, so real ids are 1-10) to
+        // far above any real army slot (player squadId == UnitIndex + 1, so real ids are 1-13) to
         // guarantee no collision. They are never written back to the campaign save - see
         // MapSquadsToKillsAndWithdrwanSquads, which only ever writes squads present in the loaded roster.
         const int SUMMON_UNIT_INDEX_BASE = 9000;
@@ -367,11 +367,6 @@ namespace Memori.SaveData
             selectedTeam = Team.Enemy;
             ShuffleEnemyOutriderSpawnPoints();
 
-#if UNITY_EDITOR
-            if (enemyArmy != null && enemyArmy.Length != 0)
-                // AssignSpawnPositionsNormalBattle(enemyArmy, enemyArmyCenter);
-                AssignSpawnPositionsGarrisionBattle(enemyArmy, enemyArmyCenter);
-#else
             if(playerSquadBattlePositions.Count == 0)
             {
                 if (enemyArmy != null && enemyArmy.Length != 0) {
@@ -396,7 +391,6 @@ namespace Memori.SaveData
                 if (newEnemySquads.Count > 0)
                     AssignSpawnPositionsNormalBattle(newEnemySquads.ToArray(), enemyArmyCenter);
             }
-#endif
         }
         public void LoadEnemyArmyFromSaveFiles()
         {
@@ -1591,11 +1585,9 @@ namespace Memori.SaveData
                 }
                 else
                 {
-                    // Structure: instantiate the artillery GPU anim dummy so all animation
-                    // system lookups (GetComponentRW<GpuAnimControl>) have a
-                    // valid entity instead of Entity.Null
-                    Entity dummyAnimEntity = entityManager.Instantiate(entitiesReferences.artilleryGPUAnim);
-                    GpuAnimLegacy.Attach(entityManager, dummyAnimEntity);
+                    // Structure: an invisible clock so every animation lookup (GetComponentRW<GpuAnimControl>) finds a real entity.
+                    Entity clock = BattleManager.Instance.UnitGPUAnimLoader.StructureClockPrefab();
+                    Entity dummyAnimEntity = clock != Entity.Null ? entityManager.Instantiate(clock) : entityManager.CreateEntity(typeof(GpuAnimControl), typeof(GpuAnimRestart), typeof(LocalTransform), typeof(LocalToWorld));
                     entityManager.AddComponentData(dummyAnimEntity, new Parent { Value = entity });
 
                     AnimationDataHolder dat = entityManager.GetComponentData<AnimationDataHolder>(entity);
@@ -1665,6 +1657,72 @@ namespace Memori.SaveData
         // Gates spawned this battle. Zero outside garrison battles, so it doubles as
         // "is this a garrison battle" for the Siegebreaker check in BattleManager.
         public int GateCount => _gateGameObjects.Count;
+
+        public void ClearGates()
+        {
+            _gateGameObjects.Clear();
+            _gateDefenderUniqueIds.Clear();
+            BattleManager.Instance.ClearBreachedGates();
+
+            World world = World.DefaultGameObjectInjectionWorld;
+            if (world == null || !world.IsCreated) return;
+            EntityManager entityManager = world.EntityManager;
+            entityManager.CompleteAllTrackedJobs();
+            using NativeArray<SquadEntity> squads = BattleManager.Instance.SquadManager.RetrieveAllSquads();
+            foreach (SquadEntity squad in squads)
+            {
+                if (squad.UnitName != UnitName.Gate || !entityManager.Exists(squad.SelfEntity)) continue;
+                if (!entityManager.HasComponent<DeleteSquadTag>(squad.SelfEntity))
+                    entityManager.AddComponent<DeleteSquadTag>(squad.SelfEntity);
+            }
+        }
+
+        // A custom battle has no gate placement, so the enemy squads standing inside the walls at Start Battle hold them.
+        public void AssignCustomGarrisonDefenders(GarrisonConcaveZone zone)
+        {
+            if (_gateGameObjects.Count == 0) return;
+            EntityManager entityManager = World.DefaultGameObjectInjectionWorld.EntityManager;
+            entityManager.CompleteAllTrackedJobs();
+            using NativeArray<SquadEntity> squads = BattleManager.Instance.SquadManager.RetrieveAllSquads();
+            foreach (SquadEntity squad in squads)
+            {
+                if (squad.SquadId >= 0 || squad.UnitName == UnitName.Gate) continue;
+                Entity entity = squad.SelfEntity;
+                if (!entityManager.Exists(entity) || entityManager.HasComponent<GarrisonDefenderComponent>(entity)) continue;
+                float3 center = entityManager.GetComponentData<SquadMovementComponent>(entity).SquadCenter;
+                if (!zone.IsInsideEnemyZone(center.x, center.z)) continue;
+
+                int nearestGate = -1;
+                float nearestDistance = float.MaxValue;
+                foreach (KeyValuePair<int, GameObject> gate in _gateGameObjects)
+                {
+                    if (gate.Value == null) continue;
+                    float distance = math.distancesq(center, (float3)gate.Value.transform.position);
+                    if (distance >= nearestDistance) continue;
+                    nearestDistance = distance;
+                    nearestGate = gate.Key;
+                }
+                if (nearestGate < 0) continue;
+
+                // The same rules EntityWatcher applies to a campaign defender at registration.
+                entityManager.AddComponentData(entity, new GarrisonDefenderComponent { GateIndex = nearestGate });
+                entityManager.AddComponent<DefendersResolveComponent>(entity);
+                TJ.Morale.MoraleComponent morale = entityManager.GetComponentData<TJ.Morale.MoraleComponent>(entity);
+                morale.CurrentMorale += TabletopTavernConstants.FORTIFIED_MORALE_BONUS;
+                morale.MaxMorale += TabletopTavernConstants.FORTIFIED_MORALE_BONUS;
+                entityManager.SetComponentData(entity, morale);
+
+                // Structural changes invalidate the buffer, so copy the unit entities first.
+                DynamicBuffer<EntityReferenceBufferElement> units = entityManager.GetBuffer<EntityReferenceBufferElement>(entity);
+                List<Entity> unitEntities = new(units.Length);
+                for (int i = 0; i < units.Length; i++) unitEntities.Add(units[i].Entity);
+                foreach (Entity unit in unitEntities)
+                {
+                    if (!entityManager.Exists(unit) || entityManager.HasComponent<MissileResistance>(unit)) continue;
+                    entityManager.AddComponentData(unit, new MissileResistance { DamageMultiplier = 0.5f });
+                }
+            }
+        }
 
         public void SpawnGateSquad(Vector3 position, int gateIndex, GameObject gateGO, GarrisonWallsSO wallsData)
         {

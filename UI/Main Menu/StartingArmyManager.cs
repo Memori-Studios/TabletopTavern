@@ -1,3 +1,4 @@
+using System.Collections;
 using UnityEngine;
 using TMPro;
 using Memori.SaveData;
@@ -134,8 +135,10 @@ namespace TJ.MainMenu
             int armyIndex = 0;
             foreach (var tile in armyTiles)
             {
-                if(tile != null)
-                    Destroy(tile.gameObject);
+                if(tile == null) continue;
+                // Destroy waits for the frame's end; switched off now, the grid lays out only the new tiles.
+                tile.gameObject.SetActive(false);
+                Destroy(tile.gameObject);
             }
             armyTiles.Clear();
             foreach (var squad in _squadsToLoad)
@@ -146,7 +149,7 @@ namespace TJ.MainMenu
                 tile.gameObject.AddComponent<StartingTroopDoubleClickHandler>().SetUp(armyIndex, this);
                 tile.gameObject.AddComponent<MemoriTooltipTrigger>().SetUpToolTip(
                     LocalizationManager.Instance.GetText(squad.UnitName.ToString()),
-                    LocalizationManager.Instance.GetText("DoubleClickRemoveTroop")
+                    InputText.Get("DoubleClickRemoveTroop")
                 );
                 armyTiles.Add(tile);
                 armyIndex++;
@@ -175,9 +178,10 @@ namespace TJ.MainMenu
             }
             #endregion
             playPanel.SetStartingGear(_gear);
-            if(playFeedback) IAudioRequester.Instance.PlaySFX(SFXData.AddGear);
+            // Taking gear off has its own sound, so removing never sounds like equipping.
+            if(playFeedback) IAudioRequester.Instance.PlaySFX(_gear == GearID.None ? SFXData.CollectItem : SFXData.AddGear);
             CalculateRemainingTreasury();
-            gearSlot.Show(_gear, GearCost(_gear), playPanel.StartingGearLocked, () => EquipGear(GearID.None));
+            gearSlot.Show(_gear, GearCost(_gear), playPanel.StartingGearLocked, () => EquipGear(GearID.None), playFeedback);
         }
 
         /// <summary>Starting price of a gear item, after the Renown discount. None costs nothing.</summary>
@@ -251,10 +255,66 @@ namespace TJ.MainMenu
             updatedSquads.RemoveAt(_index);
             _squadsToLoad = updatedSquads.ToArray();
             PointerOffTroop();
+            List<Vector2> oldPositions = TilePositions();
+            LeaveGhost(_index);
             RefreshArmyDisplay();
+            SlideTilesFrom(oldPositions, _index);
             TooltipManager.Instance.HideTooltip();
             IAudioRequester.Instance.PlaySFX(SFXData.DisbandSquad);
         }
+
+        #region Army tile motion
+        private const float TileSlideTime = 0.15f;
+
+        private List<Vector2> TilePositions()
+        {
+            List<Vector2> positions = new();
+            foreach (WarbandArmyTile tile in armyTiles)
+                positions.Add(tile != null ? ((RectTransform)tile.transform).anchoredPosition : Vector2.zero);
+            return positions;
+        }
+
+        // The removed squad's tile stays where it was and shrinks away, out of the layout and out of reach of clicks.
+        private void LeaveGhost(int index)
+        {
+            if (index < 0 || index >= armyTiles.Count || armyTiles[index] == null) return;
+            WarbandArmyTile ghost = armyTiles[index];
+            armyTiles.RemoveAt(index);
+            GetOrAdd<UnityEngine.UI.LayoutElement>(ghost.gameObject).ignoreLayout = true;
+            CanvasGroup group = GetOrAdd<CanvasGroup>(ghost.gameObject);
+            group.blocksRaycasts = false;
+            ghost.PlayRemoved();
+        }
+
+        // The squads after a removed one slide one slot back instead of jumping.
+        private void SlideTilesFrom(List<Vector2> oldPositions, int removedIndex)
+        {
+            if (!isActiveAndEnabled) return;
+            UnityEngine.UI.LayoutRebuilder.ForceRebuildLayoutImmediate((RectTransform)startingUnitsParent);
+            for (int i = removedIndex; i < armyTiles.Count && i + 1 < oldPositions.Count; i++)
+                StartCoroutine(Slide((RectTransform)armyTiles[i].transform, oldPositions[i + 1]));
+        }
+
+        private static IEnumerator Slide(RectTransform tile, Vector2 from)
+        {
+            Vector2 to = tile.anchoredPosition;
+            for (float t = 0f; t < 1f && tile != null; t += Mathf.Min(Time.unscaledDeltaTime, UIJuice.MaxStep) / TileSlideTime)
+            {
+                tile.anchoredPosition = Vector2.LerpUnclamped(from, to, UIJuice.EaseOutCubic(t));
+                yield return null;
+            }
+            if (tile != null) tile.anchoredPosition = to;
+        }
+
+        private static T GetOrAdd<T>(GameObject go) where T : Component
+        {
+            T found = go.GetComponent<T>();
+            return found != null ? found : go.AddComponent<T>();
+        }
+
+        // The first + a key press should land on: the top recruit row that can take a squad.
+        public UnityEngine.UI.Selectable FirstRecruitControl() => recruitList != null ? recruitList.FirstAddButton() : null;
+        #endregion
         public void AddTroop(SquadToLoad _squadToAdd)
         {
             if(_squadsToLoad.Length >= MaxStartingArmySize)
@@ -271,6 +331,8 @@ namespace TJ.MainMenu
             };
             _squadsToLoad = updatedSquads.ToArray();
             RefreshArmyDisplay();
+            // Every tile is rebuilt in the same frame, so only the new last one is seen to land.
+            if (armyTiles.Count > 0 && armyTiles[^1] != null) armyTiles[^1].PlayLanded();
             TooltipManager.Instance.HideTooltip();
             IAudioRequester.Instance.PlaySFX(SFXData.RecruitUnit);
         }

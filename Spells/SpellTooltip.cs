@@ -74,7 +74,8 @@ namespace TJ.Spells
 
         private static string[] KeyCaps(int hotkeyNumber)
         {
-            if (hotkeyNumber < 1 || hotkeyNumber > 10) return null;
+            // The pad casts by clicking the spell, so it shows no keys.
+            if (hotkeyNumber < 1 || hotkeyNumber > 10 || Memori.Input.InputDevices.UsingGamepad) return null;
             return new[] { SpellCastButton.GetSpellMenuKeyName(), (hotkeyNumber % 10).ToString() };
         }
 

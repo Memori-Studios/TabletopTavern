@@ -8,7 +8,6 @@ public class EntitiesReferencesAuthoring : MonoBehaviour {
     public GameObject debugPlayerUnitPositionPrefab, debugEnemyUnitPositionPrefab;
     public GameObject battlefieldBonusPrefabGameObject;
     public GameObject basePlayerUnitPrefabGameObject;
-    public GameObject artilleryGPUAnimPrefab;
     public GameObject gateUnitPrefabGameObject;
 
 
@@ -37,7 +36,6 @@ public class EntitiesReferencesAuthoring : MonoBehaviour {
 
                 // Units
                 basePlayerUnitPrefabEntity = GetEntity(authoring.basePlayerUnitPrefabGameObject, TransformUsageFlags.Dynamic),
-                artilleryGPUAnim = GetEntity(authoring.artilleryGPUAnimPrefab, TransformUsageFlags.Dynamic),
                 gateUnitPrefabEntity = GetEntity(authoring.gateUnitPrefabGameObject, TransformUsageFlags.Dynamic),
 
             });

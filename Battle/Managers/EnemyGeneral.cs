@@ -174,6 +174,8 @@ namespace TJ
             _rangedBehavior.InitialiseSquadLists();
             _cavalryBehavior.DetermineInfantryMarchSpeed();
 
+            // A custom battle picks its walls after SetUp, so the flag is read again here.
+            _isGarrisonBattle = BattleManager.Instance.BattleSaveManager.IsGarrisonBattle;
             if (_isGarrisonBattle)
             {
                 Debug.Log("[EnemyGeneral] Starting in Garrison state");

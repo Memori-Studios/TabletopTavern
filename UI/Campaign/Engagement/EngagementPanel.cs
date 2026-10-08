@@ -207,6 +207,7 @@ namespace TJ.Engagement
             }
 
             engagementPanelCanvasGroup.interactable = true;
+            mapSceneUIManager.HUDPanel.PulseReservePennants();
             if (!DifficultyRules.AutoResolvePreviewHidden(campaignSaveManager.SaveData.difficultyLevel))
             {
                 view.AutoResolvePreview.CheckIfMouseOverTooltip();
@@ -476,6 +477,8 @@ namespace TJ.Engagement
             }
             campaignSaveManager.SaveCampaign();
             campaignSaveManager.SaveCampaignSnapshot();
+            MapNode node = CampaignManager.Instance.MapSceneUIManager.MapSceneManager.SelectedNode;
+            if (node != null) node.RefreshTwistLabel();
             _ = LoadEnemyCompany(false, _engagementRunId);
         }
         #endregion
@@ -638,7 +641,8 @@ namespace TJ.Engagement
                         squadDisplayCardMenu.ShowPotentialHealthLoss(predictedPlayerSquads[i]);
                     }
                 }
-                if(squadDisplayCardMenu.InReserve && !garrisonFight && !CampaignSaveManager.HealingBlocked()) {
+                if(squadDisplayCardMenu.InReserve && !SaveDataHandler.FightsInBattle(squadDisplayCardMenu.GetSquadToLoad())
+                    && squadDisplayCardMenu.GetSquadToLoad().SquadCurrentHealth > 0 && !garrisonFight && !CampaignSaveManager.HealingBlocked()) {
                     squadDisplayCardMenu.ShowPotentialHealthRecovery();
                 }
             }
@@ -755,6 +759,8 @@ namespace TJ.Engagement
         {
             goldRewardAmount = engagementType == EngagementType.Skirmish ? TabletopTavernConstants.GetSkirmishReward() : TabletopTavernConstants.GetHordeReward();
             goldRewardAmount += BattlesFoughtBonus();
+            goldRewardAmount += campaignSaveManager.ProspectorsGold();
+            goldRewardAmount += campaignSaveManager.CampaignTraitBountyGold();
             // The build is locked on the March and a won battle pays nothing, gold included (TJ).
             bool march = campaignSaveManager.SaveData.InMarch;
             if (march) goldRewardAmount = 0;
@@ -826,6 +832,7 @@ namespace TJ.Engagement
                     campaignSaveManager.ModifyGruntkinTroopHealth(TabletopTavernConstants.ENDLESS_HORDES_HEAL_AMOUNT);
             }
 
+            if (campaignSaveManager.SaveData.playerWonBattle) campaignSaveManager.ApplyCampaignTraitsAfterWin();
             HideAutoResolvePrediction();
             campaignSaveManager.PrestigeUnitsOnKills();
 
@@ -1265,6 +1272,7 @@ namespace TJ.Engagement
         {
             if (bountyRow == null || bountyRow.IsTaken) return;
             MarkTaken(SpoilBounty);
+            campaignSaveManager.AddSpoilsGoldToLastBattle(goldRewardAmount);
             CampaignManager.Instance.GoldManager.ModifyGold(goldRewardAmount, Text("Loot Gold"));
             bountyRow.SetTaken(true, true);
             QueueAutoContinue();
@@ -1319,6 +1327,7 @@ namespace TJ.Engagement
         {
             if (choiceMade) return;
             campaignSaveManager.RegisterRansomChosen();
+            campaignSaveManager.AddSpoilsGoldToLastBattle(ransomAmount);
             CampaignManager.Instance.GoldManager.ModifyGold(ransomAmount, Text("Ransom Captives"));
             Choose(row);
             QueueAutoContinue();

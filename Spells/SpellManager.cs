@@ -783,7 +783,7 @@ public class SpellManager : MonoBehaviour
         {
             placementPhase = SpellPlacementPhase.Placing;
             BeginBarricadeLine();
-            ui.ShowSpellTargetHint(validTargetCursor, LocalizationManager.Instance.GetText("SpellHintPlaceBarricade"));
+            ui.ShowSpellTargetHint(validTargetCursor, InputText.Get("SpellHintPlaceBarricade"));
         }
         else
         {
@@ -796,7 +796,7 @@ public class SpellManager : MonoBehaviour
             BattleManager.Instance.PositionDrawer.SetLookRotation(Quaternion.Euler(0f, -90f, 0f));
             BattleManager.Instance.PositionDrawer.PreviewSpawnFormation(MouseWorldPosition.Instance.GetWorldPosition(), count, spread);
             placementPhase = SpellPlacementPhase.Placing;
-            ui.ShowSpellTargetHint(validTargetCursor, LocalizationManager.Instance.GetText("SpellHintPlaceFormation"));
+            ui.ShowSpellTargetHint(validTargetCursor, InputText.Get("SpellHintPlaceFormation"));
         }
 
         if(BattleManager.Instance.CursorMode != CursorMode.CastSpell)
@@ -831,7 +831,7 @@ public class SpellManager : MonoBehaviour
         BattleManager.Instance.PositionDrawer.SetLookRotation(Quaternion.Euler(0f, BattleInputManager.Instance.Angle, 0f));
         BattleManager.Instance.PositionDrawer.TurnOn(selection.GetMousePositionOffsetByFormationCenter(), selection.SelectedSquadEntityAndEntitiesCountDict);
         placementPhase = SpellPlacementPhase.Placing;
-        BattleManager.Instance.UIManager.ShowSpellTargetHint(validTargetCursor, LocalizationManager.Instance.GetText("SpellHintPlaceFormation"));
+        BattleManager.Instance.UIManager.ShowSpellTargetHint(validTargetCursor, InputText.Get("SpellHintPlaceFormation"));
     }
     /// <summary>The right-click that confirms a drawn formation. Called by BattleInputManager.HandleSpellPlacementCursorMode.</summary>
     public void ConfirmPlacement()
@@ -1430,14 +1430,14 @@ public class SpellManager : MonoBehaviour
             bool overUI = UnityEngine.EventSystems.EventSystem.current.IsPointerOverGameObject();
 
             // A click on the spell wheel picks from it; it must not also cast or cancel the armed spell.
-            if(!WheelOwnsMouse && Input.GetMouseButtonDown(1)){
+            if(!WheelOwnsMouse && global::Memori.Input.GameCursor.GetButtonDown(1)){
                 BattleManager.Instance.SetCursorMode(CursorMode.Free);
                 yield break;
             }
 
             // A click on UI belongs to the UI (the spell bar re-arms, a unit card casts through CastOnSquadCard);
             // a click on the minimap moves the camera. Neither may also cast on the ground behind it.
-            if(!WheelOwnsMouse && !overUI && !MinimapClickToMove.PointerIsOver && Input.GetMouseButtonDown(0)){
+            if(!WheelOwnsMouse && !overUI && !MinimapClickToMove.PointerIsOver && global::Memori.Input.GameCursor.GetButtonDown(0)){
                 AttemptCastSpell();
             }
 
@@ -1563,7 +1563,7 @@ public class SpellManager : MonoBehaviour
         targetHintOverSquad = overWrongSquad;
         LocalizationManager loc = LocalizationManager.Instance;
         string validTargets = string.Format(loc.GetText("SpellTargetValidTargets"), ValidTargetsLabel(spell));
-        string message = valid ? loc.GetText("SpellTargetCastHint")
+        string message = valid ? InputText.Get("SpellTargetCastHint")
             : overWrongSquad ? $"<color=#E04040>{loc.GetText("SpellTargetInvalid")}</color> {validTargets}"
             : validTargets;
         BattleManager.Instance.UIManager.ShowSpellTargetHint(cursor, message);
@@ -1646,7 +1646,7 @@ public class SpellManager : MonoBehaviour
 
         mouseReleased = false;
         while(!mouseReleased){
-            if(Input.GetMouseButtonUp(0)){
+            if(global::Memori.Input.GameCursor.GetButtonUp(0)){
                 mouseReleased = true;
                 BattleManager.Instance.SetCursorMode(CursorMode.Free);
                 // Debug.Log($"SpellManager: Mouse released, exiting cast mode (spells cast this session: {spellsCast})");

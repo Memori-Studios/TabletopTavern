@@ -53,7 +53,7 @@ namespace TJ.MainMenu
             string date = record.EndedAtUtc.ToLocalTime().ToString("d", CultureInfo.CurrentCulture);
             meta.text = $"{RecordsFormat.Difficulty(record.difficulty)} · {RecordsFormat.Reached(record)} · {date}";
             time.text = RecordsFormat.Time(record.playTimeSeconds);
-            gold.text = $"{record.goldAtEnd}";
+            gold.text = record.goldEarned.ToString("N0", CultureInfo.CurrentCulture);
             outcome.text = RecordsFormat.Outcome(record.outcome);
             Color outcomeColour = Hex(RecordsFormat.OutcomeColour(record.outcome));
             outcome.color = outcomeColour;

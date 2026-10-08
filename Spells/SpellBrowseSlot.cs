@@ -74,6 +74,7 @@ namespace TJ.Spells
         private bool hovered;
         private Coroutine rejectFlash;
         public SpellData SpellData => spellData;
+        public Button SelectButton => selectButton;
 
         /// <param name="_onAlreadyEquipped">
         /// Raised when the player clicks a row that is already equipped (in any slot). The row flashes

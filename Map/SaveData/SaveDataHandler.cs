@@ -130,6 +130,18 @@ namespace Memori.SaveData
         // Twists bought off the node being fought, so a reload does not bring them back. CompleteChapter clears them.
         public List<OrdealId> twistsStruckHere = new();
 
+        // Run History detail. Kept here, not on the player save, so a quit and Continue rolls it back with the snapshot.
+        // 0 in saves from before it was kept.
+        public int startingGold;
+        // Units each player squad lost over the run.
+        public List<SquadLossesStored> squadLossTotals = new();
+        // Squads that died this run, as they stood when they fell.
+        public List<RunSquad> fallenSquads = new();
+        // The army as each act ended, one entry per act.
+        public List<RunAct> actArmies = new();
+        // One entry per resolved battle.
+        public List<RunBattle> battleLog = new();
+
         /// <summary>Past the last story act: no healing, no recruits, only battles.</summary>
         public bool InMarch => MarchRules.InMarch(bookNumber);
         public bool HasOrdeal(OrdealId id)
@@ -181,6 +193,7 @@ namespace Memori.SaveData
             heroID = _hero;
             selectedSpells = SpellLoadout.Sanitize(_selectedSpells, _hero);
             goldAmount = _startingGold;
+            startingGold = _startingGold;
             playerArmy = _playerArmy;
             activeMapLayer = -1;
             nodeGenerated = false;
@@ -228,6 +241,8 @@ namespace Memori.SaveData
         public Spell[] playerCustomBattleSpells = Array.Empty<Spell>();
         public SquadToLoad[] enemyCustomBattleArmy;
         public List<SquadBattlePosition> enemyCustomBattleSquadBattlePositions = new();
+        // TownSize ordinal of the garrison walls, -1 for none; the initializer keeps saves without the field at none.
+        public int customBattleGarrison = -1;
     }
     [System.Serializable] public struct RunStats
     {
@@ -254,6 +269,14 @@ namespace Memori.SaveData
         public int campfireTrainings;            // squads trained at campfires this run (DrillSergeant)
         public List<TJ.Map.NodeType> nodeTypesVisited; // kinds of node picked this run (GrandTour)
         public int battlesWon;                   // battles won this run, garrisons included; BattlesFought resets every act
+        public int unitsLost;                    // units the player's squads lost in battle this run (Run History)
+        public int goldSpent;                    // gold taken from the purse this run, after the clamp at 0 (Run History)
+        public int campfireRests;                // times the army rested at a campfire (Run History)
+        public int consumablesUsed;              // consumables used this run, battle-scene uses included (Run History)
+        public int healingItemsUsed;             // Minor and Major Health potions used (Run History)
+        public int villagesSacked;               // towns sacked by size; CampaignSaveData.townsSacked is the total (Run History)
+        public int castlesSacked;
+        public int citiesSacked;
     }
     [System.Serializable] public struct SpellCastStored
     {
@@ -366,6 +389,8 @@ namespace Memori.SaveData
         public List<UnitNameKillsStored> UnitNameHistoricalKillStore = new();
         /// <summary>Every finished campaign, newest last. See <see cref="RunRecord"/>.</summary>
         public List<RunRecord> runHistory = new();
+        // Totals over every recorded run, past the Run History cap. Seeded once from runHistory on load.
+        public LifetimeStats lifetime = new();
         // Spells cast in fought campaign battles, ever (GrandGrimoire).
         public List<Spell> spellsEverCast = new();
         // Harsh weathers the player has won a fought battle in, ever (AllWeathers).
@@ -682,6 +707,12 @@ namespace Memori.SaveData
             playerSaveData.UnitNameHistoricalKillStore = AddToUnitNameHistoricalKills(playerSaveData.UnitNameHistoricalKillStore, currentKillsByUnitName);
             SavePlayerSaveData(playerSaveData);
         }
+        // Slots 0-9 take the field, and so do goblins in reserve.
+        public static bool FightsInBattle(SquadToLoad squad) =>
+            squad.UnitIndex != -1 && (squad.UnitIndex < 10 || TabletopTavernConstants.IsTrueGoblin(squad.UnitName));
+        // For building a battle only: a fallen Restless Dead squad stays in the army but never takes the field.
+        public static bool TakesTheField(SquadToLoad squad) =>
+            FightsInBattle(squad) && squad.SquadCurrentHealth > 0;
         /// <summary>
         /// Saves the squads after a manual battle has been completed.
         /// </summary>
@@ -704,9 +735,9 @@ namespace Memori.SaveData
                 return new SquadToLoad();
             }
 
-            for (int i = 0; i < 10; i++)
+            for (int i = 0; i < saveData.playerArmy.Length; i++)
             {
-                if (saveData.playerArmy[i].UnitIndex == -1) continue;
+                if (!TakesTheField(saveData.playerArmy[i])) continue;
 
                 saveData.playerArmy[i] = GetPlayerSquad(saveData.playerArmy[i].UniqueID);
             }
@@ -726,6 +757,8 @@ namespace Memori.SaveData
             saveData.HistoricalKillStore = AddToHistoricalKills(saveData.HistoricalKillStore, _squadIdKillCounter);
             saveData.SquadLossesStore = _squadIdLossCounter;
             saveData.SquadDamageStore = _squadDamage;
+            // Read before the line below marks every fought battle's town as sacked.
+            bool garrison = IsGarrisonBattle(saveData);
             if(saveData.townData == null) {
                 saveData.townData = new TownSaveData();
                 UnityEngine.Debug.Log($"Created new TownSaveData in SaveSquadsPostBattle");
@@ -757,9 +790,9 @@ namespace Memori.SaveData
             }
 
             //achievement tracking - archer used in battle
-            for (int i = 0; i < 10; i++)
+            for (int i = 0; i < saveData.playerArmy.Length; i++)
             {
-                if (saveData.playerArmy[i].UnitIndex == -1) continue;
+                if (!FightsInBattle(saveData.playerArmy[i])) continue;
 
                 // Only the Ranged class breaks the No Archers run; Hybrids count as melee.
                 if (TabletopTavernData.Instance.GetSquadStats(saveData.playerArmy[i].UnitName).unitType == UnitType.Ranged)
@@ -786,6 +819,8 @@ namespace Memori.SaveData
             List<Spell> spellsCastThisBattle = new(SpellsCastThisBattle.Keys);
             SpellsCastThisBattle.Clear();
 
+            RecordBattleForRunHistory(saveData, _playerSquads, _enemySquads, _playerWon, true, garrison, totalKills, _squadIdLossCounter);
+
             // The battle result goes to disk before any stats or achievement work so a failure below
             // cannot leave the map treating this battle as unfought.
             SaveCampaign(saveData);
@@ -799,9 +834,9 @@ namespace Memori.SaveData
 
             //achievement check - cav only
             bool cavOnly = true;
-            for (int i = 0; i < 10; i++)
+            for (int i = 0; i < saveData.playerArmy.Length; i++)
             {
-                if (saveData.playerArmy[i].UnitIndex == -1) continue;
+                if (!FightsInBattle(saveData.playerArmy[i])) continue;
 
                 //get unit size for each unit
                 UnitSize unitSize = TabletopTavernData.Instance.GetSquadStats(saveData.playerArmy[i].UnitName).unitSize;
@@ -911,6 +946,8 @@ namespace Memori.SaveData
             PlayerSaveData loadedSaveData = ReadListFromJSON<PlayerSaveData>("playerSaveData.json");
             loadedSaveData ??= new PlayerSaveData();
             _playerCache = loadedSaveData;
+            MigrateRunHistoryArmies(loadedSaveData);
+            SeedLifetimeStats(loadedSaveData);
             MigrateLegacyDepositedGoldToRenown(loadedSaveData);
 
             return _playerCache;
@@ -1325,6 +1362,9 @@ namespace Memori.SaveData
                 outcome = RunOutcome.Win;
             }
 
+            // A run abandoned before its first battle is a restart, not a run, and would push real runs out of the cap.
+            if (outcome == RunOutcome.Abandon && RunBattlesFought(abandonedRun) == 0) return;
+
             AppendRunRecord(saveData, abandonedRun, outcome, renownEarned);
             SavePlayerSaveData(saveData);
         }
@@ -1346,25 +1386,146 @@ namespace Memori.SaveData
                 endedAtUtcTicks = DateTime.UtcNow.Ticks,
                 actReached = run.bookNumber,
                 chaptersCompleted = run.RunStats.chaptersCompleted,
-                // BattlesFought resets every act; a save from before the whole-run count has only that.
-                battlesFought = Math.Max(run.RunStats.battlesWon, run.BattlesFought),
+                battlesFought = RunBattlesFought(run),
                 marchBattles = run.marchBattlesWon,
                 goldAtEnd = run.goldAmount,
                 goldEarned = run.RunStats.goldEarned,
                 enemiesSlain = run.RunStats.enemiesSlain,
                 renownEarned = renownEarned,
                 playTimeSeconds = run.playTimeSeconds,
-                // A copy: SquadToLoad is a struct so the array is the only shared reference, and
-                // the campaign save is about to be deleted anyway.
-                army = run.playerArmy != null ? (SquadToLoad[])run.playerArmy.Clone() : Array.Empty<SquadToLoad>(),
+                squads = RunSquad.FromArmy(run.playerArmy, run.HistoricalKillStore, run.squadLossTotals),
                 gear = run.Gear != null ? new List<GearID>(run.Gear) : new List<GearID>(),
                 spells = run.selectedSpells != null ? new List<Spell>(run.selectedSpells) : new List<Spell>(),
+
+                detailVersion = RunRecord.CURRENT_DETAIL_VERSION,
+                startingGold = run.startingGold,
+                goldSpent = run.RunStats.goldSpent,
+                unitsLost = run.RunStats.unitsLost,
+                unitsPrestiged = run.RunStats.unitsPrestiged,
+                unitsRecruited = run.RunStats.unitsRecruited,
+                gearFound = run.RunStats.gearAquired,
+                shopPurchases = run.RunStats.shopPurchases,
+                goldWagered = run.RunStats.goldWagered,
+                campfireRests = run.RunStats.campfireRests,
+                campfireTrainings = run.RunStats.campfireTrainings,
+                consumablesUsed = run.RunStats.consumablesUsed,
+                healingItemsUsed = run.RunStats.healingItemsUsed,
+                townsSacked = run.townsSacked,
+                villagesSacked = run.RunStats.villagesSacked,
+                castlesSacked = run.RunStats.castlesSacked,
+                citiesSacked = run.RunStats.citiesSacked,
+                spellsCast = run.RunStats.spellsCast != null ? new List<SpellCastStored>(run.RunStats.spellsCast) : new List<SpellCastStored>(),
+                fallen = run.fallenSquads != null ? new List<RunSquad>(run.fallenSquads) : new List<RunSquad>(),
+                acts = run.actArmies != null ? new List<RunAct>(run.actArmies) : new List<RunAct>(),
+                battles = run.battleLog != null ? new List<RunBattle>(run.battleLog) : new List<RunBattle>(),
             };
 
             if (saveData.runHistory == null) saveData.runHistory = new List<RunRecord>();
             saveData.runHistory.Add(record);
             if (saveData.runHistory.Count > MAX_RUN_HISTORY)
                 saveData.runHistory.RemoveRange(0, saveData.runHistory.Count - MAX_RUN_HISTORY);
+            for (int i = 0; i < saveData.runHistory.Count - MAX_BATTLE_LOGS; i++)
+                saveData.runHistory[i].battles = new List<RunBattle>();
+
+            (saveData.lifetime ??= new LifetimeStats()).Add(record);
+        }
+
+        /// <summary>How many of the newest runs keep their battle-by-battle log; older runs keep only their totals.</summary>
+        public const int MAX_BATTLE_LOGS = 20;
+
+        // battlesWon misses losses and BattlesFought resets every act; the battle log has every battle, but only on newer saves.
+        private static int RunBattlesFought(CampaignSaveData run) =>
+            Math.Max(Math.Max(run.RunStats.battlesWon, run.BattlesFought), run.battleLog?.Count ?? 0);
+
+        private static bool IsGarrisonBattle(CampaignSaveData run) =>
+            run.townData != null && run.townData.townInteractionStatus == TownInteractionStatus.GarrisonBattleStarted;
+
+        /// <summary>
+        /// Adds one resolved battle to the run's history: units lost, each squad's loss total and a battle log entry.
+        /// Both result paths call it once per battle, before the save is written, so a reload cannot count it twice.
+        /// </summary>
+        public static void RecordBattleForRunHistory(CampaignSaveData run, SquadToLoad[] playerSquads, SquadToLoad[] enemySquads,
+            bool playerWon, bool fought, bool garrison, int kills, List<SquadLossesStored> losses)
+        {
+            // The fought path's loss list carries enemy squads too.
+            HashSet<string> playerSquadGuids = new();
+            foreach (SquadToLoad squad in playerSquads) playerSquadGuids.Add(squad.UniqueID);
+
+            int lost = 0;
+            run.squadLossTotals ??= new List<SquadLossesStored>();
+            if (losses != null)
+            {
+                foreach (SquadLossesStored loss in losses)
+                {
+                    if (loss.Losses <= 0 || !playerSquadGuids.Contains(loss.SquadGUID)) continue;
+                    lost += loss.Losses;
+                    int index = run.squadLossTotals.FindIndex(entry => entry.SquadGUID == loss.SquadGUID);
+                    if (index < 0) run.squadLossTotals.Add(loss);
+                    else run.squadLossTotals[index] = new SquadLossesStored { SquadGUID = loss.SquadGUID, Losses = run.squadLossTotals[index].Losses + loss.Losses };
+                }
+            }
+            run.RunStats.unitsLost += lost;
+
+            int fallen = 0;
+            foreach (SquadToLoad squad in playerSquads)
+                if (RunSquad.IsFilled(squad) && squad.SquadCurrentHealth <= 0) fallen++;
+
+            (run.battleLog ??= new List<RunBattle>()).Add(new RunBattle
+            {
+                act = run.bookNumber,
+                node = run.selectedNodeType,
+                town = garrison && run.townData != null ? (int)run.townData.townSize : -1,
+                race = BattleAchievements.FirstFactionRace(enemySquads, TabletopTavernData.Instance),
+                warlord = run.enemyWarlordHeroID,
+                weather = run.battleFieldPreset.weather,
+                fought = fought,
+                won = playerWon,
+                kills = kills,
+                lost = lost,
+                fallen = fallen,
+            });
+        }
+
+        /// <summary>Keeps a squad that died, with its run kills and losses, before it is cleared from the army.</summary>
+        public static void RecordFallenSquad(CampaignSaveData run, SquadToLoad squad)
+        {
+            if (!RunSquad.IsFilled(squad)) return;
+            (run.fallenSquads ??= new List<RunSquad>()).Add(RunSquad.From(squad, -1, run.HistoricalKillStore, run.squadLossTotals));
+        }
+
+        /// <summary>Keeps the army as an act ends. Safe to call twice for the same act: the newer one replaces the older.</summary>
+        public static void RecordActArmy(CampaignSaveData run)
+        {
+            run.actArmies ??= new List<RunAct>();
+            run.actArmies.RemoveAll(entry => entry.act == run.bookNumber);
+            run.actArmies.Add(new RunAct
+            {
+                act = run.bookNumber,
+                gold = run.goldAmount,
+                squads = RunSquad.FromArmy(run.playerArmy, run.HistoricalKillStore, run.squadLossTotals),
+            });
+        }
+
+        // In memory only, like the army migration: the next player save writes it. Safe to run twice.
+        private static void SeedLifetimeStats(PlayerSaveData saveData)
+        {
+            saveData.lifetime ??= new LifetimeStats();
+            if (saveData.lifetime.seeded) return;
+            if (saveData.runHistory != null)
+                foreach (RunRecord record in saveData.runHistory) saveData.lifetime.Add(record);
+            saveData.lifetime.seeded = true;
+        }
+
+        // In memory only: the next player save writes the compact form, and a test pointed at a fixture folder never writes to it.
+        private static void MigrateRunHistoryArmies(PlayerSaveData saveData)
+        {
+            if (saveData.runHistory == null) return;
+            foreach (RunRecord record in saveData.runHistory)
+            {
+                if (record.army == null || record.army.Length == 0) continue;
+                record.squads = RunSquad.FromArmy(record.army);
+                record.army = Array.Empty<SquadToLoad>();
+            }
         }
         #endregion
 

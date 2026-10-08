@@ -54,6 +54,10 @@ namespace TJ.MainMenu
         [Header("Hero Stage")]
         [SerializeField] private Transform heroParent;
         [SerializeField] private MemoriTooltipTrigger startingGoldTooltipTrigger;
+        // World-space FX at the hero's feet: a small one when a hero is picked, a big one for the campaign send-off.
+        [SerializeField] private GameObject heroPickFx;
+        [SerializeField] private GameObject sendOffFx;
+        [SerializeField] private float stageFxLifetime = 4f;
 
         [Header("Difficulty")]
         [SerializeField] private TT_Difficulty _difficultySelected;
@@ -113,15 +117,21 @@ namespace TJ.MainMenu
         {
             base.SetUp(_mainMenu);
 
-            startButton.onClick.RemoveAllListeners();
+            // Only this panel's own handler is removed: RemoveAllListeners also took the button's click sound.
+            startButton.onClick.RemoveListener(OnStartButtonClicked);
             startButton.onClick.AddListener(OnStartButtonClicked);
-            toWarbandButton.onClick.RemoveAllListeners();
+            toWarbandButton.onClick.RemoveListener(ShowWarbandScreen);
             toWarbandButton.onClick.AddListener(ShowWarbandScreen);
 
-            increaseDifficultyButton.onClick.RemoveAllListeners();
+            increaseDifficultyButton.onClick.RemoveListener(IncreaseDifficulty);
             increaseDifficultyButton.onClick.AddListener(IncreaseDifficulty);
-            decreaseDifficultyButton.onClick.RemoveAllListeners();
+            decreaseDifficultyButton.onClick.RemoveListener(DecreaseDifficulty);
             decreaseDifficultyButton.onClick.AddListener(DecreaseDifficulty);
+
+            // A locked hero switches Build Army off; a click on it still says why (the toast plays the fail sound).
+            UIDenyFeedback buildArmyDeny = UIDenyFeedback.Attach(toWarbandButton, sound: false);
+            buildArmyDeny.Denied -= ShowWarbandScreen;
+            buildArmyDeny.Denied += ShowWarbandScreen;
 
             startingArmySection.OnStartingArmyLengthChanged -= StartingArmyLengthChanged;
             startingArmySection.OnStartingArmyLengthChanged += StartingArmyLengthChanged;
@@ -167,7 +177,11 @@ namespace TJ.MainMenu
             LoadHeroes(openingHero);
             ShowCommanderScreen();
             silentSetUp = false;
+            // The roster and hero panel deal in as the camera door clears.
+            commanderView.PlayArrival(ArrivalDelay);
         }
+
+        private const float ArrivalDelay = 0.25f;
 
         private bool silentSetUp;
         private Coroutine screenSwap;
@@ -194,7 +208,10 @@ namespace TJ.MainMenu
         #region Screen switching
         public void ShowCommanderScreen()
         {
+            // The campaign is already on its way; going back now would start it from the hero screen.
+            if (sendOff != null) return;
             warbandScreenShown = false;
+            warbandPanel.SetShown(false);
             RefreshWarbandBlockers();
 
             commanderScreen.CGEnable();
@@ -223,9 +240,14 @@ namespace TJ.MainMenu
 
             warbandScreen.CGEnable();
             commanderScreen.CGDisable();
-            // Keys and a controller stay on the warband screen instead of wandering onto the hero roster behind it.
-            ContainedNavigation.Attach(warbandScreen.gameObject);
+            // Keys and a controller stay on the warband screen instead of wandering onto the hero roster behind it,
+            // and start on the recruit list rather than the bottom corner.
+            ContainedNavigation.Attach(warbandScreen.gameObject).PreferFirst(startingArmySection.FirstRecruitControl);
+            // A selection left from the last visit would keep the first key press on Start Campaign.
+            if (EventSystem.current != null) EventSystem.current.SetSelectedGameObject(null);
             PlayScreenSwap(warbandScreen);
+            warbandPanel.SetShown(true);
+            warbandPanel.PlayArrival();
         }
 
         /// <summary>
@@ -234,6 +256,7 @@ namespace TJ.MainMenu
         /// </summary>
         public override bool TryStepBack()
         {
+            if (sendOff != null) return true;
             if (!warbandScreenShown) return false;
 
             ShowCommanderScreen();
@@ -299,6 +322,8 @@ namespace TJ.MainMenu
 
         public void LoadHeroes(Hero _hero, bool _resetGear = false)
         {
+            // A pick the player made gets the full answer; the hero the panel opens on arrives with the door instead.
+            bool announce = !silentSetUp;
             UnloadHeroes();
             SetActiveHero(_hero);
 #if DEMO
@@ -312,9 +337,9 @@ namespace TJ.MainMenu
             if(SaveDataHandler.IsDevToolUser()) heroIsUnlocked = true;
 #endif
 
-            LoadHeroPrefab();
+            LoadHeroPrefab(announce);
 
-            if (!silentSetUp) IAudioRequester.Instance.PlaySFX(SFXData.SelectHero);
+            if (announce) IAudioRequester.Instance.PlaySFX(SFXData.SelectHero);
 
             List<int> maxDifficultyComletedOnHero = SaveDataHandler.GetHeroDifficultiesCompleted(hero.HeroID);
 
@@ -357,6 +382,11 @@ namespace TJ.MainMenu
 
             startingArmySection.SetUp(this);
             ShowHeroDetailsBox(hero);
+            if (announce)
+            {
+                commanderView.RevealHero();
+                commanderView.CountTreasury();
+            }
             startingArmySection.LoadUnitsOfRace(hero.Race);
 
             // The hero pick has its own sound; the difficulty that comes with it stays quiet.
@@ -367,7 +397,7 @@ namespace TJ.MainMenu
             warbandPanel.ResetLoadoutForHero(hero);
         }
 
-        public async void LoadHeroPrefab()
+        public async void LoadHeroPrefab(bool announce = false)
         {
             int version = ++_heroPrefabLoadVersion;
             string key = TabletopTavernData.Instance.GetHeroPrefabKey(hero.HeroID);
@@ -390,6 +420,38 @@ namespace TJ.MainMenu
                 animator.Play("HeroPopIn");
 
             heroPopInFeedback.PlayFeedbacks();
+            if (announce) SpawnStageFx(heroPickFx, 1f);
+        }
+
+        // One-shot FX at the hero's feet in the 3D tavern; it removes itself, so nothing needs to track it.
+        private void SpawnStageFx(GameObject fxPrefab, float scale)
+        {
+            if (fxPrefab == null || heroParent == null) return;
+            GameObject fx = Instantiate(fxPrefab, heroParent.position, Quaternion.identity, heroParent);
+            fx.transform.localScale = Vector3.one * scale;
+            Destroy(fx, stageFxLifetime);
+        }
+
+        // The hero answers the send-off; the tavern controllers hold a masculine and a feminine cheer.
+        private void PlayHeroCheer()
+        {
+            if (heroObject == null) return;
+            Animator animator = heroObject.GetComponent<Animator>();
+            if (animator == null) return;
+            bool masculine = HasParameter(animator, "isMasculine") && animator.GetBool("isMasculine");
+            foreach (string state in new[] { masculine ? "Masc Cheer" : "Fem Cheer", "Cheer" })
+            {
+                if (!animator.HasState(0, Animator.StringToHash(state))) continue;
+                animator.CrossFadeInFixedTime(state, 0.15f, 0);
+                return;
+            }
+        }
+
+        private static bool HasParameter(Animator animator, string name)
+        {
+            foreach (AnimatorControllerParameter parameter in animator.parameters)
+                if (parameter.name == name) return true;
+            return false;
         }
 
         public void SetActiveHero(Hero _hero)
@@ -401,17 +463,8 @@ namespace TJ.MainMenu
             UpdateStartingGoldTooltip(_hero.StartingGold);
         }
 
-        public void RevertToActiveHeroDetailsBox(Hero unhoveredHero)
-        {
-            if (unhoveredHero.HeroID != hero.HeroID)
-            {
-                ShowHeroDetailsBox(hero);
-            }
-        }
-
         /// <summary>
-        /// Fills the hero panel. Called on hero change and on roster hover, so it must stay free of
-        /// side effects that accumulate.
+        /// Fills the hero panel for the picked hero. It must stay free of side effects that accumulate.
         /// </summary>
         public void ShowHeroDetailsBox(Hero _hero)
         {
@@ -521,12 +574,15 @@ namespace TJ.MainMenu
             decreaseDifficultyButton.gameObject.SetActive(DifficultyRules.Rank(_difficultySelected) > 0);
 
             //display difficulty crests
+            GameObject shownCrest = null;
             for (int i = 0; i < difficultyCrests.Length; i++)
             {
                 difficultyCrests[i].SetActive(i == difficultyData.crestIndex);
+                if (i == difficultyData.crestIndex) shownCrest = difficultyCrests[i];
             }
             crestSpawnFeedback.StopFeedbacks();
             crestSpawnFeedback.PlayFeedbacks();
+            ShowDifficultyFeel(shownCrest, levelModifierLines.Count, silent);
 
             string additionalModifiersDesc = "";
 
@@ -540,6 +596,45 @@ namespace TJ.MainMenu
 
             // A locked level blocks Start, so the validation strip has to re-check on every change.
             warbandPanel.RefreshValidation();
+        }
+
+        private Coroutine difficultyFeel;
+        private CanvasGroup crestGroup;
+        private const float LockedCrestAlpha = 0.45f;
+
+        // A locked level dims its crest; a chosen level deals its modifier lines in, and Godking lands harder.
+        private void ShowDifficultyFeel(GameObject crest, int lineCount, bool silent)
+        {
+            if (crestGroup == null)
+            {
+                Transform crests = crestSpawnFeedback.transform.parent;
+                crestGroup = crests.GetComponent<CanvasGroup>();
+                if (crestGroup == null) crestGroup = crests.gameObject.AddComponent<CanvasGroup>();
+            }
+            bool locked = DifficultyRules.IsLocked(_difficultySelected, SaveDataHandler.LoadPlayerSaveData().MaxDifficultyOverall);
+            crestGroup.alpha = locked ? LockedCrestAlpha : 1f;
+
+            if (difficultyFeel != null) StopCoroutine(difficultyFeel);
+            difficultyDescriptionText.maxVisibleLines = 99;
+            if (silent || !isActiveAndEnabled) return;
+            difficultyFeel = StartCoroutine(DifficultyFeelRoutine(crest, lineCount));
+        }
+
+        private IEnumerator DifficultyFeelRoutine(GameObject crest, int lineCount)
+        {
+            for (int line = 1; line <= lineCount; line++)
+            {
+                difficultyDescriptionText.maxVisibleLines = line;
+                yield return new WaitForSecondsRealtime(0.04f);
+            }
+            difficultyDescriptionText.maxVisibleLines = 99;
+            // The crest's own spawn scale runs first; the Godking crest then lands with a heavier punch.
+            if (crest != null && DifficultyRules.IsHardest(_difficultySelected))
+            {
+                yield return new WaitForSecondsRealtime(0.1f);
+                yield return UIJuice.Punch(crest.transform, 1.15f, 0.06f, 0.2f);
+            }
+            difficultyFeel = null;
         }
         #endregion
 
@@ -562,8 +657,20 @@ namespace TJ.MainMenu
         #endregion
 
         #region Start
+        private const float SendOffTime = 0.6f;
+        private Coroutine sendOff;
+
         public void OnStartButtonClicked()
         {
+            // A second click during the send-off skips the rest of it.
+            if (sendOff != null)
+            {
+                StopCoroutine(sendOff);
+                sendOff = null;
+                BeginCampaign();
+                return;
+            }
+
             // The validation strip already collects every blocker and drives startButton.interactable,
             // so a blocked run cannot reach here through the button. Re-checked anyway because
             // OnStartButtonClicked is public and the old flow relied on ordered activeSelf checks.
@@ -574,6 +681,23 @@ namespace TJ.MainMenu
                 return;
             }
 
+            sendOff = StartCoroutine(SendOff());
+        }
+
+        // The run's one big moment: trumpet, gold flare, the hero cheers, then the door closes as before.
+        private IEnumerator SendOff()
+        {
+            IAudioRequester.Instance.PlaySFX(SFXData.Trumpet);
+            warbandPanel.PlaySendOff();
+            PlayHeroCheer();
+            SpawnStageFx(sendOffFx, 1f);
+            yield return new WaitForSecondsRealtime(SendOffTime);
+            sendOff = null;
+            BeginCampaign();
+        }
+
+        private void BeginCampaign()
+        {
             startButton.interactable = false;
 
             Guid runUUID = Guid.NewGuid();

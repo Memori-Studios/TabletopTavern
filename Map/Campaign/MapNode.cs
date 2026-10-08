@@ -132,7 +132,7 @@ namespace TJ.Map
                 _marchNode = run.InMarch;
                 if (_marchNode)
                 {
-                    _twists = MarchRules.Twists(run, _mapNodeData.layer, _mapNodeData.index);
+                    _twists = VisibleTwists(run);
                     // The same rule the engagement screen applies, so the flag never shows a weather the battle will not have.
                     if (_twists.Contains(OrdealId.FoulWeather) && run.ordealWeather == Weather.ClearSkies)
                         _weather = MarchRules.FoulWeather(campaignSeed, bookNum, _mapNodeData.index);
@@ -277,6 +277,21 @@ namespace TJ.Map
                 }
                 ShowTwistLabel();
             }
+        }
+        // Twists never repeat on a layer, so dropping the struck ones from the layer being chosen only touches the struck node.
+        private List<OrdealId> VisibleTwists(Memori.SaveData.CampaignSaveData run)
+        {
+            List<OrdealId> twists = MarchRules.Twists(run, _mapNodeData.layer, _mapNodeData.index);
+            if (run.twistsStruckHere != null && _mapNodeData.layer == run.activeMapLayer + 1)
+                twists.RemoveAll(run.twistsStruckHere.Contains);
+            return twists;
+        }
+        /// <summary>Redraws the Twist label after a War Chest strike, if the label is showing.</summary>
+        public void RefreshTwistLabel()
+        {
+            if (!_marchNode) return;
+            _twists = VisibleTwists(CampaignManager.Instance.CampaignSaveManager.SaveData);
+            if (twistLabelCanvas != null && twistLabelCanvas.gameObject.activeSelf) ShowTwistLabel();
         }
         private void ShowTwistLabel()
         {

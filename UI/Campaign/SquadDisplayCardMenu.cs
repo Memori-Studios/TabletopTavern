@@ -59,6 +59,11 @@ namespace TJ
         [SerializeField] private GameObject originSlotMarkerPrefab;
         [SerializeField] private Canvas healthBarTextCanvas;
 
+        [Header("Reserve Pennant")]
+        [Tooltip("Optional. Raised only on a squad in a reserve slot that still joins every battle.")]
+        [SerializeField] private RectTransform reservePennant;
+        [SerializeField] private MemoriTooltipTrigger reservePennantTooltip;
+
         bool wasJustSelected;
         HUDPanel hudPanel;
         bool cachedShowOptions, cachedShowRenamePrestige, cachedShowMerge, cachedShowPrestige;
@@ -88,6 +93,14 @@ namespace TJ
         // OnBeginDrag locks every card (including this one) so the rest of the panel stops reacting, so
         // isLocked cannot be the guard for OnDrag/OnEndDrag - they key off this instead.
         bool dragActive;
+
+        const float DOUBLE_CLICK_TIME = 0.3f;
+        const float QUICK_MOVE_TOOLTIP_DELAY = 1f;
+        float lastPlainClickTime = float.NegativeInfinity;
+        MemoriTooltipTrigger quickMoveTooltip;
+
+        const float PENNANT_PULSE_SECONDS = 0.4f, PENNANT_PULSE_SCALE = 1.2f;
+        Coroutine pennantPulse;
 
         public void SetUp(SquadToLoad _squad, bool _inReserve, HUDPanel _hudPanel = null, bool _isEnemy = false)
         {
@@ -121,6 +134,36 @@ namespace TJ
             graphicRaycaster = GetComponent<GraphicRaycaster>();
 
             SetUpToolTips();
+            SetUpReservePennant();
+        }
+        private void SetUpReservePennant()
+        {
+            if (reservePennant == null) return;
+            bool fightsFromReserve = inReserve && !isEnemy && SaveDataHandler.FightsInBattle(squad);
+            reservePennant.gameObject.SetActive(fightsFromReserve);
+            reservePennant.localScale = Vector3.one;
+            if (fightsFromReserve && reservePennantTooltip != null)
+                reservePennantTooltip.SetUpToolTip(
+                    LocalizationManager.Instance.GetText("GoblinReservePennant"),
+                    LocalizationManager.Instance.GetText("GoblinReservePennantDesc"));
+        }
+        /// <summary>Pulses the reserve pennant once, if this card raises one.</summary>
+        public void PulseReservePennant()
+        {
+            if (reservePennant == null || !reservePennant.gameObject.activeInHierarchy) return;
+            if (pennantPulse != null) StopCoroutine(pennantPulse);
+            pennantPulse = StartCoroutine(PulsePennant());
+        }
+        private IEnumerator PulsePennant()
+        {
+            for (float t = 0f; t < PENNANT_PULSE_SECONDS; t += Time.unscaledDeltaTime)
+            {
+                float scale = 1f + (PENNANT_PULSE_SCALE - 1f) * Mathf.Sin(t / PENNANT_PULSE_SECONDS * Mathf.PI);
+                reservePennant.localScale = Vector3.one * scale;
+                yield return null;
+            }
+            reservePennant.localScale = Vector3.one;
+            pennantPulse = null;
         }
         private void OnEnable()
         {
@@ -210,12 +253,16 @@ namespace TJ
             } else {
                 isLocked = false;
             }
+            // A drag locks every card, and the move hint must not open over a card being dragged or passed over.
+            if (quickMoveTooltip != null) quickMoveTooltip.enabled = !_lock;
         }
         private int GetHealthRecovery()
         {
             int healthRecovery = (int)(squad.SquadMaxHealth * TabletopTavernConstants.RESERVES_HEAL_AMOUNT);
             if(CampaignManager.HasInstance) healthRecovery *= CampaignManager.Instance.CampaignSaveManager.ReservesHealMultiplier;
             if(CampaignManager.HasInstance && CampaignManager.Instance.GearManager.CheckForGear(GearID.ChugJug)) healthRecovery*=2;
+            // Must match HealTroopsInReserve: Forest Spirits heal to full in reserve.
+            if(squad.UnitName == UnitName.ForestSpirits) healthRecovery = squad.SquadMaxHealth;
             return (int)CampaignSaveManager.ApplyHealingBonus(healthRecovery);
         }
         public override void SelectSquadButtonClicked()
@@ -246,6 +293,15 @@ namespace TJ
                              || Input.GetKey(KeyCode.LeftShift)
                              || Input.GetKey(KeyCode.RightShift);
 
+            // Only plain clicks pair up, so a Ctrl or Shift selection click never ends in a move.
+            bool isDoubleClick = !modifierHeld && Time.unscaledTime - lastPlainClickTime <= DOUBLE_CLICK_TIME;
+            lastPlainClickTime = modifierHeld || isDoubleClick ? float.NegativeInfinity : Time.unscaledTime;
+            if (isDoubleClick && !isEnemy && hudPanel != null && hudPanel.PlayerSquadsCards.Contains(this))
+            {
+                QuickMoveToOtherRegion();
+                return;
+            }
+
             if (modifierHeld)
                 CampaignManager.Instance.MapSceneUIManager.HUDPanel.ToggleCardInSelection(this);
             else
@@ -268,6 +324,15 @@ namespace TJ
             renameButton.gameObject.SetActive(showRenamePrestige);
             prestigeUnitButton.gameObject.SetActive((showRenamePrestige && isPrestigeAvailable) || showPrestige);
             mergeButton.gameObject.SetActive(showMerge);
+        }
+        /// <summary>A merge that would change nothing keeps its button, dimmed, with the reason in the tooltip.</summary>
+        public void SetMergeAvailable(bool _available)
+        {
+            mergeButton.interactable = _available;
+            string description = LocalizationManager.Instance.GetText("MergeUnitsDescription");
+            if (!_available)
+                description += $"\n\n<color={ColorData.Error}>{LocalizationManager.Instance.GetText("MergeUnitsNothingToMerge")}</color>";
+            mergeUnitTooltipTrigger.SetUpToolTip(LocalizationManager.Instance.GetText("Merge Units"), description);
         }
         public override void OnPointerEnter(PointerEventData eventData)
         {
@@ -589,6 +654,8 @@ namespace TJ
         public void OnEndDrag(PointerEventData eventData)
         {
             if (!dragActive) return;
+            // The release can arrive in the same frame as the last move, so the drop target is read at the release point.
+            OnDrag(eventData);
             dragActive = false;
 
             if (layoutElement != null)
@@ -642,6 +709,32 @@ namespace TJ
             hudPanel.MoveUnit(UniqueID, targetIndex);
             CampaignManager.Instance.CampaignSaveManager.ReorderUnits();
             return true;
+        }
+        // Lands where a drag onto the other side's empty space would; a full side trades with the unit HUDPanel picks.
+        void QuickMoveToOtherRegion()
+        {
+            bool toDeployed = inReserve;
+            int targetIndex = hudPanel.GetFirstEmptySlotIndex(toDeployed, this);
+            if (targetIndex >= 0)
+            {
+                IAudioRequester.Instance.PlaySFX(toDeployed ? SFXData.HoveredDepoyedTroops : SFXData.HoveredReserveTroops);
+                hudPanel.MoveUnit(UniqueID, targetIndex);
+                CampaignManager.Instance.CampaignSaveManager.ReorderUnits();
+                return;
+            }
+
+            SquadDisplayCardMenu swapTarget = hudPanel.PickQuickMoveSwapTarget(toDeployed);
+            if (swapTarget == null) return;
+            IAudioRequester.Instance.PlaySFX(toDeployed ? SFXData.HoveredDepoyedTroops : SFXData.HoveredReserveTroops);
+            hudPanel.MoveUnit(UniqueID, swapTarget.SquadId);
+        }
+        // Army bar cards only; a dead card's click opens disband, so it gets no move hint.
+        public void EnableQuickMoveTooltip()
+        {
+            if (squad.SquadCurrentHealth == 0) return;
+            quickMoveTooltip = gameObject.AddComponent<MemoriTooltipTrigger>();
+            string key = inReserve ? "QuickMoveToDeployedTooltip" : "QuickMoveToReserveTooltip";
+            quickMoveTooltip.SetUpToolTip(_description: InputText.Get(key), _delay: QUICK_MOVE_TOOLTIP_DELAY);
         }
         public void SpawnInJuice(bool makeInteractable)
         {

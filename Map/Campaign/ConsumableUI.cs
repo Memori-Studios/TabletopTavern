@@ -173,11 +173,11 @@ namespace TJ.Map
             {
                 hudPanel.UILineDrawer.pointB.transform.position = InputHandler.Instance.MousePosition;
 
-                if (Input.GetMouseButtonDown(1))
+                if (global::Memori.Input.GameCursor.GetButtonDown(1))
                     break;
 
                 indexHovered = CampaignManager.Instance.MapSceneUIManager.HUDPanel.HoveredSquadIndex;
-                if (Input.GetMouseButtonDown(0))
+                if (global::Memori.Input.GameCursor.GetButtonDown(0))
                 {
                     if(indexHovered != -1)
                     {

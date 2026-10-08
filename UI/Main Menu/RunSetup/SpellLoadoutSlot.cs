@@ -93,6 +93,8 @@ namespace TJ.MainMenu
             slotButton.onClick.AddListener(() => onSlotClicked?.Invoke(slotIndex));
             // The signature slot still reads as a slot but cannot be focused for swapping.
             slotButton.interactable = !IsPinned && !cachedLocked;
+            // A click on the pinned or a locked slot still says no.
+            UIDenyFeedback.Attach(slotButton, (RectTransform)transform);
 
             SetFocused(false);
 
@@ -142,6 +144,33 @@ namespace TJ.MainMenu
             bool showCost = !isEmpty && !cachedLocked && spellData.SpellManaCost > 0;
             manaCostGem.SetActive(showCost);
             if (showCost && manaCostText != null) manaCostText.text = spellData.SpellManaCost.ToString();
+        }
+
+        // A spell lands in the slot: a punch, and the faction glow flares bright before it settles.
+        public void PlayPicked()
+        {
+            if (!isActiveAndEnabled) return;
+            if (picked != null) StopCoroutine(picked);
+            transform.localScale = Vector3.one;
+            selectedHighlight.transform.localScale = Vector3.one;
+            picked = StartCoroutine(Picked());
+        }
+
+        private Coroutine picked;
+
+        private System.Collections.IEnumerator Picked()
+        {
+            StartCoroutine(UIJuice.Punch(transform, 1.1f, 0.06f, 0.18f));
+            Transform glow = selectedHighlight.transform;
+            if (!selectedHighlight.activeInHierarchy) { picked = null; yield break; }
+            for (float t = 0f; t < 1f; t += Mathf.Min(Time.unscaledDeltaTime, UIJuice.MaxStep) / 0.35f)
+            {
+                float s = Mathf.Lerp(1.35f, 1f, UIJuice.EaseOutCubic(t));
+                glow.localScale = new Vector3(s, s, 1f);
+                yield return null;
+            }
+            glow.localScale = Vector3.one;
+            picked = null;
         }
 
         public void SetFocused(bool isFocused)

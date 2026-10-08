@@ -30,7 +30,6 @@ public class EntitiesReferencesAuthoringEditor : Editor
             EditorGUI.indentLevel++;
             EditorGUILayout.PropertyField(serializedObject.FindProperty("debugEntityPrefab"));
             EditorGUILayout.PropertyField(serializedObject.FindProperty("basePlayerUnitPrefabGameObject"));
-            EditorGUILayout.PropertyField(serializedObject.FindProperty("artilleryGPUAnimPrefab"));
             EditorGUILayout.PropertyField(serializedObject.FindProperty("arrowImpactPrefabGameObject"));
             EditorGUILayout.PropertyField(serializedObject.FindProperty("debugPlayerUnitPositionPrefab"));
             EditorGUILayout.PropertyField(serializedObject.FindProperty("debugEnemyUnitPositionPrefab"));

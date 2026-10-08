@@ -297,6 +297,7 @@ namespace TJ.Town
         public void LoadTownPostGarrisonEngagement()
         {
             campaignSaveManager.SetTownData(townSaveData);
+            campaignSaveManager.AddCampaignTraitGoldToTownLoot();
             SetUpTownInfo();
             ShowRoad(TownPanelView.Road.Sacked, false);
             view.SetFightSubtitle($"{LocalizationManager.Instance.GetText("townGarrisonDefeated")} <color={ColorData.Negative}>{LocalizationManager.Instance.GetText("townReservesDidNotHeal")}</color>");
@@ -356,6 +357,12 @@ namespace TJ.Town
             SteamAchievements.Unlock(AchievementId.SackCity);
             SteamAchievements.AddStat(SteamStatId.CitiesSacked, 1);
             campaignSaveManager.SaveData.townsSacked++;
+            switch (townSaveData.townSize)
+            {
+                case TownSize.Village: campaignSaveManager.SaveData.RunStats.villagesSacked++; break;
+                case TownSize.Castle: campaignSaveManager.SaveData.RunStats.castlesSacked++; break;
+                case TownSize.City: campaignSaveManager.SaveData.RunStats.citiesSacked++; break;
+            }
             if(campaignSaveManager.SaveData.townsSacked >= 3) {
                 SteamAchievements.Unlock(AchievementId.ThreeTownsSackedRun);
             }
@@ -471,6 +478,7 @@ namespace TJ.Town
             int gold = TownSaveData.GearLeftGold(townSaveData.townSize);
             TabletopTavern.Analytics.NodeLog.Try("town loot", () => TabletopTavern.Analytics.NodeLog.Add("loot",
                 new Dictionary<string, object> { { "k", "gearLeft" }, { "v", gold } }));
+            campaignSaveManager.AddSpoilsGoldToLastBattle(gold);
             goldManager.ModifyGold(gold, LocalizationManager.Instance.GetText("townGearLeft"));
             campaignSaveManager.SetTownData(townSaveData);
         }
@@ -488,7 +496,8 @@ namespace TJ.Town
             int looted = townSaveData.bountyAmount + ActBonus();
             TabletopTavern.Analytics.NodeLog.Try("town loot", () => TabletopTavern.Analytics.NodeLog.Add("loot",
                 new Dictionary<string, object> { { "k", "gold" }, { "v", looted } }));
-            goldManager.ModifyGold(townSaveData.bountyAmount + ActBonus(), localizedString);
+            campaignSaveManager.AddSpoilsGoldToLastBattle(looted);
+            goldManager.ModifyGold(looted, localizedString);
             townSaveData.bountyAmount = 0;
             campaignSaveManager.SetTownData(townSaveData);
             view.GoldRow.Button.OnPointerExit(null);

@@ -415,7 +415,7 @@ namespace TJ
 
             // Debug.Log($"Loading SquadBattleInfo for {applyGearBonuses} applying gear bonuses.");
             unitAttributesUIContainer = GetComponent<UnitAttributesUIContainer>();
-            unitAttributesUIContainer.Load(squadStats.unitName, applyGearBonuses, prestigeTrait);
+            unitAttributesUIContainer.Load(squadStats.unitName, applyGearBonuses, prestigeTrait, ShowsCampaignTrait());
 
             unitStatsUIContainer = GetComponent<UnitStatsUIContainer>();
             LoadStats();
@@ -486,9 +486,8 @@ namespace TJ
             raceColorImage1.color = passiveColor;
             raceColorImage2.color = ColorData.WithAlpha255(passiveColor, ColorData.GetRacePassiveAlpha(race));
 
-            string campaignBonusTitle = LocalizationManager.Instance.GetText("Campaign Bonus");
-            string campaignRaceTitle = LocalizationManager.Instance.GetText(race.ToString());
-            passiveTitleText.text = $"{campaignBonusTitle} - {campaignRaceTitle}";
+            // The faction band names the faction only; with "Faction Effect -" in front it ran off the card at a readable size.
+            passiveTitleText.text = LocalizationManager.Instance.GetText(race.ToString());
             string passiveName = LocalizationManager.Instance.GetText(race.ToString() + "PassiveName");
             string passiveDesc = RacePassiveInfo.GetDescription(race);
             passiveNameText.text = passiveName;
@@ -519,6 +518,9 @@ namespace TJ
             float potency = TabletopTavernConstants.SpellPotency(CasterAttributes());
             RenderSpellCard(spell, LocalizationManager.Instance.GetText, KeywordText.Render(spell.GetLocalizedSpellDescription(potency), false));
         }
+
+        // Campaign Traits hold for the player's campaign army only, and never on the March.
+        private bool ShowsCampaignTrait() => team == Team.Player && !isCustomBattle && (cachedSnapshot == null || !cachedSnapshot.InMarch);
 
         // The spell card's numbers are the ones this squad casts with, so its prestige trait is merged in.
         private SquadAttributes CasterAttributes()

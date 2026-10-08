@@ -2,6 +2,7 @@ using Unity.Burst;
 using Unity.Entities;
 using Unity.Mathematics;
 using Unity.Rendering;
+using UnityEngine.Rendering;
 using UnityEngine;
 using Unity.Collections;
 
@@ -11,6 +12,9 @@ public partial struct ShieldRandomizerSystem : ISystem
 {
     private NativeArray<UnityObjectRef<Mesh>> _shieldMeshes; // Store meshes for random selection
     private UnityObjectRef<Material> _shieldMaterial; // Single material for all shields
+    // TJBake visuals draw by registered ids, so each shield mesh is registered once per world.
+    private NativeArray<BatchMeshID> _registeredMeshes;
+    private BatchMaterialID _registeredMaterial;
     private bool _isInitialized;
     private Unity.Mathematics.Random _random;
 
@@ -142,6 +146,7 @@ public partial struct ShieldRandomizerSystem : ISystem
             Debug.LogError("Failed to load shield material");
         }
 
+        _registeredMeshes = new NativeArray<BatchMeshID>(_shieldMeshes.Length, Allocator.Persistent);
         _isInitialized = true;
         _random = Unity.Mathematics.Random.CreateFromIndex(0);
     }
@@ -153,6 +158,11 @@ public partial struct ShieldRandomizerSystem : ISystem
         if (_shieldMeshes.IsCreated)
         {
             _shieldMeshes.Dispose();
+        }
+        // No system lookups are allowed during teardown; the registrations end with the world's EntitiesGraphicsSystem.
+        if (_registeredMeshes.IsCreated)
+        {
+            _registeredMeshes.Dispose();
         }
     }
 
@@ -199,6 +209,25 @@ public partial struct ShieldRandomizerSystem : ISystem
             ecb.RemoveComponent<ShieldRandomMesh>(entity);
 
             // Debug.Log($"Assigned shield mesh {randomMesh.name} to entity {entity}");
+        }
+
+        EntitiesGraphicsSystem graphics = null;
+        foreach (var (info, entity) in SystemAPI
+            .Query<RefRW<MaterialMeshInfo>>()
+            .WithAll<ShieldRandomMesh>()
+            .WithNone<RenderMeshArray>()
+            .WithEntityAccess())
+        {
+            ecb.RemoveComponent<ShieldRandomMesh>(entity);
+            int meshIndex = _random.NextInt(0, _shieldMeshes.Length);
+            Mesh randomMesh = _shieldMeshes[meshIndex].Value;
+            if (randomMesh == null || _shieldMaterial.Value == null) continue;
+            if (graphics == null) graphics = state.World.GetExistingSystemManaged<EntitiesGraphicsSystem>();
+            if (graphics == null) continue;
+            if (_registeredMeshes[meshIndex] == BatchMeshID.Null) _registeredMeshes[meshIndex] = graphics.RegisterMesh(randomMesh);
+            if (_registeredMaterial == BatchMaterialID.Null) _registeredMaterial = graphics.RegisterMaterial(_shieldMaterial.Value);
+            info.ValueRW = new MaterialMeshInfo(_registeredMaterial, _registeredMeshes[meshIndex]);
+            ecb.SetComponent(entity, new RenderBounds { Value = new AABB { Center = randomMesh.bounds.center, Extents = randomMesh.bounds.extents } });
         }
     }
 }

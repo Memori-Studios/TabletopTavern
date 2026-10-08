@@ -1,5 +1,7 @@
 using System.Collections.Generic;
+using Memori.Audio;
 using Memori.Localization;
+using Memori.UI;
 using Memori.SaveData;
 using TJ.Spells;
 using TMPro;
@@ -28,7 +30,8 @@ namespace TJ.MainMenu
         public bool CanStart => blockers.Count == 0;
         public IReadOnlyList<string> Blockers => blockers;
 
-        public void Evaluate(PlayPanel playPanel, StartingArmyManager startingArmySection, Spell[] loadout)
+        /// <param name="feedback">The warband screen is on show, so a change of state is seen and heard.</param>
+        public void Evaluate(PlayPanel playPanel, StartingArmyManager startingArmySection, Spell[] loadout, bool feedback = false)
         {
             blockers.Clear();
 
@@ -64,15 +67,61 @@ namespace TJ.MainMenu
             }
 #endif
 
-            Render();
+            Render(feedback);
         }
 
-        private void Render()
+        private bool? wasBlocked;
+        private Coroutine blockedFade;
+        private UIFlare startFlare;
+        private UISheen startSheen;
+        private bool juiceReady;
+
+        // Start answers a blocked click with a shake of the blocked line; its flare and sheen are found once.
+        private void EnsureJuice()
         {
+            if (juiceReady) return;
+            juiceReady = true;
+            UIDenyFeedback.Attach(startButton, (RectTransform)blockedRoot.transform);
+            startFlare = startButton.GetComponentInChildren<UIFlare>(true);
+            startSheen = startButton.GetComponentInChildren<UISheen>(true);
+        }
+
+        // The campaign starts: a big gold flare and a sweep across Start Campaign.
+        public void PlaySendOff()
+        {
+            EnsureJuice();
+            if (startFlare != null) startFlare.Play(null, SendOffFlareSize);
+            if (startSheen != null) startSheen.SweepNow();
+        }
+
+        private const float SendOffFlareSize = 2.2f;
+
+        private void Render(bool feedback)
+        {
+            EnsureJuice();
             bool blocked = blockers.Count > 0;
+            bool changed = wasBlocked.HasValue && wasBlocked.Value != blocked;
+            wasBlocked = blocked;
             blockedRoot.SetActive(blocked);
             readyRoot.SetActive(!blocked);
             startButton.interactable = !blocked;
+            // A fade cut short by hiding must not leave the line faint the next time it shows without one.
+            if (!blocked && blockedRoot.TryGetComponent(out CanvasGroup blockedGroup))
+            {
+                if (blockedFade != null) { StopCoroutine(blockedFade); blockedFade = null; }
+                blockedGroup.alpha = 1f;
+            }
+            if (feedback && changed && isActiveAndEnabled)
+            {
+                if (blocked) FadeInBlocked();
+                else
+                {
+                    // The last blocker cleared: Start announces it once.
+                    if (startFlare != null) startFlare.Play();
+                    if (startSheen != null) startSheen.SweepNow();
+                    IAudioRequester.Instance.PlaySFX(SFXData.Notification);
+                }
+            }
 
             if (blocked)
             {
@@ -84,6 +133,14 @@ namespace TJ.MainMenu
                 blockedText.text = joined;
                 return;
             }
+        }
+
+        private void FadeInBlocked()
+        {
+            if (blockedFade != null) StopCoroutine(blockedFade);
+            CanvasGroup group = blockedRoot.GetComponent<CanvasGroup>();
+            if (group == null) group = blockedRoot.AddComponent<CanvasGroup>();
+            blockedFade = StartCoroutine(UIJuice.Open(group, null, UIJuice.SwapTime, 0f));
         }
     }
 }

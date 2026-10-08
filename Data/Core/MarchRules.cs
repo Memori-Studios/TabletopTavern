@@ -30,9 +30,9 @@ namespace TJ
         #endregion
 
         #region Enemy armies
-        public const int BASE_SQUADS = 10;
-        public const int BASE_TIER_TWO = 3;
-        public const int BATTLES_PER_EXTRA_SQUAD = 2;
+        public const int BASE_SQUADS = 7;
+        public const int BASE_TIER_TWO = 4;
+        public const int BATTLES_PER_EXTRA_SQUAD = 3;
         // The battle from which one tier 2 squad a battle becomes tier 3.
         public const int TIER_THREE_UPGRADES_FROM = 6;
         // The battle from which one tier 3 squad becomes tier 4, every BATTLES_PER_TIER_FOUR battles.
@@ -47,17 +47,20 @@ namespace TJ
         public const int SECOND_TWIST_FROM = 11;
 
         /// <summary>The battle number the army tables read: the real one, pushed ahead by difficulty and Quickened Hosts.</summary>
-        public static int ScheduleBattle(CampaignSaveData run, int battleNumber)
+        public static int ScheduleBattle(CampaignSaveData run, int battleNumber) =>
+            ScheduleBattle(run.difficultyLevel, run.HasOrdeal(OrdealId.QuickenedHosts), battleNumber);
+
+        public static int ScheduleBattle(TT_Difficulty difficulty, bool quickenedHosts, int battleNumber)
         {
             int battle = battleNumber;
-            if (DifficultyRules.Applies(19, run.difficultyLevel)) battle += SCHEDULE_HEAD_START;
-            if (run.HasOrdeal(OrdealId.QuickenedHosts)) battle += SCHEDULE_HEAD_START;
+            if (DifficultyRules.Applies(19, difficulty)) battle += SCHEDULE_HEAD_START;
+            if (quickenedHosts) battle += SCHEDULE_HEAD_START;
             return battle;
         }
 
         /// <summary>
-        /// The host for a March battle: the top act 3 row, one more squad every two battles up to the deployment cap,
-        /// then better squads. A warlord brings one more tier 4 squad. extraSquads is Outnumbered.
+        /// The host for a March battle: seven squads, one more every three battles up to the deployment cap, better
+        /// squads from battle 6. A warlord brings one more tier 4 squad. extraSquads is Outnumbered.
         /// </summary>
         public static TierCount[] ArmyTierCounts(int scheduleBattle, bool warlord, int extraSquads = 0)
         {

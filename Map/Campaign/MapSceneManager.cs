@@ -40,6 +40,7 @@ namespace TJ.Map
         [Header("Map Race")]
         public Race MapRace => mapGenerator.MapRace;
         public MapNodeData SelectedNodeData => selectedNode.Value;
+        public MapNode SelectedNode => selectedNode;
 
         // CampaignSaveManager campaignSaveManager;
 
@@ -527,6 +528,8 @@ namespace TJ.Map
             if (activeChapterIndex == mapLayers.Count - 1)
             {
                 ReportNodeCompleted(nodeReport, 0);
+                // Here, not in CompleteBook: the act III win can end the run without reaching it.
+                CampaignManager.Instance.CampaignSaveManager.RecordActArmy();
 
                 // The last story act banks the win either way; only Claim Victory ends the run, and
                 // below Overlord there is no March On, so the win ends it as before.
@@ -607,7 +610,8 @@ namespace TJ.Map
             if (army == null) return 0;
             int lost = 0;
             foreach (SquadToLoad squad in army)
-                if (squad.UnitIndex != -1 && !squad.isEmptySquad && squad.SquadCurrentHealth == 0) lost++;
+                if (squad.UnitIndex != -1 && !squad.isEmptySquad && squad.SquadCurrentHealth == 0
+                    && !CampaignManager.Instance.CampaignSaveManager.KeepsFallenSquad(squad)) lost++;
             return lost;
         }
         // Read after CompleteChapter, so activeMapLayer is the layer this node sat on.

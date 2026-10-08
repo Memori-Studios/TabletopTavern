@@ -183,6 +183,7 @@ namespace TJ.Campfire
             view.SetChoicesInteractable(false);
             if (mapOverviewPanel != null) mapOverviewPanel.Close();
             campaignSaveManager.ModifyTroopHealth(RestHealAmount);
+            campaignSaveManager.RegisterCampfireRest();
             CampaignManager.Instance.MapSceneUIManager.HUDPanel.ArmyStructureChanged();
             int healPercent = RestHealPercent();
             ShowResult(CampfireChoice.Rest,

@@ -30,6 +30,9 @@ public class GameOverPanel : MonoBehaviour
     [SerializeField] private TMP_Text enemiesSlainText;
     [SerializeField] private MemoriCanvasGroup completionMessageRow, heroNameRow, difficultyRow, backgroundRow;
     [SerializeField] private MemoriCanvasGroup chaptersCompletedRow, goldEarnedRow, renownEarnedRow, enemiesSlainRow;
+    // Shown only when the run ended on the March; inactive in the scene so other endings keep their layout.
+    [SerializeField] private MemoriCanvasGroup endlessChaptersRow;
+    [SerializeField] private TMP_Text endlessChaptersLabel, endlessChaptersText;
     public MemoriButtonV2 mainMenuButton;
     [SerializeField] private MemoriCanvasGroup mainGameOverGroup, textGroup, fadeCanvasGroup;
     [SerializeField] private GameObject defeatObject, victoryObject;
@@ -160,6 +163,12 @@ public class GameOverPanel : MonoBehaviour
         chaptersCompletedText.text = runStats.chaptersCompleted.ToString();
         goldEarnedText.text = runStats.goldEarned.ToString();
         enemiesSlainText.text = runStats.enemiesSlain.ToString();
+        if (endlessChaptersRow != null)
+        {
+            endlessChaptersRow.gameObject.SetActive(_endedOnMarch);
+            endlessChaptersLabel.text = $"<color={ColorData.Gold}>{LocalizationManager.Instance.GetText("endlessModeChapters")}</color>";
+            endlessChaptersText.text = $"<color={ColorData.Gold}>{_marchBattlesWon}</color>";
+        }
 
         renownEarnedText.text = $"<color={ColorData.Tier4}>{renownAward.total}</color>";
         renownBreakdownText.text = $"{renownAward.chaptersCompleted} {chaptersLocalized}  |  {renownAward.actsCompleted} {actsLocalized} (+{renownAward.actRenown})  |  {difficultyNamestring} (x{renownAward.difficultyMultiplier:0.00})";
@@ -186,12 +195,8 @@ public class GameOverPanel : MonoBehaviour
         string demoCompletedLocalized = LocalizationManager.Instance.GetText("Demo Completed");
         string defeatedLocalized = LocalizationManager.Instance.GetText("Defeated");
         demoCompletionText.text = beatDemo ? demoCompletedLocalized : defeatedLocalized;
-        if (_endedOnMarch)
-        {
-            // Falling on the March is how the March ends: the screen is the victory it banked, with the count as its headline.
-            demoCompletionText.text = string.Format(LocalizationManager.Instance.GetText("marchEndLine"), _marchBattlesWon + 1, _marchBattlesWon);
-            beatDemo = true;
-        }
+        // Falling on the March is how the March ends: the screen is the victory it banked, with its chapters as a stat row.
+        if (_endedOnMarch) beatDemo = true;
         IAudioRequester.Instance.SwitchToGameOverMusic(beatDemo);
         // The Act Complete buttons sit beside the results card; a claimed victory arrives from that screen.
         continueButton.gameObject.SetActive(false);
@@ -214,19 +219,35 @@ public class GameOverPanel : MonoBehaviour
         if (_unlocksNewHero && heroUnlockRow != null)
             await ShowHeroUnlockScreen();
         bool showBoard = PrepareLeaderboardLine();
+        FitMarchRow(showBoard);
         await FadeInStatsSequentially(showBoard);
         // Main Menu works during the fade-in; once the map unloads, the tip would open over the menu.
         if (this == null) return;
         TutorialManager.Instance.LoadStepsFromRandomSpot(new TutorialStep[1] { TutorialData.RenownCarriesOver });
     }
 
+    // The stat stack fits five rows above the thank-you message: the March row takes the empty leaderboard slot, or all rows close up.
+    private void FitMarchRow(bool showBoard)
+    {
+        if (!_endedOnMarch || endlessChaptersRow == null || leaderboardRow == null) return;
+        if (!showBoard)
+        {
+            leaderboardRow.gameObject.SetActive(false);
+            return;
+        }
+        if (endlessChaptersRow.transform.parent.TryGetComponent(out VerticalLayoutGroup stack)) stack.spacing = MarchRowSpacing;
+    }
+    const float MarchRowSpacing = -8f;
+
     private async Task FadeInStatsSequentially(bool showBoard)
     {
         textGroup.CGEnable();
 
-        MemoriCanvasGroup[] rows = showBoard
-            ? new[] { backgroundRow, difficultyRow, heroNameRow, chaptersCompletedRow, enemiesSlainRow, goldEarnedRow, renownEarnedRow, completionMessageRow, leaderboardRow }
-            : new[] { backgroundRow, difficultyRow, heroNameRow, chaptersCompletedRow, enemiesSlainRow, goldEarnedRow, renownEarnedRow, completionMessageRow };
+        var rows = new System.Collections.Generic.List<MemoriCanvasGroup> { backgroundRow, difficultyRow, heroNameRow, chaptersCompletedRow, enemiesSlainRow, goldEarnedRow };
+        if (_endedOnMarch && endlessChaptersRow != null) rows.Add(endlessChaptersRow);
+        rows.Add(renownEarnedRow);
+        rows.Add(completionMessageRow);
+        if (showBoard) rows.Add(leaderboardRow);
         foreach (var row in rows) row.CGDisable();
 
         const float rowFade = 0.4f;

@@ -110,6 +110,13 @@ namespace TJ
                 }
             }
 
+            if (Application.isPlaying)
+            {
+                // Walls from the last generation would carve the new NavMesh and their gate squads would outlive them.
+                garrisonWallsGenerator.ClearWalls();
+                BattleManager.Instance.ArmySpawnManager.ClearGates();
+            }
+
             LoadBattlefieldParameters();
             HandleBiomeSpecifics();
             HandleSeed();
@@ -182,7 +189,7 @@ namespace TJ
             await islandGenerator.CreateBiomes();
             if (isGarrison)
             {
-                TownSize townSize = SaveDataHandler.Load().townData.townSize;
+                TownSize townSize = BattleManager.Instance.BattleSaveManager.GarrisonTownSize;
                 GarrisonWallsSO wallsSO = townSize switch
                 {
                     TownSize.Village => villageWallsSO,

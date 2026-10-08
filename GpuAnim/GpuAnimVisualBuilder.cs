@@ -34,17 +34,23 @@ namespace TabletopTavern.GpuAnim
             }
             Meshes.Clear();
             Materials.Clear();
-            if (Anchors.IsCreated) Anchors.Dispose();
-            if (RiderAnchors.IsCreated) RiderAnchors.Dispose();
+            DisposeBlobs();
             foreach (Object o in OwnedObjects) if (o != null) Object.Destroy(o);
             OwnedObjects.Clear();
+        }
+
+        /// <summary>Frees the Persistent anchor blobs only, for a shutdown where the world is already going away.</summary>
+        public void DisposeBlobs()
+        {
+            if (Anchors.IsCreated) Anchors.Dispose();
+            if (RiderAnchors.IsCreated) RiderAnchors.Dispose();
         }
     }
 
     /// <summary>Builds the entity tree the unit visual contract describes, as a prefab entity the spawn code instantiates.</summary>
     public static class GpuAnimVisualBuilder
     {
-        public delegate void RoleMarker(EntityManager em, Entity entity, GpuAnimPropRole role);
+        public delegate void RoleMarker(EntityManager em, Entity entity, GpuAnimPropRole role, string tag);
 
         // Matches the baked renderers: layer Default, rendering layer 1, object motion vectors.
         private static RenderMeshDescription BodyDescription => new RenderMeshDescription(ShadowCastingMode.On, receiveShadows: true,
@@ -136,7 +142,7 @@ namespace TabletopTavern.GpuAnim
                 }
                 AddRender(em, egs, handle, meshHolder, att.Mesh, rigidIds[Index(att.MaterialIndex, rigidIds.Length)], att.Bounds);
                 if (useLod) em.AddComponentData(meshHolder, new MeshLODComponent { Group = root, ParentGroup = Entity.Null, LODMask = att.LodMask });
-                markRole?.Invoke(em, meshHolder, att.Role);
+                markRole?.Invoke(em, meshHolder, att.Role, att.Tag);
             }
 
             DynamicBuffer<LinkedEntityGroup> group = em.AddBuffer<LinkedEntityGroup>(root);

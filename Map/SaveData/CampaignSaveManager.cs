@@ -396,6 +396,7 @@ namespace TJ
             saveData.bookNumber++;
             if (saveData.bookNumber >= AchievementRules.MARCH_ON_ACT) SteamAchievements.Unlock(AchievementId.MarchOn);
             if (saveData.bookNumber >= AchievementRules.BEYOND_THE_MAPS_EDGE_ACT) SteamAchievements.Unlock(AchievementId.BeyondTheMapsEdge);
+            GrowTreants();
             saveData.BattlesFought = 0;
             saveData.activeMapLayer = -1;
             saveData.nodePath.Clear();
@@ -461,8 +462,9 @@ namespace TJ
             {
                 for (int i = 0; i < saveData.playerArmy.Length; i++)
                 {
-                    if (saveData.playerArmy[i].SquadCurrentHealth == 0)
+                    if (saveData.playerArmy[i].SquadCurrentHealth == 0 && !KeepsFallenSquad(saveData.playerArmy[i]))
                     {
+                        SaveDataHandler.RecordFallenSquad(saveData, saveData.playerArmy[i]);
                         saveData.playerArmy[i] = new SquadToLoad
                         {
                             UnitIndex = -1
@@ -490,6 +492,8 @@ namespace TJ
             CampaignManager.Instance.MapSceneUIManager.HUDPanel.HideZeroHealthSquads();
         }
         public const int DRAVEN_HERO_ID = 10;
+        // Drums in the Deep (Boblin): a goblin from a Unit Pack joins prestiged after Act 1.
+        public const int BOBLIN_HERO_ID = 3;
         public void HandleSpecialSquadsOnChapterEnd()
         {
             // Thirst for Blood (Draven): a battle won this turn heals every Common unit to full health.
@@ -553,6 +557,7 @@ namespace TJ
         public void HealTroopsOnTownEntry()
         {
             ModifyTroopHealth(TownEntryHealAmount());
+            GarrisonDuty();
         }
         // The town panel shows this share, so it must stay the one HealTroopsOnTownEntry applies.
         public float TownEntryHealAmount()
@@ -899,6 +904,22 @@ namespace TJ
 
             ReorderUnits();
         }
+        /// <summary>False when MergeSquads would leave these squads exactly as they are, as with two full squads.</summary>
+        public static bool MergeChangesArmy(List<SquadToLoad> _squads)
+        {
+            List<SquadToLoad> ordered = new(_squads);
+            ordered.Sort((a, b) => a.UnitIndex.CompareTo(b.UnitIndex));
+            int remainder = 0;
+            foreach (SquadToLoad s in ordered) remainder += s.SquadCurrentHealth;
+            foreach (SquadToLoad s in ordered)
+            {
+                if (remainder <= 0) return true;
+                int filled = Mathf.Min(remainder, s.SquadMaxHealth);
+                if (filled != s.SquadCurrentHealth) return true;
+                remainder -= filled;
+            }
+            return false;
+        }
         public void RenameSquad(string _uniqueID, string _newName)
         {
             bool overrideExists = false;
@@ -1156,7 +1177,7 @@ namespace TJ
             List<UnitAttribute> pool = GetEligiblePrestigeTraitsForUnit(_squad.UnitName);
             if (!PrestigeTraitOffer.CanReroll(pool.Count) || FateshineElixirsHeld == 0 || saveData.IsConsumableBlocked(ConsumableEnum.FateshineElixir))
                 return null;
-            MarkConsumableUsed();
+            MarkConsumableUsed(ConsumableEnum.FateshineElixir);
             List<UnitAttribute> offer = DealPrestigeTraitOffer(_squad, pool, _shown);
             RemoveConsumable(ConsumableEnum.FateshineElixir);
             return offer;
@@ -1536,12 +1557,15 @@ namespace TJ
         /// <param name="_goldAmount"> the amount to increase gold amount by</param>
         public void ModifyGoldSaveDataValue(int _goldAmount)
         {
+            int goldBefore = saveData.goldAmount;
             saveData.goldAmount += _goldAmount;
 
             //clamp gold to be at least 0
             saveData.goldAmount = math.max(saveData.goldAmount, 0);
-            
+
             saveData.RunStats.goldEarned += _goldAmount > 0 ? _goldAmount : 0;
+            // What actually left the purse, so the clamp at 0 never records more than was there.
+            saveData.RunStats.goldSpent += math.max(goldBefore - saveData.goldAmount, 0);
             if (!DisableSaving) SaveDataHandler.SaveCampaign(saveData);
 
             if (saveData.goldAmount > 20)
@@ -1796,10 +1820,14 @@ namespace TJ
             for(int i = 10; i < playerSquadsSaveData.Length; i++)
             {
                 if(playerSquadsSaveData[i].SquadCurrentHealth == 0) continue;
+                // A reserve that fought in the battle does not rest.
+                if(SaveDataHandler.FightsInBattle(playerSquadsSaveData[i])) continue;
 
                 int healthRecovery = (int)(playerSquadsSaveData[i].SquadMaxHealth * TabletopTavernConstants.RESERVES_HEAL_AMOUNT);
                 healthRecovery *= ReservesHealMultiplier;
                 if(CampaignManager.Instance.GearManager.CheckForGear(GearID.ChugJug)) healthRecovery*=2;
+                // Return to the Grove: Forest Spirits heal to full in reserve.
+                if(playerSquadsSaveData[i].UnitName == UnitName.ForestSpirits) healthRecovery = playerSquadsSaveData[i].SquadMaxHealth;
                 healthRecovery = (int)ApplyHealingBonus(healthRecovery);
 
                 playerSquadsSaveData[i].SquadCurrentHealth = math.min(
@@ -1979,6 +2007,8 @@ namespace TJ
 
             saveData.SquadLossesStore = _squadIdLossCounter;
             saveData.SquadDamageStore = _squadDamage;
+            bool garrison = saveData.townData != null && saveData.townData.townInteractionStatus == TownInteractionStatus.GarrisonBattleStarted;
+            SaveDataHandler.RecordBattleForRunHistory(saveData, _playerSquads, _enemySquads, _playerWon, false, garrison, totalKills, _squadIdLossCounter);
 
             //achievement check - flawless victory (won losing zero units)
             if (_playerWon)
@@ -2044,6 +2074,187 @@ namespace TJ
                 }
             }
         }
+        #region Campaign Traits
+        // A fallen Restless Dead squad stays in the army to rise later; on the March it falls like any other.
+        public bool KeepsFallenSquad(SquadToLoad squad) =>
+            squad.UnitIndex != -1 && !saveData.InMarch && TabletopTavernConstants.IsRestlessDead(squad.UnitName);
+
+        // Runs once per won battle's result; a Continue re-runs it on the post-battle snapshot, never on its own output.
+        public void ApplyCampaignTraitsAfterWin()
+        {
+            if (saveData == null || saveData.InMarch) return;
+            HashSet<string> fought = SquadsThatFoughtLastBattle();
+            // Crypt Keepers
+            float riseHealth = HasLivingSquad(UnitName.BlackWardens)
+                ? TabletopTavernConstants.CRYPT_KEEPERS_RISE_HEALTH
+                : TabletopTavernConstants.RESTLESS_DEAD_RISE_HEALTH;
+            bool rose = false;
+            for (int i = 0; i < saveData.playerArmy.Length; i++)
+            {
+                SquadToLoad squad = saveData.playerArmy[i];
+                if (squad.UnitIndex == -1 || squad.isEmptySquad) continue;
+
+                if (squad.SquadCurrentHealth == 0)
+                {
+                    // Restless Dead: only a squad that fell before this battle rises.
+                    if (TabletopTavernConstants.IsRestlessDead(squad.UnitName) && !fought.Contains(squad.UniqueID))
+                    {
+                        saveData.playerArmy[i].SquadCurrentHealth = math.max(1, (int)(squad.SquadMaxHealth * riseHealth));
+                        rose = true;
+                    }
+                    continue;
+                }
+
+                // Regeneration
+                if (squad.UnitName == UnitName.BogmawTroll)
+                    ModifySpecificUnitHealth(TabletopTavernConstants.REGENERATION_HEAL_AMOUNT, squad.UniqueID);
+
+                // Feast
+                if (squad.UnitName == UnitName.FleshshredderFanatics && KillsLastBattle(squad.UniqueID) >= TabletopTavernConstants.FEAST_KILLS)
+                    ModifySpecificUnitHealth(TabletopTavernConstants.FEAST_HEAL_AMOUNT, squad.UniqueID);
+
+                // Masterless Blade
+                if (squad.UnitName == UnitName.RoninWanderers && squad.UnitPrestige < 2
+                    && KillsLastBattle(squad.UniqueID) >= TabletopTavernConstants.MASTERLESS_BLADE_KILLS)
+                    PrestigeSpecificUnit(saveData.playerArmy[i]);
+            }
+            GraveRobbers();
+            // The army bar only drops a card's dead overlay when it rebuilds.
+            if (rose) OnArmyStructureChanged?.Invoke();
+            OnUnitHealthChanged?.Invoke();
+        }
+        private bool HasLivingSquad(UnitName unit)
+        {
+            foreach (SquadToLoad squad in saveData.playerArmy)
+                if (squad.UnitIndex != -1 && !squad.isEmptySquad && squad.SquadCurrentHealth > 0 && squad.UnitName == unit) return true;
+            return false;
+        }
+        // Keeps the Grave Robbers roll off every other seeded stream at this node.
+        private const int GRAVE_ROBBERS_SEED_SALT = 7919;
+        // Grave Robbers: with no free gear slot the find is sold on the spot, so the trait never comes up empty.
+        private void GraveRobbers()
+        {
+            if (!HasLivingSquad(UnitName.CorpseClaws)) return;
+            System.Random roll = new(MathUtilities.MixSeed(GetSeededRandom() + GRAVE_ROBBERS_SEED_SALT));
+            if (roll.Next(0, 100) >= TabletopTavernConstants.GRAVE_ROBBERS_CHANCE) return;
+            List<GearID> found = DrawRandomGear(1);
+            if (found.Count == 0) return;
+
+            GearID gear = found[0];
+            string traitName = LocalizationManager.Instance.GetText("CampaignTrait_GraveRobbers");
+            string gearName = LocalizationManager.Instance.GetText(gear + "Name");
+            if (CanAquireGear())
+            {
+                AquireGear(gear);
+                Memori.Notifications.NotificationManager.Instance.DisplayNotification(
+                    string.Format(LocalizationManager.Instance.GetText("GraveRobbersFoundGear"), traitName, gearName));
+            }
+            else
+            {
+                int gold = GearData.GetSellValue(GearData.GetGear(gear).GearRarity);
+                CampaignManager.Instance.GoldManager.ModifyGold(gold, traitName);
+                Memori.Notifications.NotificationManager.Instance.DisplayNotification(
+                    string.Format(LocalizationManager.Instance.GetText("GraveRobbersSoldGear"), traitName, gearName, gold));
+            }
+        }
+        // Noble Purse and Scavengers: bounty gold on a won battle's rewards.
+        public int CampaignTraitBountyGold()
+        {
+            if (saveData == null || saveData.InMarch) return 0;
+            int gold = 0;
+            foreach (SquadToLoad squad in saveData.playerArmy)
+                if (squad.UnitIndex != -1 && !squad.isEmptySquad && squad.SquadCurrentHealth > 0 && squad.UnitName == UnitName.RoyalCavaliers)
+                    gold += TabletopTavernConstants.NOBLE_PURSE_GOLD_PER_SQUAD;
+            if (HasLivingSquad(UnitName.FeralHounds) && saveData.enemyArmy != null)
+                foreach (SquadToLoad enemy in saveData.enemyArmy)
+                    if (!string.IsNullOrEmpty(enemy.UniqueID)) gold += TabletopTavernConstants.SCAVENGERS_GOLD_PER_ENEMY_SQUAD;
+            return gold;
+        }
+        // A garrison win pays no battle bounty, so Prospectors, Noble Purse and Scavengers add to the town's loot gold instead.
+        public void AddCampaignTraitGoldToTownLoot()
+        {
+            if (saveData.townData == null) return;
+            saveData.townData.bountyAmount += ProspectorsGold() + CampaignTraitBountyGold();
+        }
+        // Garrison Duty: Field Pikemen heal to full on entering a Town, on top of the army's town heal.
+        private void GarrisonDuty()
+        {
+            if (saveData.InMarch) return;
+            for (int i = 0; i < saveData.playerArmy.Length; i++)
+            {
+                SquadToLoad squad = saveData.playerArmy[i];
+                if (squad.UnitIndex == -1 || squad.isEmptySquad || squad.SquadCurrentHealth == 0 || squad.UnitName != UnitName.FieldPikemen) continue;
+                saveData.playerArmy[i].SquadCurrentHealth = squad.SquadMaxHealth;
+            }
+            OnUnitHealthChanged?.Invoke();
+        }
+        // Lucky Charm: a living Golden Saru in a campaign army means the initiative die never shows a 1.
+        public static int LowestInitiativeRoll(CampaignSaveData run)
+        {
+            if (run == null || run.InMarch || run.playerArmy == null) return 1;
+            foreach (SquadToLoad squad in run.playerArmy)
+                if (squad.UnitIndex != -1 && !squad.isEmptySquad && squad.SquadCurrentHealth > 0 && squad.UnitName == UnitName.GoldenSaru)
+                    return TabletopTavernConstants.LUCKY_CHARM_LOWEST_ROLL;
+            return 1;
+        }
+        private HashSet<string> SquadsThatFoughtLastBattle()
+        {
+            HashSet<string> fought = new();
+            if (saveData.SquadKillsStore != null) foreach (SquadKillsStored entry in saveData.SquadKillsStore) fought.Add(entry.SquadGUID);
+            if (saveData.SquadLossesStore != null) foreach (SquadLossesStored entry in saveData.SquadLossesStore) fought.Add(entry.SquadGUID);
+            if (saveData.SquadDamageStore != null) foreach (SquadDamageStored entry in saveData.SquadDamageStore) fought.Add(entry.SquadGUID);
+            return fought;
+        }
+        private int KillsLastBattle(string _uniqueID)
+        {
+            if (saveData.SquadKillsStore == null) return 0;
+            int kills = 0;
+            foreach (SquadKillsStored entry in saveData.SquadKillsStore)
+                if (entry.SquadGUID == _uniqueID) kills += entry.Kills;
+            return kills;
+        }
+        // Prospectors
+        public int ProspectorsGold()
+        {
+            if (saveData == null || saveData.InMarch) return 0;
+            int squads = 0;
+            foreach (SquadToLoad squad in saveData.playerArmy)
+                if (squad.UnitIndex != -1 && !squad.isEmptySquad && squad.SquadCurrentHealth > 0 && squad.UnitName == UnitName.RiftpickLaborers) squads++;
+            return math.min(squads, TabletopTavernConstants.PROSPECTORS_MAX_SQUADS) * TabletopTavernConstants.PROSPECTORS_GOLD_PER_SQUAD;
+        }
+        // Slow Growth: runs after the act number moves on, so the step into the March grows nothing.
+        private void GrowTreants()
+        {
+            if (saveData.InMarch) return;
+            for (int i = 0; i < saveData.playerArmy.Length; i++)
+            {
+                SquadToLoad squad = saveData.playerArmy[i];
+                if (squad.UnitIndex == -1 || squad.UnitName != UnitName.Treants || squad.SquadCurrentHealth == 0 || squad.UnitPrestige >= 2) continue;
+                PrestigeSpecificUnit(squad);
+            }
+        }
+        // Earn Their Freedom: runs before the trait picker, so a freed squad picks its trait as Huskarls.
+        public void FreeThralls()
+        {
+            if (saveData == null || saveData.playerArmy == null || saveData.InMarch) return;
+            bool freedAny = false;
+            for (int i = 0; i < saveData.playerArmy.Length; i++)
+            {
+                SquadToLoad thrall = saveData.playerArmy[i];
+                if (thrall.UnitIndex == -1 || thrall.UnitName != UnitName.ThrallLevy || thrall.UnitPrestige < 2) continue;
+
+                float healthShare = thrall.SquadMaxHealth > 0 ? (float)thrall.SquadCurrentHealth / thrall.SquadMaxHealth : 1f;
+                SquadToLoad freed = new(UnitName.Huskarls, thrall.UnitPrestige, thrall.UnitIndex, _modifiedHealthValueByAmount: healthShare);
+                HeroBonusManager.ApplyHeroBaseUnitCount(ref freed, saveData.heroID);
+                freed.UniqueID = thrall.UniqueID;
+                freed.PrestigeTrait = thrall.PrestigeTrait;
+                saveData.playerArmy[i] = freed;
+                freedAny = true;
+                Debug.Log($"[Unit] Thrall Levy {thrall.UniqueID} earned its freedom and became Huskarls");
+            }
+            if (freedAny) OnArmyStructureChanged?.Invoke();
+        }
+        #endregion
         public int GetSquadHistoricalKillCount(string _uniqueID)
         {
             if(saveData == null) return 0;
@@ -2070,11 +2281,32 @@ namespace TJ
             saveData.RunStats.goldWagered += amount;
             if (saveData.RunStats.goldWagered >= 100) SteamAchievements.Unlock(AchievementId.Gamba);
         }
-        // Flags that a consumable was used this run (disqualifies BareEssentials).
-        public void MarkConsumableUsed()
+        // Flags that a consumable was used this run (disqualifies BareEssentials) and counts it for Run History.
+        public void MarkConsumableUsed(ConsumableEnum consumable)
         {
             if (saveData == null) return;
             saveData.RunStats.consumableUsed = true;
+            saveData.RunStats.consumablesUsed++;
+            if (consumable == ConsumableEnum.MinorHealth || consumable == ConsumableEnum.MajorHealth) saveData.RunStats.healingItemsUsed++;
+        }
+        public void RegisterCampfireRest()
+        {
+            if (saveData == null) return;
+            saveData.RunStats.campfireRests++;
+        }
+        // Adds claimed spoils gold to the newest battle in the run's log.
+        public void AddSpoilsGoldToLastBattle(int gold)
+        {
+            if (saveData?.battleLog == null || saveData.battleLog.Count == 0 || gold <= 0) return;
+            int last = saveData.battleLog.Count - 1;
+            RunBattle battle = saveData.battleLog[last];
+            battle.gold += gold;
+            saveData.battleLog[last] = battle;
+        }
+        public void RecordActArmy()
+        {
+            if (saveData == null) return;
+            SaveDataHandler.RecordActArmy(saveData);
         }
         // A battle offered the ransom-captives reward (denominator for Merciful).
         public void RegisterRansomOffered()

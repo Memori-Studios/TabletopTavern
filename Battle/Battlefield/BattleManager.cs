@@ -95,6 +95,7 @@ public class BattleManager : Singleton<BattleManager>
     private readonly HashSet<int> _breachedGateIndices = new();
     public bool IsGateBreached(int gateIndex) => _breachedGateIndices.Contains(gateIndex);
     public bool AnyGateBreached => _breachedGateIndices.Count > 0;
+    public void ClearBreachedGates() => _breachedGateIndices.Clear();
     public void NotifyGateDestroyed(int gateIndex)
     {
         UnityEngine.Debug.Log($"BattleManager: NotifyGateDestroyed: gateIndex={gateIndex}");
@@ -103,7 +104,7 @@ public class BattleManager : Singleton<BattleManager>
 
         // "Siegebreaker" - every gate in this garrison breached. GateCount is 0 outside garrison battles.
         int gateCount = ArmySpawnManager.GateCount;
-        if (gateCount > 0 && _breachedGateIndices.Count >= gateCount)
+        if (gateCount > 0 && _breachedGateIndices.Count >= gateCount && TJ.Achievements.BattleAchievements.BattleCounts)
             SteamAchievements.Unlock(AchievementId.Siegebreaker);
     }
 
@@ -247,6 +248,9 @@ public class BattleManager : Singleton<BattleManager>
     public void StartBattle()
     {
         SetGamePhase(GamePhase.Battle);
+
+        if (battleSaveManager.IsCustomBattle && battleSaveManager.IsGarrisonBattle)
+            amySaveDataManager.AssignCustomGarrisonDefenders(positionDrawer.GarrisonZone);
 
         EntityManager entityManager = World.DefaultGameObjectInjectionWorld.EntityManager;
         entityManager.CreateEntity(typeof(BattlePhase));

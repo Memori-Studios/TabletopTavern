@@ -41,7 +41,11 @@ partial struct GarrisonGateTargetSystem : ISystem
                 {
                     float3 toExisting = _transformLookup[target.ValueRO.targetEntity].Position - transform.ValueRO.Position;
                     float2 toExistingXZ = new float2(toExisting.x, toExisting.z);
-                    if (math.lengthsq(toExistingXZ) > 0f)
+                    // Same 10 buffer RangedSquadFindTargetSystem gives ranged squads before they drop a target.
+                    float keepRange = shootAttack.ValueRO.Range + 10f;
+                    if (math.lengthsq(toExistingXZ) > keepRange * keepRange)
+                        clear = true;
+                    else if (math.lengthsq(toExistingXZ) > 0f)
                     {
                         float dot = math.dot(gateForwardXZ, math.normalize(toExistingXZ));
                         if (dot < 0.0872f) clear = true; // 85° half-angle = 170° arc

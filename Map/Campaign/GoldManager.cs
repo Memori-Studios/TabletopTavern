@@ -104,10 +104,8 @@ public class GoldManager : MonoBehaviour
             }
         }
 
-        if(interest == 0) return;
-        string interestLocalized = LocalizationManager.Instance.GetText("Interest at turn end");
-        ModifyGold(interest, interestLocalized);
-
+        // Dragon's Hoard pays on its own, even on a turn that earns no interest.
+        if(interest > 0) ModifyGold(interest, LocalizationManager.Instance.GetText("Interest at turn end"));
         if(bonus > 0) ModifyGold(bonus, LocalizationManager.Instance.GetText("DragonsHoard"));
         // Debug.Log($"Collected {interest} gold in interest");
     }

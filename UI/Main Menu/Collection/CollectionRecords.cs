@@ -26,7 +26,7 @@ namespace TJ.MainMenu
     /// </summary>
     public class CollectionRecords : MonoBehaviour
     {
-        public enum Page { Quests, Runs, Boards }
+        public enum Page { Quests, Runs, Boards, Profile }
         private enum Board { Godking, Deepest }
 
         [Header("Shared")]
@@ -86,6 +86,19 @@ namespace TJ.MainMenu
         [SerializeField] private Transform spellsGrid;
         [SerializeField] private CollectionMiniUnit miniUnitTemplate;
         [SerializeField] private CollectionTile itemTileTemplate;
+        // Act I to III, then End: the army as each act ended. Hidden on runs recorded before acts were kept.
+        [SerializeField] private GameObject actTabsRow;
+        [SerializeField] private CollectionTab[] actTabs;
+        [SerializeField] private GameObject fallenGroup;
+        [SerializeField] private TMP_Text fallenLabel;
+        [SerializeField] private Transform fallenGrid;
+        [SerializeField] private GameObject detailsGroup;
+        [SerializeField] private TMP_Text detailsLabel;
+        [SerializeField] private TMP_Text detailsText;
+        [SerializeField] private GameObject battlesGroup;
+        [SerializeField] private TMP_Text battlesLabel;
+        [SerializeField] private Transform battleList;
+        [SerializeField] private RecordsBattleRow battleRowTemplate;
 
         [Header("Leaderboards")]
         [SerializeField] private GameObject boardsPage;
@@ -122,6 +135,34 @@ namespace TJ.MainMenu
         [SerializeField] private TMP_Text yoursNote;
         [SerializeField] private Transform yoursList;
 
+        [Header("Profile")]
+        [SerializeField] private GameObject profilePage;
+        [SerializeField] private ScrollRect profileScroll;
+        [SerializeField] private GameObject profileBody;
+        [SerializeField] private TMP_Text profileEmpty;
+        // Runs, wins, time / battles, slain, lost / gold earned, gold spent, prestiges / villages, castles, cities.
+        [SerializeField] private TMP_Text[] profileValues;
+        [SerializeField] private TMP_Text[] profileLabels;
+        [SerializeField] private TMP_Text sackedLabel;
+        [SerializeField] private TMP_Text favouritesLabel;
+        [SerializeField] private Transform favouritesList;
+        [SerializeField] private GameObject deadliestGroup;
+        [SerializeField] private TMP_Text deadliestLabel;
+        [SerializeField] private Transform deadliestList;
+        [SerializeField] private GameObject bestsGroup;
+        [SerializeField] private TMP_Text bestsLabel;
+        [SerializeField] private Transform bestsList;
+        [SerializeField] private TMP_Text commandersLabel;
+        [SerializeField] private Transform commandersList;
+        [SerializeField] private GameObject profileSide;
+        [SerializeField] private Image profilePortrait;
+        [SerializeField] private TMP_Text profileEyebrow;
+        [SerializeField] private TMP_Text profileName;
+        [SerializeField] private TMP_Text profileLine;
+        [SerializeField] private TMP_Text[] profileSideValues;
+        [SerializeField] private TMP_Text[] profileSideLabels;
+        [SerializeField] private TMP_Text profileNote;
+
         // Run History, Leaderboards and the quests not yet on the Steam backend ship with the Spell Update.
         // Readonly rather than #if blocks, so the pre-release path compiles and can be checked in a SPELLS Editor.
 #if SPELLS
@@ -147,8 +188,15 @@ namespace TJ.MainMenu
         private readonly List<GameObject> _cardItems = new();
         private readonly List<GameObject> _boardItems = new();
         private readonly List<GameObject> _yoursItems = new();
+        private readonly List<GameObject> _armyItems = new();
+        private readonly List<GameObject> _profileItems = new();
+
+        // Labels beside a value in one line of text, the card's own muted grey.
+        private const string MUTED = "#8E9A9A";
+        private static readonly Color FallenTint = new(0.45f, 0.45f, 0.45f, 1f);
 
         private List<RunRecord> _runs;
+        private RunRecord _cardRun;
         private int _keptRun = -1;
         private RecordsRunRow _hoveredRun;
         private Coroutine _pending;
@@ -183,6 +231,11 @@ namespace TJ.MainMenu
                 _ = RefreshBoard();
             };
             filter.Show(false);
+            for (int i = 0; i < actTabs.Length; i++)
+            {
+                int tab = i;
+                actTabs[i].Button.onClick.AddListener(() => PickActTab(tab, true));
+            }
             heroPicker.onValueChanged.AddListener(index =>
             {
                 _heroId = index > 0 && index <= _pickerHeroes.Count ? _pickerHeroes[index - 1] : 0;
@@ -210,10 +263,40 @@ namespace TJ.MainMenu
             cardLabels[3].text = T("enemiesSlain");
             cardLabels[4].text = T("RunHistoryGoldEarned");
             cardLabels[5].text = T("RunHistoryRenownEarned");
+            cardLabels[6].text = T("RunHistoryTroopsLost");
+            cardLabels[7].text = T("RunHistoryGoldSpent");
+            cardLabels[8].text = T("RunHistoryTownsSacked");
+            cardLabels[9].text = T("RunHistoryPrestiges");
+            cardLabels[10].text = T("Troops Recruited");
+            cardLabels[11].text = T("RunHistoryItemsUsed");
             armyLabel.text = T("RunHistoryArmy");
             reserveLabel.text = T("Reserve");
             gearLabel.text = T("RunHistoryGear");
             spellsLabel.text = T("Spells");
+            for (int i = 0; i < actTabs.Length - 1; i++) actTabs[i].SetLabel($"{T("Act")} {MemoriUI.ConvertNumberToRomanNumeral(i + 1)}");
+            actTabs[actTabs.Length - 1].SetLabel(T("RunHistoryActEnd"));
+            fallenLabel.text = T("RunHistoryFallen");
+            detailsLabel.text = T("RunHistoryDetails");
+            battlesLabel.text = T("RunHistoryBattles");
+
+            string[] profileKeys =
+            {
+                "ProfileRuns", "ProfileWins", "ProfileTimePlayed",
+                "RunHistoryBattles", "enemiesSlain", "RunHistoryTroopsLost",
+                "RunHistoryGoldEarned", "RunHistoryGoldSpent", "RunHistoryPrestiges",
+                "Village", "Castle", "City",
+            };
+            for (int i = 0; i < profileLabels.Length && i < profileKeys.Length; i++) profileLabels[i].text = T(profileKeys[i]);
+            sackedLabel.text = T("RunHistoryTownsSacked");
+            favouritesLabel.text = T("ProfileFavourites");
+            deadliestLabel.text = T("ProfileDeadliest");
+            bestsLabel.text = T("ProfileBests");
+            commandersLabel.text = T("ProfileCommanders");
+            profileEmpty.text = T("ProfileEmpty");
+            profileEyebrow.text = T("ProfileFavouriteCommander");
+            profileSideLabels[0].text = T("ProfileWinRate");
+            profileSideLabels[1].text = T("ProfileBestDifficulty");
+            profileNote.text = T("ProfileNote");
 
             godkingTab.SetLabel(T("LeaderboardBoardGodking"));
             deepestTab.SetLabel(T("LeaderboardBoardDeepest"));
@@ -233,6 +316,7 @@ namespace TJ.MainMenu
             questsPage.SetActive(page == Page.Quests);
             runsPage.SetActive(page == Page.Runs);
             boardsPage.SetActive(page == Page.Boards);
+            profilePage.SetActive(page == Page.Profile);
             boardHeader.SetActive(page == Page.Boards);
             boardFilterSlot.SetActive(page == Page.Boards);
             // The side panel must be active before its lists are built, or their Awake never runs.
@@ -240,6 +324,7 @@ namespace TJ.MainMenu
             questSide.SetActive(page == Page.Quests);
             runSide.SetActive(page == Page.Runs);
             boardSide.SetActive(page == Page.Boards);
+            profileSide.SetActive(page == Page.Profile);
             sideScroll.verticalNormalizedPosition = 1f;
             _serial++;
 
@@ -261,6 +346,11 @@ namespace TJ.MainMenu
                     subtitle.text = string.Empty;
                     _ = RefreshBoard();
                     break;
+                case Page.Profile:
+                    title.text = T("profileButton");
+                    FillProfile();
+                    profileScroll.verticalNormalizedPosition = 1f;
+                    break;
             }
         }
 
@@ -273,6 +363,7 @@ namespace TJ.MainMenu
             questsPage.SetActive(false);
             runsPage.SetActive(false);
             boardsPage.SetActive(false);
+            profilePage.SetActive(false);
             boardHeader.SetActive(false);
             boardFilterSlot.SetActive(false);
             side.SetActive(false);
@@ -502,7 +593,7 @@ namespace TJ.MainMenu
             LocalizationManager loc = LocalizationManager.Instance;
             Hero hero = HeroData.GetHeroByID(run.heroID);
             cardPortrait.enabled = false;
-            LoadCardPortrait(run.heroID);
+            LoadPortrait(cardPortrait, run.heroID);
             cardEyebrow.text = run.EndedAtUtc.ToLocalTime().ToString("D", CultureInfo.CurrentCulture);
             cardName.text = loc.GetText(hero.HeroName);
             cardLine.text = $"{RecordsFormat.Difficulty(run.difficulty)}  <color=#8E9A9A>·</color>  " +
@@ -515,25 +606,29 @@ namespace TJ.MainMenu
             cardValues[3].text = run.enemiesSlain.ToString("N0", CultureInfo.CurrentCulture);
             cardValues[4].text = run.goldEarned.ToString("N0", CultureInfo.CurrentCulture);
             cardValues[5].text = run.renownEarned > 0 ? $"+{run.renownEarned}" : run.renownEarned.ToString();
+            // Runs recorded before these were kept show a dash, not a zero that never happened.
+            bool detail = run.HasDetail;
+            cardValues[6].text = Count(run.unitsLost, detail);
+            cardValues[7].text = Count(run.goldSpent, detail);
+            cardValues[8].text = Count(run.townsSacked, detail);
+            cardValues[9].text = Count(run.unitsPrestiged, detail);
+            cardValues[10].text = Count(run.unitsRecruited, detail);
+            cardValues[11].text = Count(run.consumablesUsed, detail);
 
-            int reserves = 0;
-            for (int i = 0; i < run.army.Length; i++)
-            {
-                SquadToLoad squad = run.army[i];
-                if (squad.isEmptySquad || squad.maxUnitCount <= 0) continue;
-                bool inReserve = i >= MAIN_ARMY_SLOTS;
-                if (inReserve) reserves++;
-                CollectionMiniUnit mini = Instantiate(miniUnitTemplate, inReserve ? reserveGrid : armyGrid);
-                mini.gameObject.SetActive(true);
-                mini.Set(TabletopTavernData.Instance.GetUnitIcon(squad.UnitName), CollectionDetailPanel.TierColour(squad.UnitName));
-                string title = loc.GetText(squad.UnitName.ToString());
-                string description = squad.PrestigeTrait != UnitAttribute.None
-                    ? loc.GetText(squad.PrestigeTrait.ToString())
-                    : loc.GetText(TabletopTavernData.Instance.GetUnitTypeFromUnitName(squad.UnitName).ToString());
-                mini.gameObject.AddComponent<MemoriTooltipTrigger>().SetUpToolTip(title, description);
-                _cardItems.Add(mini.gameObject);
-            }
-            reserveGroup.SetActive(reserves > 0);
+            _cardRun = run;
+            bool hasActs = run.acts != null && run.acts.Count > 0;
+            actTabsRow.SetActive(hasActs);
+            for (int i = 0; i < actTabs.Length - 1; i++) actTabs[i].gameObject.SetActive(ActSquads(run, i + 1) != null);
+            PickActTab(actTabs.Length - 1, false);
+
+            int fallen = 0;
+            if (run.fallen != null)
+                foreach (RunSquad squad in run.fallen)
+                {
+                    _cardItems.Add(MiniSquad(fallenGrid, squad, true));
+                    fallen++;
+                }
+            fallenGroup.SetActive(fallen > 0);
 
             int gear = 0;
             foreach (GearID id in run.gear)
@@ -558,16 +653,139 @@ namespace TJ.MainMenu
                 spells++;
             }
             spellsGroup.SetActive(spells > 0);
+
+            List<string> lines = DetailLines(run);
+            detailsGroup.SetActive(lines.Count > 0);
+            detailsText.text = string.Join("\n", lines);
+
+            int battles = 0;
+            if (run.battles != null)
+                for (int i = 0; i < run.battles.Count; i++)
+                {
+                    RunBattle battle = run.battles[i];
+                    RunOutcome result = battle.won ? RunOutcome.Win : RunOutcome.Loss;
+                    RecordsBattleRow row = Instantiate(battleRowTemplate, battleList);
+                    row.gameObject.SetActive(true);
+                    row.Set(i + 1, BattleTitle(battle), BattleMeta(battle), RecordsFormat.Outcome(result), Hex(RecordsFormat.OutcomeColour(result)), i % 2 == 0);
+                    _cardItems.Add(row.gameObject);
+                    battles++;
+                }
+            battlesGroup.SetActive(battles > 0);
             sideScroll.verticalNormalizedPosition = 1f;
         }
 
-        private async void LoadCardPortrait(int heroID)
+        /// <summary>Shows the army as one act ended, or as the run ended for the last tab.</summary>
+        private void PickActTab(int tab, bool sound)
+        {
+            if (_cardRun == null) return;
+            if (sound) Memori.Audio.IAudioRequester.Instance.PlaySFX(Memori.Audio.SFXData.ButtonClick);
+            for (int i = 0; i < actTabs.Length; i++) actTabs[i].SetActive(i == tab);
+            List<RunSquad> squads = tab == actTabs.Length - 1 ? null : ActSquads(_cardRun, tab + 1);
+            ShowArmy(squads ?? _cardRun.squads);
+        }
+
+        private static List<RunSquad> ActSquads(RunRecord run, int act)
+        {
+            if (run.acts == null) return null;
+            foreach (RunAct entry in run.acts)
+                if (entry.act == act) return entry.squads;
+            return null;
+        }
+
+        private void ShowArmy(List<RunSquad> squads)
+        {
+            foreach (GameObject item in _armyItems)
+                if (item != null) Destroy(item);
+            _armyItems.Clear();
+
+            int reserves = 0;
+            foreach (RunSquad squad in squads)
+            {
+                bool inReserve = squad.slot >= MAIN_ARMY_SLOTS;
+                if (inReserve) reserves++;
+                // A squad at no health was wiped out in the battle that ended the run.
+                _armyItems.Add(MiniSquad(inReserve ? reserveGrid : armyGrid, squad, squad.health <= 0));
+            }
+            reserveGroup.SetActive(reserves > 0);
+        }
+
+        private GameObject MiniSquad(Transform parent, RunSquad squad, bool dimmed)
+        {
+            LocalizationManager loc = LocalizationManager.Instance;
+            CollectionMiniUnit mini = Instantiate(miniUnitTemplate, parent);
+            mini.gameObject.SetActive(true);
+            mini.Set(TabletopTavernData.Instance.GetUnitIcon(squad.unit), CollectionDetailPanel.TierColour(squad.unit));
+            if (dimmed) mini.Portrait.color = FallenTint;
+            string description = squad.trait != UnitAttribute.None
+                ? loc.GetText(squad.trait.ToString())
+                : loc.GetText(TabletopTavernData.Instance.GetUnitTypeFromUnitName(squad.unit).ToString());
+            if (squad.prestige > 0) description += $"\n{loc.GetText("Prestige")} {MemoriUI.ConvertNumberToRomanNumeral(squad.prestige)}";
+            if (squad.kills > 0 || squad.lost > 0) description += "\n" + string.Format(loc.GetText("RunHistorySquadStats"), N(squad.kills), N(squad.lost));
+            mini.gameObject.AddComponent<MemoriTooltipTrigger>().SetUpToolTip(loc.GetText(squad.unit.ToString()), description);
+            return mini.gameObject;
+        }
+
+        // Only what happened: a count of zero says nothing new, so it is left out.
+        private static List<string> DetailLines(RunRecord run)
+        {
+            var lines = new List<string>();
+            if (!run.HasDetail) return lines;
+            void Add(string key, int value)
+            {
+                if (value > 0) lines.Add(Labelled(T(key), N(value)));
+            }
+            Add("RunHistoryStartingGold", run.startingGold);
+            Add("RunHistoryCampfireRests", run.campfireRests);
+            Add("RunHistoryTrainings", run.campfireTrainings);
+            Add("RunHistoryShopPurchases", run.shopPurchases);
+            Add("RunHistoryGearFound", run.gearFound);
+            Add("RunHistoryGoldWagered", run.goldWagered);
+            Add("RunHistoryHealingUsed", run.healingItemsUsed);
+
+            var sacks = new List<string>();
+            if (run.villagesSacked > 0) sacks.Add($"{T("Village")} {run.villagesSacked}");
+            if (run.castlesSacked > 0) sacks.Add($"{T("Castle")} {run.castlesSacked}");
+            if (run.citiesSacked > 0) sacks.Add($"{T("City")} {run.citiesSacked}");
+            if (sacks.Count > 0) lines.Add(Labelled(T("RunHistoryTownsSacked"), string.Join(" · ", sacks)));
+
+            if (run.spellsCast != null && run.spellsCast.Count > 0)
+            {
+                IEnumerable<string> top = run.spellsCast.Where(c => c.Casts > 0).OrderByDescending(c => c.Casts).Take(SUMMARY_COUNT)
+                    .Select(c => $"{T(c.Spell.ToString())} ×{c.Casts}");
+                string cast = string.Join(", ", top);
+                if (cast.Length > 0) lines.Add(Labelled(T("RunHistoryMostCast"), cast));
+            }
+            return lines;
+        }
+
+        private static string BattleTitle(RunBattle battle)
+        {
+            string where = battle.town >= 0 ? T(((TownSize)battle.town).ToString()) : T(battle.node.ToString());
+            string title = $"{MemoriUI.ConvertNumberToRomanNumeral(Mathf.Max(battle.act, 1))} · {where}";
+            return battle.race != Race.Special ? $"{title} · {T(battle.race.ToString())}" : title;
+        }
+
+        private static string BattleMeta(RunBattle battle)
+        {
+            // The counts first, so a long line loses its end to the ellipsis, not the numbers.
+            var parts = new List<string>
+            {
+                string.Format(T("RunHistorySquadStats"), N(battle.kills), N(battle.lost)),
+                T(battle.fought ? "RunHistoryFought" : "Autoresolve"),
+            };
+            if (battle.gold > 0) parts.Add($"{N(battle.gold)}<sprite name=GoldSprite>");
+            if (battle.weather != Weather.ClearSkies) parts.Add(T(battle.weather.ToString()));
+            if (battle.warlord > 0) parts.Add(T(HeroData.GetHeroByID(battle.warlord).HeroName));
+            return string.Join(" · ", parts);
+        }
+
+        private async void LoadPortrait(Image target, int heroID)
         {
             int request = ++_portraitRequest;
             Sprite sprite = await TabletopTavernData.Instance.LoadHeroSpriteAsync(heroID);
             if (this == null || request != _portraitRequest) return;
-            cardPortrait.sprite = sprite;
-            cardPortrait.enabled = sprite != null;
+            target.sprite = sprite;
+            target.enabled = sprite != null;
         }
 
         private CollectionTile ItemTile(Transform parent, Sprite icon, Color colour)
@@ -815,7 +1033,140 @@ namespace TJ.MainMenu
 
         #endregion
 
+        #region Profile
+
+        // Totals come from the lifetime store, which outlasts the Run History cap; favourites and bests from Run History.
+        private void FillProfile()
+        {
+            foreach (GameObject item in _profileItems)
+                if (item != null) Destroy(item);
+            _profileItems.Clear();
+
+            PlayerSaveData save = SaveDataHandler.LoadPlayerSaveData();
+            LifetimeStats life = save.lifetime ?? new LifetimeStats();
+            List<RunRecord> runs = SaveDataHandler.GetRunHistory();
+            _subtitle.text = string.Format(T("ProfileSubtitle"), N(life.runs), N(life.wins));
+
+            bool any = life.runs > 0 && life.heroes != null && life.heroes.Count > 0;
+            profileBody.SetActive(any);
+            profileEmpty.gameObject.SetActive(!any);
+            if (!any)
+            {
+                side.SetActive(false);
+                return;
+            }
+
+            int[] totals =
+            {
+                life.runs, life.wins, 0,
+                life.battlesFought, life.enemiesSlain, life.unitsLost,
+                life.goldEarned, life.goldSpent, life.unitsPrestiged,
+                life.villagesSacked, life.castlesSacked, life.citiesSacked,
+            };
+            for (int i = 0; i < profileValues.Length && i < totals.Length; i++) profileValues[i].text = N(totals[i]);
+            profileValues[2].text = RecordsFormat.Time(life.playTimeSeconds);
+
+            List<HeroTally> heroes = life.heroes.OrderByDescending(h => h.runs).ThenByDescending(h => h.wins).ToList();
+            HeroTally favourite = heroes[0];
+
+            int favourites = 0;
+            ProfileRow(favouritesList, 0, Labelled(T("ProfileFavCommander"), HeroName(favourite.heroID)), RunsCount(favourite.runs), favourites++);
+            var faction = heroes.GroupBy(h => HeroData.GetRaceFromHero(h.heroID))
+                .Select(g => (race: g.Key, runs: g.Sum(h => h.runs))).OrderByDescending(f => f.runs).First();
+            ProfileRow(favouritesList, 0, Labelled(T("ProfileFavFaction"), T(faction.race.ToString())), RunsCount(faction.runs), favourites++);
+            var unit = MostCommon(runs, r => (r.squads ?? new List<RunSquad>()).Concat(r.fallen ?? new List<RunSquad>()).Select(s => s.unit));
+            if (unit.HasValue)
+                ProfileRow(favouritesList, 0, Labelled(T("ProfileFavUnit"), T(unit.Value.item.ToString())), RunsCount(unit.Value.runs), favourites++);
+            var gear = MostCommon(runs, r => (r.gear ?? new List<GearID>()).Where(id => id != GearID.None));
+            if (gear.HasValue)
+                ProfileRow(favouritesList, 0, Labelled(T("ProfileFavGear"), T(gear.Value.item + "Name")), RunsCount(gear.Value.runs), favourites++);
+
+            List<UnitNameKillsStored> deadliest = (save.UnitNameHistoricalKillStore ?? new List<UnitNameKillsStored>())
+                .Where(k => k.Kills > 0).OrderByDescending(k => k.Kills).Take(SUMMARY_COUNT).ToList();
+            deadliestGroup.SetActive(deadliest.Count > 0);
+            for (int i = 0; i < deadliest.Count; i++)
+                ProfileRow(deadliestList, i + 1, T(deadliest[i].UnitName.ToString()), string.Format(T("RunHistorySlainCount"), N(deadliest[i].Kills)), i);
+
+            int bests = 0;
+            RunRecord fastest = runs.Where(r => r.outcome == RunOutcome.Win).OrderBy(r => r.playTimeSeconds).FirstOrDefault();
+            if (fastest != null)
+                ProfileRow(bestsList, 0, Labelled(T("ProfileFastestWin"), HeroName(fastest.heroID)), RecordsFormat.Time(fastest.playTimeSeconds), bests++);
+            RunRecord deepest = runs.Where(r => r.marchBattles > 0).OrderByDescending(r => r.marchBattles).FirstOrDefault();
+            if (deepest != null)
+                ProfileRow(bestsList, 0, Labelled(T("LeaderboardBoardDeepest"), HeroName(deepest.heroID)), string.Format(T("RunHistoryMarchBattles"), deepest.marchBattles), bests++);
+            RunRecord bloodiest = runs.OrderByDescending(r => r.enemiesSlain).FirstOrDefault();
+            if (bloodiest != null && bloodiest.enemiesSlain > 0)
+                ProfileRow(bestsList, 0, Labelled(T("ProfileMostSlain"), HeroName(bloodiest.heroID)), N(bloodiest.enemiesSlain), bests++);
+            RunRecord longest = runs.OrderByDescending(r => r.playTimeSeconds).FirstOrDefault();
+            if (longest != null && longest.playTimeSeconds > 0)
+                ProfileRow(bestsList, 0, Labelled(T("ProfileLongestRun"), HeroName(longest.heroID)), RecordsFormat.Time(longest.playTimeSeconds), bests++);
+            bestsGroup.SetActive(bests > 0);
+
+            for (int i = 0; i < heroes.Count; i++)
+            {
+                int best = BestDifficulty(heroes[i].heroID);
+                ProfileRow(commandersList, i + 1, HeroName(heroes[i].heroID), best >= 0 ? RecordsFormat.Difficulty((TT_Difficulty)best) : "-", i,
+                    WinsCount(heroes[i].wins));
+            }
+
+            profilePortrait.enabled = false;
+            LoadPortrait(profilePortrait, favourite.heroID);
+            profileName.text = HeroName(favourite.heroID);
+            profileLine.text = string.Format(T("ProfileSubtitle"), N(favourite.runs), N(favourite.wins));
+            profileSideValues[0].text = $"{Mathf.RoundToInt(life.wins * 100f / life.runs)}%";
+            int bestOverall = -1;
+            foreach (HeroTally hero in heroes)
+            {
+                int best = BestDifficulty(hero.heroID);
+                if (best >= 0) bestOverall = bestOverall < 0 ? best : DifficultyRules.Harder(bestOverall, best);
+            }
+            profileSideValues[1].text = bestOverall >= 0 ? RecordsFormat.Difficulty((TT_Difficulty)bestOverall) : "-";
+            sideScroll.verticalNormalizedPosition = 1f;
+        }
+
+        private void ProfileRow(Transform list, int rank, string name, string score, int index, string second = null)
+        {
+            RecordsBoardRow row = Instantiate(boardRowTemplate, list);
+            row.gameObject.SetActive(true);
+            row.Set(rank, name, score, false, index % 2 == 0, second);
+            _profileItems.Add(row.gameObject);
+        }
+
+        // The hardest level this hero has won, as stored, or -1 for none.
+        private static int BestDifficulty(int heroID)
+        {
+            List<int> won = SaveDataHandler.GetHeroDifficultiesCompleted(heroID);
+            if (won == null || won.Count == 0) return -1;
+            return won.Aggregate(DifficultyRules.Harder);
+        }
+
+        // What turns up in the most runs, counting it once per run.
+        private static (T item, int runs)? MostCommon<T>(List<RunRecord> runs, Func<RunRecord, IEnumerable<T>> pick)
+        {
+            var counts = new Dictionary<T, int>();
+            foreach (RunRecord run in runs)
+                foreach (T item in pick(run).Distinct())
+                    counts[item] = counts.TryGetValue(item, out int count) ? count + 1 : 1;
+            if (counts.Count == 0) return null;
+            KeyValuePair<T, int> top = counts.OrderByDescending(pair => pair.Value).First();
+            return (top.Key, top.Value);
+        }
+
+        private static string RunsCount(int runs) => runs == 1 ? T("ProfileRunsCountOne") : string.Format(T("ProfileRunsCount"), N(runs));
+
+        private static string WinsCount(int wins) => wins == 1 ? T("ProfileWinsCountOne") : string.Format(T("ProfileWinsCount"), N(wins));
+
+        #endregion
+
         #region Helpers
+
+        private static string N(int value) => value.ToString("N0", CultureInfo.CurrentCulture);
+
+        private static string Count(int value, bool known) => known ? N(value) : "-";
+
+        private static string Labelled(string label, string value) => $"<color={MUTED}>{label}</color>  {value}";
+
+        private static Color Hex(string hex) => ColorUtility.TryParseHtmlString(hex, out Color colour) ? colour : Color.white;
 
         private IEnumerator After(float seconds, Action action)
         {

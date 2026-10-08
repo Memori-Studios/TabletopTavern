@@ -131,7 +131,7 @@ namespace TJ.MainMenu
             }
 
             // On left mouse click, attempt to purchase unlock
-            if (Input.GetMouseButtonDown(0))
+            if (global::Memori.Input.GameCursor.GetButtonDown(0))
             {
                 PurchaseUnlockNode();
             }

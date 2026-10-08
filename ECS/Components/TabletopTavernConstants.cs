@@ -464,6 +464,40 @@ public static class TabletopTavernConstants
     public static bool IsAGoblinUnit(UnitName unitName) =>
         unitName == UnitName.GoblinRabble || unitName == UnitName.GoblinScrapShooters || unitName == UnitName.StonegulletEnforcers;
 
+    // The goblin recruit and reserve rules cover Rabble and ScrapShooters only; Stonegullet Enforcers are trolls.
+    public static bool IsTrueGoblin(UnitName unitName) =>
+        unitName == UnitName.GoblinRabble || unitName == UnitName.GoblinScrapShooters;
+
+    #region Campaign Traits
+    // Unit traits whose effect only happens on the campaign side; they display as Campaign Traits.
+    public static bool IsCampaignAttribute(UnitAttribute trait) =>
+        trait is UnitAttribute.Unstoppable or UnitAttribute.ForgefuryTempering or UnitAttribute.DragonsHoard;
+    // Restless Dead: a fallen squad waits at 0 health and rises after the next won battle.
+    public static bool IsRestlessDead(UnitName unitName) =>
+        unitName == UnitName.UndeadLevies || unitName == UnitName.BoneclatterSpears;
+    public const float RESTLESS_DEAD_RISE_HEALTH = 0.25f;
+    // Masterless Blade: kills in one won battle that earn a Ronin squad a prestige level.
+    public const int MASTERLESS_BLADE_KILLS = 40;
+    // Prospectors: bounty gold per living Riftpick Laborers squad, counted up to the cap.
+    public const int PROSPECTORS_GOLD_PER_SQUAD = 2;
+    public const int PROSPECTORS_MAX_SQUADS = 3;
+    // Regeneration: share of a Bogmaw Troll squad's health restored after a won battle.
+    public const float REGENERATION_HEAL_AMOUNT = 0.5f;
+    // Noble Purse: bounty gold per living Royal Cavaliers squad.
+    public const int NOBLE_PURSE_GOLD_PER_SQUAD = 2;
+    // Feast: kills in one won battle that let a Fleshshredder Fanatics squad heal, and the share it heals.
+    public const int FEAST_KILLS = 20;
+    public const float FEAST_HEAL_AMOUNT = 0.3f;
+    // Scavengers: bounty gold per enemy squad in a won battle while Feral Hounds live.
+    public const int SCAVENGERS_GOLD_PER_ENEMY_SQUAD = 1;
+    // Grave Robbers: percent chance that living Corpse Claws dig up gear after a won battle.
+    public const int GRAVE_ROBBERS_CHANCE = 10;
+    // Crypt Keepers: the health Restless Dead rise at while Black Wardens live.
+    public const float CRYPT_KEEPERS_RISE_HEALTH = 0.5f;
+    // Lucky Charm: the lowest initiative roll while Golden Saru live.
+    public const int LUCKY_CHARM_LOWEST_ROLL = 2;
+    #endregion
+
     // Covers all 29 real SquadAttributes bool fields (every UnitAttribute value except None).
     // Armored/Large/Infantry/IsOnFire/TowerShields have no backing field (derived elsewhere or
     // vestigial) and fall through to false here - see SetAttribute for the same set rejected loudly.
@@ -585,8 +619,10 @@ public static class TabletopTavernConstants
         };
     }
 
+    // Campaign Traits never come from the prestige picker; their hooks read base traits, not the squad's prestige trait.
     public static List<UnitAttribute> GetEligiblePrestigeTraits(SquadStats squadStats) =>
         PRESTIGE_TRAIT_POOL
+            .Where(trait => !IsCampaignAttribute(trait))
             .Where(trait => !GetAttribute(squadStats.SquadAttributes, trait))
             .Where(trait => IsTraitEligibleForUnitType(trait, squadStats))
             .ToList();

@@ -107,6 +107,8 @@ namespace TJ.MainMenu
             WarbandGearTile tile = tiles.Find(t => t.GearID == gearID);
             if (tile == null || !tile.Found)
             {
+                // The toast plays the fail sound; the tile shakes with it.
+                if (tile != null) StartCoroutine(Memori.UI.UIJuice.Shake((RectTransform)tile.transform));
                 NotificationManager.Instance.ErrorNotification(T("Gear Not Discoverd"));
                 return;
             }

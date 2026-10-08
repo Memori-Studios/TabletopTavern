@@ -29,7 +29,7 @@ public class ClickOutHandler : MonoBehaviour
     {
         if (!isMenuOpen) return;
 
-        if (Input.GetMouseButtonDown(0) && EventSystem.current != null)
+        if (global::Memori.Input.GameCursor.GetButtonDown(0) && EventSystem.current != null)
         {
             if (!IsPointerOverMenu())
             {

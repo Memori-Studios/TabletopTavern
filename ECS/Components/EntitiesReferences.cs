@@ -17,7 +17,6 @@ public struct EntitiesReferences : IComponentData {
     public Entity starHurlerProjectilePrefabEntity;
 
     public Entity basePlayerUnitPrefabEntity;
-    public Entity artilleryGPUAnim;
     public Entity gateUnitPrefabEntity;
     public readonly Entity GetProjectileEntityForUnitName(UnitName _unitName, bool requestingFireProjectile)
     {

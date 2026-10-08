@@ -190,7 +190,11 @@ namespace TJ
             bool isRiverCrossing = biome == Biome.River;
             battleManager.EnemyGeneral.SetRiverCrossing(isRiverCrossing);      
 
-            if (battlefieldGeneratedAtLeastOnce) return;
+            if (battlefieldGeneratedAtLeastOnce)
+            {
+                greyCompanyBattlefield.SpawnGateSquads();
+                return;
+            }
 
             squadManager.SetUp();
             customBattleUIManager.LoadUI(seed);

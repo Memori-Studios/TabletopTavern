@@ -34,6 +34,8 @@ namespace TJ
         [SerializeField] private Button deleteAllSquadsButton;
         [SerializeField] private MemoriCanvasGroup spawnOptionsCanvasGroup, spawnControlsCanvasGroup;
         [SerializeField] private TMP_Dropdown prestigeDropdown, weatherDropdown, mapRegionDropdown, biomeDropdown;
+        [SerializeField] private TMP_Dropdown garrisonDropdown;
+        [SerializeField] private MapSettingsView mapSettingsView;
         [SerializeField] private ToggleGroup factionToggleGroup;
         [SerializeField] private TMPSpawnScaler factionNameText;
         [SerializeField] private Race selectedRace;
@@ -164,6 +166,7 @@ namespace TJ
                 OnBiomeChanged(value);
             });
             ResetBiomeDropdownOptions();
+            SetUpGarrisonDropdown();
 
             weatherDropdown.onValueChanged.AddListener(value =>
             {
@@ -195,6 +198,17 @@ namespace TJ
             SetPrestige();
             SelectRace(Race.IronLegion);
             SelectTeam(Team.Player);
+            RefreshIcons();
+        }
+
+        // The row icons follow the dropdowns, so every change that moves a dropdown ends here.
+        private void RefreshIcons()
+        {
+            if (mapSettingsView == null) return;
+            var weathers = mapRegion.GetPossibleWeathers();
+            if (weatherDropdown.value < weathers.Count) mapSettingsView.ShowWeather(weathers[weatherDropdown.value].weather);
+            mapSettingsView.ShowBiome(biome, biomeDropdown.interactable);
+            mapSettingsView.ShowGarrison(garrisonDropdown == null ? -1 : garrisonDropdown.value - 1);
         }
         private void OnCursorModeChanged(CursorMode _cursorMode)
         {
@@ -320,6 +334,7 @@ namespace TJ
             biomeDropdown.onValueChanged.RemoveAllListeners();
             weatherDropdown.onValueChanged.RemoveAllListeners();
             mapRegionDropdown.onValueChanged.RemoveAllListeners();
+            if (garrisonDropdown != null) garrisonDropdown.onValueChanged.RemoveAllListeners();
 
             if (spellTestModeToggle != null) spellTestModeToggle.onValueChanged.RemoveAllListeners();
             if (mageNoCooldownToggle != null) mageNoCooldownToggle.onValueChanged.RemoveAllListeners();
@@ -405,16 +420,45 @@ namespace TJ
             tooltip.SetUpToolTip(title, description);
         }
         #endregion
+        #region Garrison
+        private static readonly string[] GarrisonOptionKeys = { "None", "Village", "Castle", "City" };
+
+        private void SetUpGarrisonDropdown()
+        {
+            if (garrisonDropdown == null) return;
+            garrisonDropdown.options.Clear();
+            foreach (string key in GarrisonOptionKeys)
+                garrisonDropdown.options.Add(new TMP_Dropdown.OptionData(LocalizationManager.Instance.GetText(key)));
+            // Option 0 is None, so the dropdown value is the town size plus one.
+            garrisonDropdown.SetValueWithoutNotify(BattleManager.Instance.BattleSaveManager.CustomGarrison + 1);
+            garrisonDropdown.RefreshShownValue();
+            garrisonDropdown.onValueChanged.RemoveAllListeners();
+            garrisonDropdown.onValueChanged.AddListener(OnGarrisonChanged);
+            biomeDropdown.interactable = garrisonDropdown.value == 0;
+        }
+
+        private void OnGarrisonChanged(int value)
+        {
+            BattleManager.Instance.BattleSaveManager.SetCustomGarrison(value - 1);
+            // Walls force the Plains battlefield, the campaign rule, so the biome choice is moot.
+            biomeDropdown.interactable = value == 0;
+            garrisonDropdown.RefreshShownValue();
+            RefreshIcons();
+        }
+        #endregion
+
         private async void RegenerateBattlefield()
         {
             BattleManager.Instance.BattleCleanUpManager.RegeneratingBattlefieldIndicator.SetActive(true);
             await Task.Delay(100); //small delay to ensure the indicator shows up
 
-            int _seed = BattleManager.Instance.GreyCompanyBattlefield.GenerateBattlefieldFromCustomBattle(useRandomSeed, seed, mapRegion, biome, _regeneratingBattlefield: true);
+            Biome generatedBiome = BattleManager.Instance.BattleSaveManager.IsGarrisonBattle ? Biome.Plains : biome;
+            int _seed = BattleManager.Instance.GreyCompanyBattlefield.GenerateBattlefieldFromCustomBattle(useRandomSeed, seed, mapRegion, generatedBiome, _regeneratingBattlefield: true);
             seed = _seed;
             seedInputField.text = seed.ToString();
             ResetWeatherDropdownOptions();
             ResetBiomeDropdownOptions();
+            RefreshIcons();
         }
         private void OnRegionChanged(int value)
         {
@@ -424,23 +468,27 @@ namespace TJ
             // Each region has its own weather and biome lists; stale labels index the wrong entry.
             ResetWeatherDropdownOptions();
             ResetBiomeDropdownOptions();
+            RefreshIcons();
         }
         private void ResetBiomeDropdownOptions()
         {
             biomeDropdown.options.Clear();
+            bool first = true;
             foreach (var possibleBiomes in mapRegion.possibleBiomes)
             {
+                // The first option is what Regenerate uses, and a region's first biome is not always Plains.
+                if (first) { biome = possibleBiomes.biome; first = false; }
                 string localizedBiomeName = LocalizationManager.Instance.GetText(possibleBiomes.biome.ToString());
                 biomeDropdown.options.Add(new TMP_Dropdown.OptionData(localizedBiomeName));
             }
             biomeDropdown.value = 0;
-            biome = (Biome)0;
             biomeDropdown.RefreshShownValue();
         }
         private void OnBiomeChanged(int value)
         {
             biome = mapRegion.possibleBiomes[value].biome;
             biomeDropdown.RefreshShownValue();
+            RefreshIcons();
         }
         private void ResetWeatherDropdownOptions()
         {
@@ -458,6 +506,7 @@ namespace TJ
             weather = mapRegion.GetPossibleWeathers()[value].weather;
             weatherDropdown.RefreshShownValue();
             BattleManager.Instance.BattlefieldEnvManager.ToggleWeather(weather);
+            RefreshIcons();
 
         }
         public void OnDeploymentToggleChanged(Toggle toggle)

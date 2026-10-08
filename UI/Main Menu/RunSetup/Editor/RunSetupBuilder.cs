@@ -33,6 +33,9 @@ namespace TJ.RunSetup.EditorTools
         const string ButtonFolder = "Assets/Data/Prefabs/UI/Reuseable/Buttons";
         const string BasicBackgroundPath = "Assets/Data/Prefabs/UI/Reuseable/Basic Background.prefab";
         const string GearTilePath = "Assets/Data/Prefabs/UI/Menu/Warband Gear Tile.prefab";
+        // Shared art: the sheen on a screen's main action and the flare a commit lands with.
+        const string ButtonSheenPath = "Assets/Data/Prefabs/UI/Reuseable/Ornaments/Button Sheen.prefab";
+        const string LandFlarePath = "Assets/Data/Prefabs/UI/Reuseable/Ornaments/Land Flare.prefab";
         const string SheetPath = "Assets/Scripts/Memori.Tooltip/Art/TooltipSheet.png";
         const string TableName = "MainLocalizationTable";
 
@@ -49,6 +52,10 @@ namespace TJ.RunSetup.EditorTools
         const float SlotSquare = 80f;
         // Every hero panel block has a fixed height so switching heroes never moves the blocks below.
         const float EffectHeight = 76f;
+        // Text boxes sized for the 13 unit floor: a unit name or a gear hint on two lines, a gear title on one.
+        const float ArmyNameHeight = 40f;
+        const float SlotTitleHeight = 20f;
+        const float SlotHintHeight = 36f;
 
         #region Style
         static readonly Color Brass = Hex("B08A3E");
@@ -64,7 +71,7 @@ namespace TJ.RunSetup.EditorTools
 
         static TMP_FontAsset displayDrop, display;
         static Sprite mount, solid, squareSliced, edgeFade, circle, lockIcon, heroIcon, campaignIcon, battleIcon, shade, arrowIcon;
-        static GameObject standardButton, backButton, primaryButton, basicBackground, gearTilePrefab;
+        static GameObject standardButton, backButton, primaryButton, basicBackground, gearTilePrefab, buttonSheen, landFlare;
 
         static void LoadAssets()
         {
@@ -90,6 +97,27 @@ namespace TJ.RunSetup.EditorTools
             primaryButton = Load<GameObject>(ButtonFolder + "/Button - Primary.prefab");
             basicBackground = Load<GameObject>(BasicBackgroundPath);
             gearTilePrefab = Load<GameObject>(GearTilePath);
+            buttonSheen = Load<GameObject>(ButtonSheenPath);
+            landFlare = Load<GameObject>(LandFlarePath);
+        }
+
+        // The sheen fills its button; it ignores the button's layout.
+        static void AddSheen(GameObject button)
+        {
+            GameObject sheen = Instance(buttonSheen, button.transform, "Sheen");
+            Stretch((RectTransform)sheen.transform);
+            Ignore(sheen);
+        }
+
+        // A flare centred on a point of its parent; it ignores the parent's layout.
+        static Memori.UI.UIFlare AddFlare(Transform parent, Vector2 anchor, Vector2 position)
+        {
+            GameObject flare = Instance(landFlare, parent, "Land Flare");
+            var rect = (RectTransform)flare.transform;
+            rect.anchorMin = rect.anchorMax = anchor;
+            rect.anchoredPosition = position;
+            Ignore(flare);
+            return flare.GetComponent<Memori.UI.UIFlare>();
         }
 
         static T Load<T>(string path) where T : Object
@@ -133,6 +161,8 @@ namespace TJ.RunSetup.EditorTools
                 "初始 {0} · 部队 {1} · 装备 {2}", "初始 {0} · 部隊 {1} · 裝備 {2}"),
             ("heroTreasuryBreakdown", "{0} base {1} renown", "{0} Basis {1} Ruhm", "{0} base {1} fama", "{0} base {1} renommée", "基本 {0} 名声 {1}", "기본 {0} 명성 {1}",
                 "{0} база {1} известность", "基础 {0} 声望 {1}", "基礎 {0} 聲望 {1}"),
+            // The gear column is narrow; "Starting Gear" in most languages is too long for it at the 13 unit floor.
+            ("warbandGearHeading", "Starting Gear", "Ausrüstung", "Equipo", "Équipement", "装備", "장비", "Снаряжение", "装备", "裝備"),
         };
 
         static StringTableCollection collection;
@@ -766,7 +796,7 @@ namespace TJ.RunSetup.EditorTools
         static void ArmyTilePart(GameObject go)
         {
             RectTransform tile = (RectTransform)go.transform;
-            Fixed(go, ArmySquare, ArmySquare + 38f);
+            Fixed(go, ArmySquare, ArmySquare + ArmyNameHeight + 4f);
             Image hit = Img(tile, null, Color.clear);
             hit.raycastTarget = true;
 
@@ -786,16 +816,20 @@ namespace TJ.RunSetup.EditorTools
             name.alignment = TextAlignmentOptions.Top;
             Wrap(name);
             name.enableAutoSizing = true;
-            name.fontSizeMin = 10f;
+            name.fontSizeMin = 13f;
             name.fontSizeMax = 13f;
             name.lineSpacing = -12f;
-            Anchor(name.rectTransform, Vector2.zero, new Vector2(1f, 0f), new Vector2(-4f, 0f), new Vector2(4f, 34f));
+            Anchor(name.rectTransform, Vector2.zero, new Vector2(1f, 0f), new Vector2(-4f, 0f), new Vector2(4f, ArmyNameHeight));
+
+            // Over the portrait, so the squad flashes as it lands.
+            Memori.UI.UIFlare flare = AddFlare(tile, new Vector2(0.5f, 1f), new Vector2(0f, -ArmySquare / 2f));
 
             WarbandArmyTile component = go.AddComponent<WarbandArmyTile>();
             var so = new SerializedObject(component);
             Ref(so, "portrait", portrait);
             Ref(so, "frame", frame);
             Ref(so, "nameText", name);
+            Ref(so, "landFlare", flare);
             so.ApplyModifiedPropertiesWithoutUndo();
         }
         #endregion
@@ -826,6 +860,7 @@ namespace TJ.RunSetup.EditorTools
             GameObject build = Instance(primaryButton, right, "Build Army");
             Fixed(build, 250f, 46f);
             Localize(Child<TMP_Text>(build.transform, "Button Label"), "WarbandReady");
+            AddSheen(build);
             Ref(so, "treasuryText", treasury);
             Ref(so, "buildArmyButton", build.GetComponent<Button>());
             so.ApplyModifiedPropertiesWithoutUndo();
@@ -1060,7 +1095,7 @@ namespace TJ.RunSetup.EditorTools
             RectTransform army = Section(panel, "Army", WarbandSection.Army, "startingArmy", out TMP_Text armyCount, out GameObject armyHighlight);
             RectTransform slots = Rect("Slots", army);
             float gridWidth = 5 * ArmySquare + 4 * 12f;
-            float gridHeight = 2 * (ArmySquare + 38f) + 10f;
+            float gridHeight = 2 * (ArmySquare + ArmyNameHeight + 4f) + 10f;
             Fixed(slots.gameObject, gridWidth, gridHeight);
             RectTransform underlay = Stretch(Rect("Empty Slots", slots));
             GridLayoutGroup underGrid = ArmyGrid(underlay);
@@ -1083,16 +1118,18 @@ namespace TJ.RunSetup.EditorTools
             rowLayout.childForceExpandHeight = true;
             // The moved spell slots carry a flexible height; pinned here so spare space goes to the gaps instead.
             GetOrAdd<LayoutElement>(row.gameObject).flexibleHeight = 0f;
-            RectTransform gear = Section(row, "Gear", WarbandSection.Gear, "Starting Gear", out TMP_Text gearCount, out GameObject gearHighlight);
-            Fixed(gear.gameObject, 214f, -1f);
+            // Wide enough for the gear heading at the 13 unit floor; the spell slots sit closer to pay for it.
+            RectTransform gear = Section(row, "Gear", WarbandSection.Gear, "warbandGearHeading", out TMP_Text gearCount, out GameObject gearHighlight);
+            Fixed(gear.gameObject, 226f, -1f);
             WarbandGearSlot gearSlot = GearSlot(gear);
             RectTransform spells = Section(row, "Spells", WarbandSection.Spells, "Spells", out TMP_Text spellCount, out GameObject spellHighlight);
             Flexible(spells.gameObject, 1f).preferredWidth = 0f;
             RectTransform spellSlots = Rect("Spell Slots", spells);
-            HorizontalLayoutGroup spellRow = HLayout(spellSlots, 22f, TextAnchor.UpperLeft, new RectOffset(4, 0, 0, 0));
+            HorizontalLayoutGroup spellRow = HLayout(spellSlots, 16f, TextAnchor.UpperLeft, new RectOffset(4, 0, 0, 0));
             spellRow.childControlWidth = false;
             spellRow.childControlHeight = false;
-            Fixed(spellSlots.gameObject, -1f, SlotSquare + 40f);
+            // Room for a spell name on two lines under each slot.
+            Fixed(spellSlots.gameObject, -1f, SlotSquare + 48f);
 
             FlexibleGap(panel, 8f);
             RectTransform difficulty = Section(panel, "Difficulty", null, "Difficulty", out TMP_Text _, out GameObject _, rightLabel: "heroRecordWon", gems: true, gemImages: out Image[] gems);
@@ -1173,6 +1210,8 @@ namespace TJ.RunSetup.EditorTools
             GameObject start = Instance(primaryButton, rightBar, "Start Campaign");
             Fixed(start, 250f, 46f);
             Localize(Child<TMP_Text>(start.transform, "Button Label"), "startCampaignButton");
+            AddSheen(start);
+            AddFlare(start.transform, new Vector2(0.5f, 0.5f), Vector2.zero);
 
             Refs(so, "wonGems", gems);
             so.ApplyModifiedPropertiesWithoutUndo();
@@ -1182,7 +1221,7 @@ namespace TJ.RunSetup.EditorTools
         static GridLayoutGroup ArmyGrid(RectTransform target)
         {
             GridLayoutGroup grid = target.gameObject.AddComponent<GridLayoutGroup>();
-            grid.cellSize = new Vector2(ArmySquare, ArmySquare + 38f);
+            grid.cellSize = new Vector2(ArmySquare, ArmySquare + ArmyNameHeight + 4f);
             grid.spacing = new Vector2(12f, 10f);
             grid.constraint = GridLayoutGroup.Constraint.FixedColumnCount;
             grid.constraintCount = 5;
@@ -1193,7 +1232,8 @@ namespace TJ.RunSetup.EditorTools
         static WarbandGearSlot GearSlot(RectTransform parent)
         {
             RectTransform slot = Rect("Gear Slot", parent);
-            Fixed(slot.gameObject, -1f, SlotSquare + 44f);
+            // Square, title and a hint on two lines, at the 13 unit floor.
+            Fixed(slot.gameObject, -1f, SlotSquare + 4f + SlotTitleHeight + 4f + SlotHintHeight);
 
             RectTransform equipped = SlotState(slot, "Equipped", out RectTransform equippedSquare, out TMP_Text equippedName, out TMP_Text equippedSub);
             GameObject tile = Instance(gearTilePrefab, equippedSquare, "Warband Gear Tile");
@@ -1226,8 +1266,11 @@ namespace TJ.RunSetup.EditorTools
             equipped.gameObject.SetActive(false);
             locked.gameObject.SetActive(false);
 
+            Memori.UI.UIFlare equipFlare = AddFlare(slot, new Vector2(0f, 1f), new Vector2(SlotSquare / 2f, -SlotSquare / 2f));
+
             WarbandGearSlot component = slot.gameObject.AddComponent<WarbandGearSlot>();
             var so = new SerializedObject(component);
+            Ref(so, "equipFlare", equipFlare);
             Ref(so, "equippedRoot", equipped.gameObject);
             Ref(so, "emptyRoot", empty.gameObject);
             Ref(so, "lockedRoot", locked.gameObject);
@@ -1255,18 +1298,18 @@ namespace TJ.RunSetup.EditorTools
             Img(square, solid, A(Hex("08100F"), 0.4f));
             title = Text("Title", state, displayDrop, 14f, Cream, name);
             title.enableAutoSizing = true;
-            title.fontSizeMin = 10f;
+            title.fontSizeMin = 13f;
             title.fontSizeMax = 14f;
-            Fixed(title.gameObject, 170f, 18f);
+            Fixed(title.gameObject, 170f, SlotTitleHeight);
             Unlocalize(title, name);
-            sub = Text("Hint", state, display, 12f, Cap, "Hint");
+            sub = Text("Hint", state, display, 13f, Cap, "Hint");
             sub.fontStyle = FontStyles.Italic;
             Wrap(sub);
             sub.enableAutoSizing = true;
-            sub.fontSizeMin = 9f;
-            sub.fontSizeMax = 12f;
+            sub.fontSizeMin = 13f;
+            sub.fontSizeMax = 13f;
             sub.alignment = TextAlignmentOptions.TopLeft;
-            Fixed(sub.gameObject, 170f, 22f);
+            Fixed(sub.gameObject, 170f, SlotHintHeight);
             Unlocalize(sub, "Hint");
             return state;
         }
@@ -1345,12 +1388,12 @@ namespace TJ.RunSetup.EditorTools
 
             RectTransform head = Rect("Heading", block);
             HLayout(head, 10f, TextAnchor.MiddleLeft, new RectOffset());
-            TMP_Text label = CapText(head, "Label", 12.5f, Cap);
+            TMP_Text label = CapText(head, "Label", 13f, Cap);
             Localize(label, headingKey);
-            // Long translations shrink to fit a narrow column rather than run into the count.
+            // At the 13 unit floor, so the layout measures the label at the size it is drawn; columns are sized to fit it.
             label.enableAutoSizing = true;
-            label.fontSizeMin = 8f;
-            label.fontSizeMax = 12.5f;
+            label.fontSizeMin = 13f;
+            label.fontSizeMax = 13f;
             GetOrAdd<LayoutElement>(label.gameObject).minWidth = 40f;
             Image line = Img(Rect("Line", head), solid, Hair);
             Flexible(line.gameObject, 1f).preferredHeight = 1f;

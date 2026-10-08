@@ -843,6 +843,8 @@ public class SquadManager : MonoBehaviour
     {
         CampaignSaveData saveData = SaveDataHandler.Load();
         CustomBattleSaveData customBattleData = SaveDataHandler.LoadCustomBattleSaveData();
+        // The walls are picked live in the UI, so the loaded file holds the previous choice until this write.
+        if (isCustomBattle) customBattleData.customBattleGarrison = BattleManager.Instance.BattleSaveManager.CustomGarrison;
 
         ComponentType squadTeamComponent = savingPlayer ? ComponentType.ReadOnly<PlayerSquad>() : ComponentType.ReadOnly<EnemySquad>();
         using var playerSquadEntities = RetrieveSquadEntities(squadTeamComponent);

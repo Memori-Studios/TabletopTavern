@@ -126,7 +126,6 @@ namespace TJ.Shop
         public void RefreshPrice()
         {
             cost = cardPackData.packPrice;
-            int activeHeroID = HeroBonusManager.Instance.ActiveHeroID;
             switch(cardPackData.packID)
             {
                 case 0:
@@ -159,13 +158,7 @@ namespace TJ.Shop
                     break;
             }
 
-            //Drums in the Deep: Pack cost Reduced to 5 for all Common Packs
-            if(activeHeroID == 3 && cardPackData.packID == 1)
-            {
-                cost = 5;
-            }
-
-            // After every set price above, so Drums in the Deep keeps its pack cheap but not free of the rise.
+            // After every set price above, so a set price is not free of the rise.
             if (CampaignManager.Instance.CampaignSaveManager.SaveData.HasOrdeal(OrdealId.IronCoffers)) cost += OrdealRegistry.IRON_COFFERS_PRICE_RISE;
 
             cost -= _discount;

@@ -20,7 +20,8 @@ namespace TJ.MainMenu
             mainMenu = _mainMenu;
             if(returnToMainMenuButton == null) return;
 
-            returnToMainMenuButton.onClick.RemoveAllListeners();
+            // Only this panel's own handler: RemoveAllListeners also took the button's click sound.
+            returnToMainMenuButton.onClick.RemoveListener(ReturnToMainMenu);
             returnToMainMenuButton.onClick.AddListener(ReturnToMainMenu);
         }
         public virtual void OpenPanel()

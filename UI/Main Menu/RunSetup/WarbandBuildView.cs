@@ -1,3 +1,5 @@
+using System.Collections.Generic;
+using Memori.UI;
 using UnityEngine;
 using UnityEngine.UI;
 
@@ -7,6 +9,27 @@ namespace TJ.MainMenu
     public class WarbandBuildView : MonoBehaviour
     {
         [SerializeField] private Image[] wonGems;
+
+        // The builder's block names, top to bottom.
+        private static readonly string[] Blocks = { "Build Panel/Army", "Build Panel/Gear And Spells", "Build Panel/Difficulty" };
+        private Coroutine arrival;
+
+        // The build blocks follow the screen in, one after another.
+        public void PlayArrival()
+        {
+            if (!isActiveAndEnabled) return;
+            var items = new List<RectTransform>();
+            var delays = new List<float>();
+            foreach (string path in Blocks)
+            {
+                Transform block = transform.Find(path);
+                if (block == null) { Debug.LogError($"[WarbandBuildView] No '{path}' to reveal."); continue; }
+                delays.Add(0.05f + items.Count * 0.05f);
+                items.Add((RectTransform)block);
+            }
+            if (arrival != null) StopCoroutine(arrival);
+            arrival = StartCoroutine(UIJuice.Reveal(items, delays, 0.2f));
+        }
 
         public void ShowRecord(int heroID)
         {

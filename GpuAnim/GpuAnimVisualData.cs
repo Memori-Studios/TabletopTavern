@@ -45,6 +45,13 @@ namespace TabletopTavern.GpuAnim
         public Bounds Bounds;
     }
 
+    /// <summary>Attachment tags the game's own bakes write and the battle reads.</summary>
+    public static class UnitVisualTags
+    {
+        // ShieldRandomizerSystem swaps this prop's mesh for a random one from the shield set.
+        public const string RandomShield = "randomShield";
+    }
+
     public sealed class GpuAnimAttachmentData
     {
         public Mesh Mesh;
@@ -54,5 +61,6 @@ namespace TabletopTavern.GpuAnim
         // Bit i set = shown at LOD i.
         public int LodMask = 0b11;
         public Bounds Bounds;
+        public string Tag = "";
     }
 }

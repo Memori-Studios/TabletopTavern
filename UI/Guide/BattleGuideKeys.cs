@@ -31,6 +31,7 @@ namespace TJ
         {
             var parts = new List<GuideKeyPart>();
             if (string.IsNullOrWhiteSpace(keys)) return parts;
+            if (InputDevices.UsingGamepad) return ParseForGamepad(keys);
 
             foreach (string token in keys.Split(' ', System.StringSplitOptions.RemoveEmptyEntries))
             {
@@ -50,6 +51,59 @@ namespace TJ
                 }
             }
             return parts;
+        }
+
+        // A gamepad row never shows a keyboard key: a key the pad has no button for reads as a word instead.
+        static List<GuideKeyPart> ParseForGamepad(string keys)
+        {
+            var parts = new List<GuideKeyPart>();
+            foreach (string token in keys.Split(' ', System.StringSplitOptions.RemoveEmptyEntries))
+            {
+                switch (token)
+                {
+                    case "+": parts.Add(new GuideKeyPart(GuideKeyPartKind.Plus, "+")); break;
+                    case "/":
+                    case "-": parts.Add(new GuideKeyPart(GuideKeyPartKind.Separator, token)); break;
+                    case "LMB": parts.Add(new GuideKeyPart(GuideKeyPartKind.Keycap, InputGlyphs.ForMouse(0))); break;
+                    case "RMB": parts.Add(new GuideKeyPart(GuideKeyPartKind.Keycap, InputGlyphs.ForMouse(1))); break;
+                    // Mouse turning and wheel zoom have their own pad rows (shoulders and triggers).
+                    case "MMB": return new List<GuideKeyPart> { new(GuideKeyPartKind.Word, Localize("InputMouseOnly")) };
+                    default:
+                        if (token.StartsWith("~")) { parts.Add(new GuideKeyPart(GuideKeyPartKind.Word, Localize(token.Substring(1)))); break; }
+                        if (!token.StartsWith("@")) return KeyboardOnly();
+                        string actionName = token.Substring(1);
+                        InputAction action = Controls().FindAction(actionName);
+                        string label = InputGlyphs.For(action);
+                        if (label != null) parts.Add(new GuideKeyPart(GuideKeyPartKind.Keycap, label));
+                        else if (InputGlyphs.OnScreenActions.Contains(actionName)) return new List<GuideKeyPart> { new(GuideKeyPartKind.Word, Localize("InputOnScreen")) };
+                        else return KeyboardOnly();
+                        break;
+                }
+            }
+            return WithoutRepeats(parts);
+        }
+
+        static List<GuideKeyPart> KeyboardOnly() => new() { new GuideKeyPart(GuideKeyPartKind.Word, Localize("InputKeyboardOnly")) };
+
+        // WASD is four actions on one stick, so the same cap shows once.
+        static List<GuideKeyPart> WithoutRepeats(List<GuideKeyPart> parts)
+        {
+            var kept = new List<GuideKeyPart>();
+            string lastCap = null;
+            foreach (GuideKeyPart part in parts)
+            {
+                if (part.kind == GuideKeyPartKind.Keycap)
+                {
+                    if (part.text == lastCap)
+                    {
+                        if (kept.Count > 0 && kept[kept.Count - 1].kind != GuideKeyPartKind.Keycap) kept.RemoveAt(kept.Count - 1);
+                        continue;
+                    }
+                    lastCap = part.text;
+                }
+                kept.Add(part);
+            }
+            return kept;
         }
 
         static string Localize(string key)
@@ -93,7 +147,8 @@ namespace TJ
                     return;
                 }
                 if (binding.isPartOfComposite) continue;
-                // Index 0 is the keyboard and mouse binding; the rebind screen edits the same one.
+                if (binding.groups != null && binding.groups.Contains(InputGlyphs.GamepadGroup)) continue;
+                // The first keyboard binding is the one the rebind screen edits.
                 AddPath(parts, binding.effectivePath);
                 return;
             }

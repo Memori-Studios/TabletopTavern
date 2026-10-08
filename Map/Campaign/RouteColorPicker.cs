@@ -29,7 +29,7 @@ namespace TJ.Map
         private void Awake()
         {
             titleText.text = LocalizationManager.Instance.GetText("RouteColor");
-            hintText.text = LocalizationManager.Instance.GetText("RouteMarkHint");
+            hintText.text = InputText.Get("RouteMarkHint");
             int count = Mathf.Min(swatches.Length, RouteMarkColors.Palette.Length);
             if (count != RouteMarkColors.Palette.Length) Debug.LogError($"[RouteColorPicker] {swatches.Length} swatches for {RouteMarkColors.Palette.Length} colours");
             for (int i = 0; i < count; i++)

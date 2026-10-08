@@ -114,9 +114,30 @@ namespace TJ.MainMenu
             }
 
             budgetLabelText.text = T("WarbandRecruitBudget");
-            budgetValueText.text = $"<color={(gold < 0 ? ColorData.Error : ColorData.Gold)}>{gold}</color> <sprite name=GoldSprite>";
+            string colour = gold < 0 ? ColorData.Error : ColorData.Gold;
+            string BudgetText(int amount) => $"<color={colour}>{amount}</color> <sprite name=GoldSprite>";
+            // Counts alongside the purse while the list is on show; the purse plays the coin ticks.
+            if (budgetCount != null) { StopCoroutine(budgetCount); budgetCount = null; }
+            if (isActiveAndEnabled && shownGold != int.MinValue && shownGold != gold)
+                budgetCount = StartCoroutine(Memori.UI.UIJuice.CountTo(budgetValueText, shownGold, gold, 0.25f, BudgetText));
+            else budgetValueText.text = BudgetText(gold);
+            shownGold = gold;
             sizeColumnText.text = T("WarbandRecruitColSize");
             costColumnText.text = T("Cost");
+        }
+
+        private int shownGold = int.MinValue;
+        private Coroutine budgetCount;
+
+        // A rebuilt list shows its numbers as they are; only later changes count.
+        private void OnDisable() => shownGold = int.MinValue;
+
+        /// <summary>The top row's + that can take a squad, for the first key press on the warband screen.</summary>
+        public UnityEngine.UI.Selectable FirstAddButton()
+        {
+            foreach (WarbandRecruitRow row in rows)
+                if (row != null && row.isActiveAndEnabled && row.AddButton.IsInteractable()) return row.AddButton;
+            return null;
         }
 
         /// <summary>Removes the most recently added squad of this unit, so starting squads go last.</summary>

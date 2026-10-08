@@ -41,12 +41,15 @@ namespace TJ
         }
 
         public bool StartBattleRequested { get; private set; }
+        // Lucky Charm (Golden Saru) lifts this to 2 for the roll; Ambush still forces a 1.
+        private int lowestRoll = 1;
 
         public async Task<int> ShowAndRoll()
         {
             CampaignSaveData saveData = SaveDataHandler.Load();
             // Ambush loses every roll; it comes first so an armed Fateshine Elixir is kept, not spent.
             if (saveData.HasOrdeal(OrdealId.Ambush)) return await AutoRoll(1);
+            lowestRoll = CampaignSaveManager.LowestInitiativeRoll(saveData);
             bool armed = saveData.fateshineElixirArmed;
             bool hasFateshineElixir = saveData.consumables.Contains(ConsumableEnum.FateshineElixir);
 
@@ -91,12 +94,13 @@ namespace TJ
             }
             _dice.StopPrespin();
 
-            int result = useElixir ? 6 : Random.Range(1, 7);
+            int result = useElixir ? 6 : Random.Range(lowestRoll, 7);
             if (useElixir)
             {
                 CampaignSaveData elixirSaveData = SaveDataHandler.Load();
                 elixirSaveData.consumables.Remove(ConsumableEnum.FateshineElixir);
                 elixirSaveData.RunStats.consumableUsed = true;
+                elixirSaveData.RunStats.consumablesUsed++;
                 SaveDataHandler.SaveCampaign(elixirSaveData);
                 IAudioRequester.Instance.PlaySFX(SFXData.Drink);
             }
@@ -132,6 +136,7 @@ namespace TJ
                         CampaignSaveData rewindSaveData = SaveDataHandler.Load();
                         rewindSaveData.consumables.Remove(ConsumableEnum.Rewind);
                         rewindSaveData.RunStats.consumableUsed = true;
+                        rewindSaveData.RunStats.consumablesUsed++;
                         SaveDataHandler.SaveCampaign(rewindSaveData);
                         IAudioRequester.Instance.PlaySFX(SFXData.Drink);
                         choiceTCS.TrySetResult(false);
@@ -150,7 +155,7 @@ namespace TJ
                 }
 
                 if (reroll)
-                    result = Random.Range(1, 7);
+                    result = Random.Range(lowestRoll, 7);
             }
 
             if (!StartBattleRequested)
@@ -194,7 +199,7 @@ namespace TJ
             if (_loseText    != null) _loseText.color    = _dimColor;
             if (_loseSubText != null) _loseSubText.color = _dimColor;
 
-            int result = forcedResult > 0 ? forcedResult : Random.Range(1, 7);
+            int result = forcedResult > 0 ? forcedResult : Random.Range(lowestRoll, 7);
             await AnimateRoll(result);
 
             string resultSFX = result switch

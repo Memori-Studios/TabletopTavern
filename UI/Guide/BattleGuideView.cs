@@ -157,6 +157,9 @@ namespace TJ
                 localization.OnLocalizedStringsLoaded -= OnStringsLoaded;
                 localization.OnLocalizedStringsLoaded += OnStringsLoaded;
             }
+            // Key rows show the keyboard or the pad, whichever the player used last.
+            Memori.Input.InputDevices.Changed -= OnStringsLoaded;
+            Memori.Input.InputDevices.Changed += OnStringsLoaded;
             if (!built || dirtyText) Rebuild();
             else if (mode == Mode.Browse) ShowTopic(currentIndex);
         }
@@ -170,6 +173,7 @@ namespace TJ
         void OnDestroy()
         {
             if (LocalizationManager.HasInstance) LocalizationManager.Instance.OnLocalizedStringsLoaded -= OnStringsLoaded;
+            Memori.Input.InputDevices.Changed -= OnStringsLoaded;
         }
 
         void OnStringsLoaded()

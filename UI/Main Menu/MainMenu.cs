@@ -74,6 +74,9 @@ namespace TJ.MainMenu
         [SerializeField] private MemoriCanvasGroup demoSaveImportCanvasGroup;
         [SerializeField] private Button keepDemoSaveButton, deleteDemoSaveButton;
 
+        [Header("Steam Deck Feedback")]
+        [SerializeField] private SteamDeckFeedbackPopup steamDeckFeedbackPopup;
+
         [Header("Localization")]
         [SerializeField] private Button openLocalizationPanelButton;
         [SerializeField] private AssetReferenceGameObject localizationPanelRef;
@@ -200,6 +203,8 @@ namespace TJ.MainMenu
             else
             {
                 FadeInTitle();
+                // A new player's first boot already has the roadmap pop-up.
+                steamDeckFeedbackPopup.TryShow();
             }
 
             // if (PlayerPrefs.GetInt(DEMO_SAVE_PROMPT_KEY, 0) == 0 && SaveDataHandler.PlayerSaveDataExists())
@@ -390,8 +395,14 @@ namespace TJ.MainMenu
         }
         private void OnSettingsPanelToggled(bool isOpen)
         {
-            if (SceneHandler.Instance.CurrentGameState == GameStateEnum.MainMenu)
-                ReturnToMainMenu();
+            if (SceneHandler.Instance.CurrentGameState != GameStateEnum.MainMenu) return;
+            // Esc in the main menu arrives here; it closes the Steam Deck popup before anything else.
+            if (isOpen && steamDeckFeedbackPopup.IsOpen)
+            {
+                steamDeckFeedbackPopup.Close();
+                return;
+            }
+            ReturnToMainMenu();
         }
         /// <summary>
         /// Right-click is a "back" gesture anywhere in the menu, the mouse twin of Esc (which
@@ -409,6 +420,11 @@ namespace TJ.MainMenu
             if (SettingsManager.Instance.SettingsPanelOpen)
             {
                 SettingsManager.Instance.CloseSettingsPanel();
+                return;
+            }
+            if (steamDeckFeedbackPopup.IsOpen)
+            {
+                steamDeckFeedbackPopup.Close();
                 return;
             }
             if (abandonRunConfirmationCanvasGroup.alpha == 1)

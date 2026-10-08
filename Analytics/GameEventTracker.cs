@@ -139,7 +139,14 @@ namespace TabletopTavern.Analytics
                 RunEnded(run, result, endReason, renown);
             else if (run.bookNumber > TabletopTavernConstants.FINAL_STORY_ACT)
             {
-                TryRun("endlessEnded", () => AnalyticsService.Record("endlessEnded", RunEndProps(run, result, endReason, renown)));
+                TryRun("endlessEnded", () =>
+                {
+                    Dictionary<string, object> p = RunEndProps(run, result, endReason, renown);
+                    p["marchBattlesWon"] = run.marchBattlesWon;
+                    // Only a lost battle ends the March at a host; an abandon has none.
+                    p["fellToRace"] = result == RunResult.Loss ? run.battleFieldPreset.race.ToString() : null;
+                    AnalyticsService.Record("endlessEnded", p);
+                });
                 if (run.difficultyLevel == TT_Difficulty.Godking && run.marchBattlesWon > 0)
                     LeaderboardClient.Submit(run.RunId, LeaderboardClient.KindEndless);
             }
@@ -199,6 +206,10 @@ namespace TabletopTavern.Analytics
                 p["spellDamage"] = report.SpellDamage;
                 p["armyLossTriggered"] = report.ArmyLossTriggered;
                 p["pauseUsed"] = report.PauseUsed;
+                // The battle counter only moves when the layer completes, so here it still names this battle.
+                bool march = run.InMarch;
+                p["marchBattle"] = march ? (object)MarchRules.CurrentBattle(run) : null;
+                p["twists"] = march ? Names(run.activeTwists) : null;
                 p["p"] = Squads(report.Player, true);
                 p["e"] = Squads(report.Enemy, false);
                 p["balanceRev"] = RemoteBalance.Revision;

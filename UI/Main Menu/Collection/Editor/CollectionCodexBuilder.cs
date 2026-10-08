@@ -56,8 +56,8 @@ namespace TJ.MainMenu.EditorTools
 
         static TMP_FontAsset displayDrop, display, body;
         static Sprite panel, shadow, keyCap, fadeRule, roundedFill, roundedOutline, edgeFade, lockIcon, arrow, gearIcon, potionIcon;
-        static Sprite circle, questsIcon, runsIcon, boardsIcon, fleur, lineLeft, lineRight, flatShadow, crestBrackets;
-        static Sprite closeFill, closeFrame, closeKeyFrame;
+        static Sprite circle, questsIcon, runsIcon, boardsIcon, profileIcon, fleur, lineLeft, lineRight, flatShadow, crestBrackets;
+        static Sprite closeFill, closeFrame, closeKeyFrame, diamondFrame;
         static QuestCatalogSO questCatalog;
         static GameObject basicBackground, ring, settingStepper;
 
@@ -91,11 +91,13 @@ namespace TJ.MainMenu.EditorTools
             questsIcon = Load<Sprite>("Assets/Art/Icons/Map/Event.png");
             runsIcon = Load<Sprite>("Assets/Art/Icons/Map/EndTurn.png");
             boardsIcon = Load<Sprite>("Assets/Art/Icons/Stats/Leadership.png");
+            profileIcon = Load<Sprite>("Assets/Art/Icons/Achievements/CrownClean.png");
             fleur = Load<Sprite>("Assets/ImportedPackages/InterfaceFantasyWarriorHUD/Sprites/HUD/SPR_HUD_FantasyWarrior_Symbol_FleurDeLis01.png");
             lineLeft = Load<Sprite>("Assets/ImportedPackages/InterfaceFantasyWarriorHUD/Sprites/HUD/SPR_HUD_FantasyWarrior_Line03_Left.png");
             lineRight = Load<Sprite>("Assets/ImportedPackages/InterfaceFantasyWarriorHUD/Sprites/HUD/SPR_HUD_FantasyWarrior_Line03_Right.png");
             closeFill = Load<Sprite>("Assets/ImportedPackages/InterfaceFantasyWarriorHUD/Sprites/HUD/SPR_HUD_FantasyWarrior_Gradient_Vertical_Solid01.png");
             closeFrame = Load<Sprite>("Assets/ImportedPackages/InterfaceFantasyWarriorHUD/Sprites/FantasyWarrior/SPR_FantasyWarrior_Frame_Box_Small03.png");
+            diamondFrame = Load<Sprite>("Assets/Art/Icons/UI/SPR_FantasyWarrior_Frame_Box21_Greyscale.png");
             closeKeyFrame = Load<Sprite>("Assets/ImportedPackages/InterfaceFantasyWarriorHUD/Sprites/HUD/SPR_HUD_FantasyWarrior_Frame_Box_Medium01.png");
             questCatalog = Load<QuestCatalogSO>("Assets/Data/SOs/Achievements/QuestCatalog.asset");
         }
@@ -313,6 +315,7 @@ namespace TJ.MainMenu.EditorTools
             ("Run Row", null, RunRowPart),
             ("Board Row", null, BoardRowPart),
             ("Filter Toggle", null, FilterTogglePart),
+            ("Battle Row", null, BattleRowPart),
         };
 
         static string PartPath(string name) => $"{PartFolder}/{name}.prefab";
@@ -913,8 +916,10 @@ namespace TJ.MainMenu.EditorTools
             TMP_Text capText = Text("Text", cap, body, 13f, Cream, "Esc");
             capText.alignment = TextAlignmentOptions.Center;
             capText.enableAutoSizing = true;
-            capText.fontSizeMin = 10f;
+            capText.fontSizeMin = 13f;
             capText.fontSizeMax = 13f;
+            // Esc on the keyboard, B on a pad.
+            capText.gameObject.AddComponent<Memori.Input.InputPromptLabel>();
             // A child of the text, so the key frame follows the label's width.
             Image capFrame = Img(Rect("frame_1", capText.transform), closeKeyFrame, Color.white, Image.Type.Sliced, 2f);
             Anchor(capFrame.rectTransform, Vector2.zero, Vector2.one, new Vector2(-8f, -4f), new Vector2(8f, -1f));
@@ -1094,6 +1099,40 @@ namespace TJ.MainMenu.EditorTools
             so.ApplyModifiedPropertiesWithoutUndo();
         }
 
+        // One battle in the Run History card's log. Fixed height, so the card does not jump as rows fill.
+        static void BattleRowPart(GameObject go)
+        {
+            RectTransform rect = (RectTransform)go.transform;
+            Fixed(go, -1f, 60f);
+            Image background = Img(Stretch(Rect("Background", rect)), roundedFill, Color.clear, Image.Type.Sliced, 76f / 4f);
+            background.gameObject.AddComponent<LayoutElement>().ignoreLayout = true;
+            HLayout(rect, 10f, TextAnchor.MiddleLeft, new RectOffset(8, 12, 4, 4));
+            TMP_Text number = Text("Number", rect, body, 14f, Muted, "1");
+            number.alignment = TextAlignmentOptions.Center;
+            number.fontStyle = FontStyles.Bold;
+            Fixed(number.gameObject, 24f, -1f);
+            RectTransform text = Rect("Text", rect);
+            VLayout(text, 1f, new RectOffset()).childAlignment = TextAnchor.MiddleLeft;
+            Flexible(text.gameObject, 1f).minWidth = 0f;
+            TMP_Text title = Text("Title", text, displayDrop, 16f, Cream, "I · Horde");
+            title.overflowMode = TextOverflowModes.Ellipsis;
+            // One line: a wrapped second line left the title too little height to draw at all.
+            TMP_Text meta = Text("Meta", text, body, 13f, Sub, "0 slain · 0 lost · Fought");
+            meta.overflowMode = TextOverflowModes.Ellipsis;
+            TMP_Text outcome = Text("Outcome", rect, displayDrop, 15f, Cream, "Victory");
+            outcome.alignment = TextAlignmentOptions.MidlineRight;
+            outcome.overflowMode = TextOverflowModes.Ellipsis;
+            Fixed(outcome.gameObject, 84f, -1f);
+            RecordsBattleRow row = go.AddComponent<RecordsBattleRow>();
+            var so = new SerializedObject(row);
+            Ref(so, "background", background);
+            Ref(so, "number", number);
+            Ref(so, "title", title);
+            Ref(so, "meta", meta);
+            Ref(so, "outcome", outcome);
+            so.ApplyModifiedPropertiesWithoutUndo();
+        }
+
         static Button Segment(RectTransform parent, string name, out Image fill, out TMP_Text label)
         {
             RectTransform segment = Rect(name, parent);
@@ -1235,6 +1274,10 @@ namespace TJ.MainMenu.EditorTools
             marker.rectTransform.localEulerAngles = new Vector3(0f, 0f, 45f);
             TMP_Text pageTitle = Text("Title", headRow, displayDrop, 34f, Cream, "Gear");
             pageTitle.alignment = TextAlignmentOptions.BaselineLeft;
+            // The row's other labels hold their width, so on a narrow canvas the title shrinks instead of being overrun.
+            pageTitle.enableAutoSizing = true;
+            pageTitle.fontSizeMin = 22f;
+            pageTitle.fontSizeMax = 34f;
             TMP_Text pageSubtitle = Text("Subtitle", headRow, body, 15f, Sub, "0 of 0 found");
             pageSubtitle.alignment = TextAlignmentOptions.BaselineLeft;
             RectTransform tabs = Rect("Tabs", headRow);
@@ -1356,6 +1399,7 @@ namespace TJ.MainMenu.EditorTools
             Ref(so, "questsRailIcon", questsIcon);
             Ref(so, "runsRailIcon", runsIcon);
             Ref(so, "boardsRailIcon", boardsIcon);
+            Ref(so, "profileRailIcon", profileIcon);
             Ref(so, "records", records);
             Ref(so, "headerMarker", marker);
             Ref(so, "headerTitle", pageTitle);
@@ -1434,7 +1478,8 @@ namespace TJ.MainMenu.EditorTools
             Image glow = Img(Rect("Glow", mount), flatShadow, A(Gold, 0.3f), Image.Type.Sliced, 1f);
             Centre(glow.rectTransform, 176f, 176f);
             glow.rectTransform.localEulerAngles = new Vector3(0f, 0f, 45f);
-            Image diamond = Img(Rect("Diamond", mount), panel, Color.white, Image.Type.Sliced, 1f);
+            // TJ's frame for the item mount, copied from his hand edit so a rebuild keeps it.
+            Image diamond = Img(Rect("Diamond", mount), diamondFrame, Color.white, Image.Type.Sliced, 4f);
             Centre(diamond.rectTransform, 150f, 150f);
             diamond.rectTransform.localEulerAngles = new Vector3(0f, 0f, 45f);
             Image itemIcon = Img(Rect("Icon", mount), null, Color.white);
@@ -1744,6 +1789,49 @@ namespace TJ.MainMenu.EditorTools
             Ref(so, "boardGapTemplate", gap);
             Ref(so, "boardStatus", boardStatus);
 
+            // Profile page
+            ScrollRect profileScroll = Scroll(root, "Profile Page", out RectTransform profileContent);
+            Stretch((RectTransform)profileScroll.transform, 0f, 472f, 0f, 0f);
+            VLayout(profileContent, 14f, new RectOffset(0, 20, 4, 24)).childForceExpandWidth = true;
+            TMP_Text profileEmpty = Text("Empty", profileContent, display, 19f, Sub, "Finish a run to start your profile.");
+            Wrap(profileEmpty, TextAlignmentOptions.Top);
+            profileEmpty.margin = new Vector4(0f, 60f, 0f, 0f);
+            RectTransform profileBody = Rect("Body", profileContent);
+            VLayout(profileBody, 14f, new RectOffset()).childForceExpandWidth = true;
+            var profileValues = new List<TMP_Text>();
+            var profileLabels = new List<TMP_Text>();
+            for (int i = 0; i < 3; i++)
+            {
+                Strip(profileBody, 3, out TMP_Text[] values, out TMP_Text[] labels);
+                profileValues.AddRange(values);
+                profileLabels.AddRange(labels);
+            }
+            TMP_Text sackedLabel = SectionLabel(profileBody, "Towns sacked");
+            Strip(profileBody, 3, out TMP_Text[] sackValues, out TMP_Text[] sackLabels);
+            profileValues.AddRange(sackValues);
+            profileLabels.AddRange(sackLabels);
+            SideGroup(profileBody, "Favourites", out TMP_Text favouritesLabel, out RectTransform favouritesList);
+            RectTransform deadliest = SideGroup(profileBody, "Deadliest", out TMP_Text deadliestLabel, out RectTransform deadliestList);
+            RectTransform bests = SideGroup(profileBody, "Bests", out TMP_Text bestsLabel, out RectTransform bestsList);
+            SideGroup(profileBody, "Commanders", out TMP_Text commandersLabel, out RectTransform commandersList);
+            Ref(so, "profilePage", profileScroll.gameObject);
+            Ref(so, "profileScroll", profileScroll);
+            Ref(so, "profileBody", profileBody.gameObject);
+            Ref(so, "profileEmpty", profileEmpty);
+            Refs(so, "profileValues", profileValues.ToArray<Object>());
+            Refs(so, "profileLabels", profileLabels.ToArray<Object>());
+            Ref(so, "sackedLabel", sackedLabel);
+            Ref(so, "favouritesLabel", favouritesLabel);
+            Ref(so, "favouritesList", favouritesList);
+            Ref(so, "deadliestGroup", deadliest.gameObject);
+            Ref(so, "deadliestLabel", deadliestLabel);
+            Ref(so, "deadliestList", deadliestList);
+            Ref(so, "bestsGroup", bests.gameObject);
+            Ref(so, "bestsLabel", bestsLabel);
+            Ref(so, "bestsList", bestsList);
+            Ref(so, "commandersLabel", commandersLabel);
+            Ref(so, "commandersList", commandersList);
+
             // Side panel, in the detail panel's frame and place
             RectTransform frame = Rect("Side", root);
             Anchor(frame, new Vector2(1f, 0f), new Vector2(1f, 1f), new Vector2(-440f, 0f), Vector2.zero);
@@ -1759,6 +1847,7 @@ namespace TJ.MainMenu.EditorTools
             QuestSide(sideContent, so);
             RunSide(sideContent, so);
             BoardSide(sideContent, so);
+            ProfileSide(sideContent, so);
 
             so.ApplyModifiedPropertiesWithoutUndo();
             return records;
@@ -1855,17 +1944,37 @@ namespace TJ.MainMenu.EditorTools
             TMP_Text name = Text("Name", words, displayDrop, 26f, Gold, "Hero");
             Wrap(name, TextAlignmentOptions.TopLeft);
             TMP_Text line = Text("Line", words, body, 16f, Parchment, "Difficulty · Outcome");
-            Strip(view, 3, out TMP_Text[] firstValues, out TMP_Text[] firstLabels);
-            Strip(view, 3, out TMP_Text[] secondValues, out TMP_Text[] secondLabels);
+            var cardValues = new List<TMP_Text>();
+            var cardLabels = new List<TMP_Text>();
+            for (int i = 0; i < 4; i++)
+            {
+                Strip(view, 3, out TMP_Text[] values, out TMP_Text[] labels);
+                cardValues.AddRange(values);
+                cardLabels.AddRange(labels);
+            }
 
             RectTransform army = Rect("Army", view);
             VLayout(army, 8f, new RectOffset()).childForceExpandWidth = true;
             TMP_Text armyLabel = SectionLabel(army, "Army");
+            RectTransform actRow = Rect("Act Tabs", army);
+            HLayout(actRow, 18f, TextAnchor.MiddleLeft, new RectOffset()).childForceExpandHeight = true;
+            Fixed(actRow.gameObject, -1f, 30f);
+            var actTabs = new List<Object>();
+            foreach (string act in new[] { "Act I", "Act II", "Act III", "End" })
+            {
+                CollectionTab tab = PageTab(actRow, act);
+                Child<TMP_Text>(tab.transform, "Label").fontSize = 17f;
+                actTabs.Add(tab);
+            }
             RectTransform armyGrid = Grid(army, "Grid", 64f, 72f, 8f, 5);
             RectTransform reserve = Rect("Reserve", view);
             VLayout(reserve, 8f, new RectOffset()).childForceExpandWidth = true;
             TMP_Text reserveLabel = SectionLabel(reserve, "Reserve");
             RectTransform reserveGrid = Grid(reserve, "Grid", 64f, 72f, 8f, 5);
+            RectTransform fallen = Rect("Fallen", view);
+            VLayout(fallen, 8f, new RectOffset()).childForceExpandWidth = true;
+            TMP_Text fallenLabel = SectionLabel(fallen, "Fallen");
+            RectTransform fallenGrid = Grid(fallen, "Grid", 64f, 72f, 8f, 5);
 
             RectTransform kit = Rect("Kit", view);
             HLayout(kit, 26f, TextAnchor.UpperLeft, new RectOffset()).childForceExpandWidth = false;
@@ -1878,13 +1987,33 @@ namespace TJ.MainMenu.EditorTools
             TMP_Text spellsLabel = SectionLabel(spells, "Spells");
             RectTransform spellsGrid = Grid(spells, "Grid", 52f, 52f, 6f, 3);
 
+            RectTransform details = SideGroup(view, "Details", out TMP_Text detailsLabel, out RectTransform detailsList);
+            TMP_Text detailsText = Text("Text", detailsList, body, 15f, Parchment, "Starting gold  60");
+            Wrap(detailsText, TextAlignmentOptions.TopLeft);
+            detailsText.lineSpacing = 6f;
+            RectTransform battles = SideGroup(view, "Battles", out TMP_Text battlesLabel, out RectTransform battleList);
+            VerticalLayoutGroup battleLayout = battleList.GetComponent<VerticalLayoutGroup>();
+            battleLayout.spacing = 2f;
+
             Ref(so, "runSide", view.gameObject);
             Ref(so, "cardPortrait", portrait);
             Ref(so, "cardEyebrow", eyebrow);
             Ref(so, "cardName", name);
             Ref(so, "cardLine", line);
-            Refs(so, "cardValues", firstValues.Concat(secondValues).ToArray<Object>());
-            Refs(so, "cardLabels", firstLabels.Concat(secondLabels).ToArray<Object>());
+            Refs(so, "cardValues", cardValues.ToArray<Object>());
+            Refs(so, "cardLabels", cardLabels.ToArray<Object>());
+            Ref(so, "actTabsRow", actRow.gameObject);
+            Refs(so, "actTabs", actTabs.ToArray());
+            Ref(so, "fallenGroup", fallen.gameObject);
+            Ref(so, "fallenLabel", fallenLabel);
+            Ref(so, "fallenGrid", fallenGrid);
+            Ref(so, "detailsGroup", details.gameObject);
+            Ref(so, "detailsLabel", detailsLabel);
+            Ref(so, "detailsText", detailsText);
+            Ref(so, "battlesGroup", battles.gameObject);
+            Ref(so, "battlesLabel", battlesLabel);
+            Ref(so, "battleList", battleList);
+            Ref(so, "battleRowTemplate", PartAsset<RecordsBattleRow>("Battle Row"));
             Ref(so, "armyLabel", armyLabel);
             Ref(so, "armyGrid", armyGrid);
             Ref(so, "reserveGroup", reserve.gameObject);
@@ -1928,6 +2057,34 @@ namespace TJ.MainMenu.EditorTools
             Ref(so, "yoursLabel", yoursLabel);
             Ref(so, "yoursNote", yoursNote);
             Ref(so, "yoursList", yoursList);
+        }
+
+        static void ProfileSide(RectTransform parent, SerializedObject so)
+        {
+            RectTransform view = View(parent, "Profile View", 14f, TextAnchor.UpperLeft);
+            RectTransform head = Rect("Head", view);
+            HLayout(head, 16f, TextAnchor.MiddleLeft, new RectOffset()).childForceExpandWidth = false;
+            Portrait(head, 76f, out Image portrait);
+            RectTransform words = Rect("Words", head);
+            VLayout(words, 2f, new RectOffset()).childAlignment = TextAnchor.MiddleLeft;
+            Flexible(words.gameObject, 1f).minWidth = 0f;
+            TMP_Text eyebrow = SectionLabel(words, "Favourite commander");
+            eyebrow.color = Sub;
+            TMP_Text name = Text("Name", words, displayDrop, 26f, Gold, "Hero");
+            Wrap(name, TextAlignmentOptions.TopLeft);
+            TMP_Text line = Text("Line", words, body, 16f, Parchment, "0 runs · 0 wins");
+            Strip(view, 2, out TMP_Text[] values, out TMP_Text[] labels);
+            TMP_Text note = Text("Note", view, body, 13f, Muted, "Counted from your recorded runs.");
+            Wrap(note, TextAlignmentOptions.TopLeft);
+
+            Ref(so, "profileSide", view.gameObject);
+            Ref(so, "profilePortrait", portrait);
+            Ref(so, "profileEyebrow", eyebrow);
+            Ref(so, "profileName", name);
+            Ref(so, "profileLine", line);
+            Refs(so, "profileSideValues", values);
+            Refs(so, "profileSideLabels", labels);
+            Ref(so, "profileNote", note);
         }
 
         static RectTransform Grid(Transform parent, string name, float width, float height, float spacing, int columns)

@@ -205,7 +205,7 @@ namespace TJ
         {
             // A clicked control keeps UI focus, and then Space or the camera keys would act on it.
             if (rootGroup.interactable && EventSystem.current != null && EventSystem.current.currentSelectedGameObject != null
-                && !UnityEngine.Input.GetMouseButton(0))
+                && !global::Memori.Input.GameCursor.GetButton(0))
                 EventSystem.current.SetSelectedGameObject(null);
         }
 

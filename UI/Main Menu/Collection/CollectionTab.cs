@@ -20,6 +20,7 @@ namespace TJ.MainMenu
 
         public Button Button => button;
         public Image Portrait => portrait;
+        public Graphic ActiveMark => activeMark;
 
         public void SetLabel(string text) => label.text = text;
 

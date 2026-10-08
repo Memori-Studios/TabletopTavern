@@ -42,6 +42,7 @@ namespace TJ.MainMenu
         [SerializeField] private Sprite questsRailIcon;
         [SerializeField] private Sprite runsRailIcon;
         [SerializeField] private Sprite boardsRailIcon;
+        [SerializeField] private Sprite profileRailIcon;
 
         [Header("Page header")]
         [SerializeField] private Image headerMarker;
@@ -124,8 +125,8 @@ namespace TJ.MainMenu
         private readonly List<CollectionTile> _gearTiles = new();
         private readonly List<CollectionTile> _potionTiles = new();
         private CollectionRailRow _gearRow, _potionRow;
-        // Run History and Leaderboards are null outside SPELLS builds, where Records holds only Quests.
-        private CollectionRailRow _questsRow, _runsRow, _boardsRow;
+        // Run History, Leaderboards and Profile are null outside SPELLS builds, where Records holds only Quests.
+        private CollectionRailRow _questsRow, _runsRow, _boardsRow, _profileRow;
         private CollectionRecords.Page _recordsPage;
         // -1 until the page is first opened, which then picks the first entry the player owns.
         private int _gearPinned = -1, _potionPinned = -1;
@@ -294,6 +295,7 @@ namespace TJ.MainMenu
             {
                 _runsRow = Row(T("runHistoryButton"), runsRailIcon, Color.white, false, () => ShowRecords(CollectionRecords.Page.Runs));
                 _boardsRow = Row(T("leaderboardButton"), boardsRailIcon, Color.white, false, () => ShowRecords(CollectionRecords.Page.Boards));
+                _profileRow = Row(T("profileButton"), profileRailIcon, Color.white, false, () => ShowRecords(CollectionRecords.Page.Profile));
             }
         }
 
@@ -364,7 +366,7 @@ namespace TJ.MainMenu
             unitsTab.SetLabel(T("Units"));
             heroesTab.SetLabel(T("Heroes"));
             loreTab.SetLabel(T("Lore"));
-            stageHint.text = T("CollectionDragToTurn");
+            stageHint.text = InputText.Get("CollectionDragToTurn");
         }
 
         private void BuildItemGroups(Transform container, List<ItemInfo> items, List<CollectionTile> tiles)
@@ -483,6 +485,7 @@ namespace TJ.MainMenu
             _questsRow.SetActive(isRecords && _recordsPage == CollectionRecords.Page.Quests);
             if (_runsRow != null) _runsRow.SetActive(isRecords && _recordsPage == CollectionRecords.Page.Runs);
             if (_boardsRow != null) _boardsRow.SetActive(isRecords && _recordsPage == CollectionRecords.Page.Boards);
+            if (_profileRow != null) _profileRow.SetActive(isRecords && _recordsPage == CollectionRecords.Page.Profile);
             gridRoot.SetActive(!isFaction && !isRecords);
             gearGroups.gameObject.SetActive(view == View.Gear);
             potionGroups.gameObject.SetActive(view == View.Potions);
@@ -514,6 +517,7 @@ namespace TJ.MainMenu
             EnsureGearBuilt();
             headerTitle.text = T("CollectionGear");
             headerSubtitle.text = FoundCount(_gear.Count(g => _gearFound.Contains((int)g)), _gear.Length);
+            PinWidth(headerSubtitle);
             Pin(_gearPinned);
         }
 
@@ -523,6 +527,7 @@ namespace TJ.MainMenu
             EnsurePotionsBuilt();
             headerTitle.text = T("CollectionPotions");
             headerSubtitle.text = FoundCount(_potions.Count(p => _potionFound.Contains((int)p)), _potions.Length);
+            PinWidth(headerSubtitle);
             Pin(_potionPinned);
         }
 
@@ -540,12 +545,15 @@ namespace TJ.MainMenu
             loreTab.SetActive(tab == FactionTab.Lore);
 
             string passive = T(faction.Race + "PassiveName");
-            battleEffectText.text = $"<size=80%><uppercase>{T("BattleEffectLabel")}</uppercase></size>  <color=#E9C06A>{passive}</color>";
+            battleEffectText.text = $"<uppercase>{T("BattleEffectLabel")}</uppercase>  <color=#E9C06A>{passive}</color>";
             battleEffectTooltip.SetUpToolTip(passive, KeywordText.ForTooltip(RacePassiveInfo.GetDescription(faction.Race)));
             string campaign = T(faction.Race + "BonusDescription");
             CollectionEffectBlock.Split(campaign, out string campaignName, out string campaignBody);
-            campaignEffectText.text = $"<size=80%><uppercase>{T("CampaignEffectLabel")}</uppercase></size>  <color=#E9C06A>{campaignName}</color>";
+            campaignEffectText.text = $"<uppercase>{T("CampaignEffectLabel")}</uppercase>  <color=#E9C06A>{campaignName}</color>";
             campaignEffectTooltip.SetUpToolTip(campaignName, KeywordText.ForTooltip(campaignBody));
+            PinWidth(headerSubtitle);
+            PinWidth(battleEffectText);
+            PinWidth(campaignEffectText);
 
             stageRoot.SetActive(tab != FactionTab.Lore);
             loreRoot.SetActive(tab == FactionTab.Lore);
@@ -832,7 +840,7 @@ namespace TJ.MainMenu
         private void StepPage(int direction)
         {
             IAudioRequester.Instance.PlaySFX(SFXData.ButtonClick);
-            int recordPages = _boardsRow != null ? 3 : 1;
+            int recordPages = _profileRow != null ? 4 : 1;
             int count = _factions.Length + 2 + recordPages;
             int current = _view switch
             {
@@ -937,6 +945,11 @@ namespace TJ.MainMenu
                 _boardsRow.SetCount(string.Empty);
                 _boardsRow.SetNew(false);
             }
+            if (_profileRow != null)
+            {
+                _profileRow.SetCount(string.Empty);
+                _profileRow.SetNew(false);
+            }
             RefreshNewDots();
         }
 
@@ -947,6 +960,14 @@ namespace TJ.MainMenu
             _potionRow.SetNew(_potionFound.Any(id => !_potionSeen.Contains(id)));
             foreach (Faction faction in _factions)
                 faction.Row.SetNew(faction.Units.Any(u => _unitFound.Contains(u) && !_unitSeen.Contains(u)));
+        }
+
+        // A squeezed header row would overrun these labels; only the title gives way, by auto-sizing.
+        private static void PinWidth(TMP_Text label)
+        {
+            LayoutElement element = label.GetComponent<LayoutElement>();
+            if (element == null) element = label.gameObject.AddComponent<LayoutElement>();
+            element.minWidth = label.GetPreferredValues(label.text).x;
         }
 
         private static string FoundCount(int found, int total) => string.Format(T("CollectionFoundCount"), found, total);

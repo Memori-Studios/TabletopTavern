@@ -50,7 +50,12 @@ public class GraphicsPanel : MonoBehaviour
     // Index 0 is Unlimited; -1 is Unity's "no cap" value for targetFrameRate
     static readonly int[] FpsLimitValues = { -1, 30, 60, 90, 120, 144, 165, 240 };
 
-    enum HardwareTier { Low, Medium, High, Ultra }
+    enum HardwareTier { Low, Medium, High, Ultra, SteamDeck }
+
+    // Valve tests the Deck handheld at its native panel size.
+    const string SteamDeckResolution = "1280x800";
+    // Raised when the Deck preset changes, so every Deck gets the new defaults once.
+    const string SteamDeckConfiguredKey = "HasConfiguredGraphicsDeck";
 
     // Every control's value as one string; Apply lights up only while this differs from the last applied state.
     string appliedState;
@@ -63,6 +68,7 @@ public class GraphicsPanel : MonoBehaviour
         AutoConfigureGraphics();
         SetHardwareTierLabel();
         SetUpDropdowns();
+        ApplySteamDeckResolutionDefault();
 
         vsyncToggle.isOn = PlayerPrefs.GetInt("VSync", 1) == 1;
         fullscreenToggle.isOn = PlayerPrefs.GetInt("Fullscreen", 1) == 1;
@@ -71,7 +77,7 @@ public class GraphicsPanel : MonoBehaviour
         bloomToggle.isOn = PlayerPrefs.GetInt("Bloom", 1) == 1;
 
         antiAliasingDropdown.value = PlayerPrefs.GetInt("MSAA", 0);
-        resolutionDropdown.value = PlayerPrefs.GetInt("Resolution", resolutionDropdown.options.Count - 1);
+        resolutionDropdown.value = PlayerPrefs.GetInt("Resolution", DefaultResolutionIndex());
         graphicsQualityDropdown.value = PlayerPrefs.GetInt("GraphicsQuality", graphicsQualityDropdown.options.Count - 1);
         refreshRateDropdown.value = PlayerPrefs.GetInt("RefreshRate", refreshRateDropdown.options.Count - 1);
         shadowQualityDropdown.value = PlayerPrefs.GetInt("ShadowQuality", 3);
@@ -120,19 +126,44 @@ public class GraphicsPanel : MonoBehaviour
             ApplyTextureQuality(textureQualityDropdown.value);
             ApplyBloom(bloomToggle.isOn);
         #endif
+        ApplySteamDeckRendering();
     }
 
     private void AutoConfigureGraphics()
     {
-        if (PlayerPrefs.HasKey("HasConfiguredGraphics")) return;
+        bool isDeck = UIScaler.IsSteamDeck;
+        if (PlayerPrefs.HasKey("HasConfiguredGraphics") && (!isDeck || PlayerPrefs.HasKey(SteamDeckConfiguredKey))) return;
 
         ApplyTierDefaults(DetectHardwareTier());
         PlayerPrefs.SetInt("HasConfiguredGraphics", 1);
+        if (isDeck)
+        {
+            PlayerPrefs.DeleteKey("Resolution");
+            PlayerPrefs.SetInt("VSync", 1);
+            PlayerPrefs.SetInt("FPSLimit", 0);
+            PlayerPrefs.SetInt(SteamDeckConfiguredKey, 1);
+        }
         PlayerPrefs.Save();
+    }
+
+    // The largest mode is the default elsewhere; a docked Deck would otherwise render at the TV's size.
+    private int DefaultResolutionIndex()
+    {
+        int last = resolutionDropdown.options.Count - 1;
+        if (!UIScaler.IsSteamDeck) return last;
+        int deck = resolutionDropdown.options.FindIndex(x => x.text == SteamDeckResolution);
+        return deck >= 0 ? deck : last;
+    }
+
+    private void ApplySteamDeckResolutionDefault()
+    {
+        if (UIScaler.IsSteamDeck && !PlayerPrefs.HasKey("Resolution"))
+            PlayerPrefs.SetInt("Resolution", DefaultResolutionIndex());
     }
 
     private HardwareTier DetectHardwareTier()
     {
+        if (UIScaler.IsSteamDeck) return HardwareTier.SteamDeck;
         int vram = SystemInfo.graphicsMemorySize;
         string gpu = SystemInfo.graphicsDeviceName.ToLowerInvariant();
 
@@ -175,6 +206,15 @@ public class GraphicsPanel : MonoBehaviour
                 PlayerPrefs.SetInt("RenderScale",      2); // 100%
                 PlayerPrefs.SetInt("TextureQuality",   0); // Full
                 PlayerPrefs.SetInt("MSAA",             2); // 4x
+                break;
+            case HardwareTier.SteamDeck:
+                PlayerPrefs.SetInt("ShadowQuality",    1); // Low
+                PlayerPrefs.SetInt("AmbientOcclusion", 0); // Off
+                PlayerPrefs.SetInt("Bloom",            0); // Off
+                PlayerPrefs.SetInt("RenderScale",      1); // 75%, upscaled with FSR
+                PlayerPrefs.SetInt("TextureQuality",   0); // Full
+                PlayerPrefs.SetInt("MSAA",             0); // Off
+                PlayerPrefs.SetInt("EnableClothSimulation", 0);
                 break;
             case HardwareTier.Ultra:
                 PlayerPrefs.SetInt("ShadowQuality",    4); // Ultra
@@ -303,7 +343,7 @@ public class GraphicsPanel : MonoBehaviour
         fullscreenToggle.isOn = true;
         fullScreenMode = FullScreenMode.FullScreenWindow;
         fpsToggle.isOn = false;
-        resolutionDropdown.value = resolutionDropdown.options.Count - 1;
+        resolutionDropdown.value = DefaultResolutionIndex();
         refreshRateDropdown.value = refreshRateDropdown.options.Count - 1;
         graphicsQualityDropdown.value = graphicsQualityDropdown.options.Count - 1;
         fpsLimitDropdown.value = 0;
@@ -337,6 +377,7 @@ public class GraphicsPanel : MonoBehaviour
         ApplyRenderScale(renderScaleDropdown.value);
         ApplyTextureQuality(textureQualityDropdown.value);
         ApplyBloom(bloomToggle.isOn);
+        ApplySteamDeckRendering();
 
         resolutionDropdown.RefreshShownValue();
         antiAliasingDropdown.RefreshShownValue();
@@ -466,6 +507,41 @@ public class GraphicsPanel : MonoBehaviour
                 bloom.active = isOn;
         }
     }
+
+    #region Steam Deck rendering
+    // The Deck preset also trims costs the menu has no control for. Asset writes are skipped in the Editor so the asset on disk keeps its values.
+    private void ApplySteamDeckRendering()
+    {
+        if (!UIScaler.IsSteamDeck) return;
+        UnityEngine.SceneManagement.SceneManager.sceneLoaded -= OnSceneLoadedOnDeck;
+        UnityEngine.SceneManagement.SceneManager.sceneLoaded += OnSceneLoadedOnDeck;
+        DowngradeCameraAntiAliasing();
+
+        var urpAsset = GraphicsSettings.defaultRenderPipeline as UniversalRenderPipelineAsset;
+        if (urpAsset == null || Application.isEditor) return;
+        urpAsset.upscalingFilter = UpscalingFilterSelection.FSR;
+    }
+
+    private void OnSceneLoadedOnDeck(UnityEngine.SceneManagement.Scene scene, UnityEngine.SceneManagement.LoadSceneMode mode)
+    {
+        DowngradeCameraAntiAliasing();
+    }
+
+    // SMAA is a full-screen pass the Deck cannot spare in battle; FXAA keeps edges smooth for a fraction of it.
+    private static void DowngradeCameraAntiAliasing()
+    {
+        foreach (UniversalAdditionalCameraData data in FindObjectsByType<UniversalAdditionalCameraData>(FindObjectsInactive.Include, FindObjectsSortMode.None))
+        {
+            if (data.antialiasing == AntialiasingMode.SubpixelMorphologicalAntiAliasing)
+                data.antialiasing = AntialiasingMode.FastApproximateAntialiasing;
+        }
+    }
+
+    private void OnDestroy()
+    {
+        UnityEngine.SceneManagement.SceneManager.sceneLoaded -= OnSceneLoadedOnDeck;
+    }
+    #endregion
 
     // URP reads MSAA from its asset, not QualitySettings.antiAliasing; dropdown indices 0/1/2/3 are 1/2/4/8 samples.
     private void ApplyMsaa(int index)

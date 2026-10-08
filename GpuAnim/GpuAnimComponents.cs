@@ -41,13 +41,6 @@ namespace TabletopTavern.GpuAnim
         public bool Value;
     }
 
-    /// <summary>On a visual baked with the old package: what the legacy bridge last wrote into it, so a value the game left alone is never rewritten.</summary>
-    public struct GpuAnimLegacyState : IComponentData
-    {
-        public int LastSlot;
-        public float LastTransition;
-        public float LastStart;
-    }
 
     /// <summary>How many slots the visual has, so a caller can skip a slot the bake lacks.</summary>
     public struct GpuAnimSlotCount : IComponentData

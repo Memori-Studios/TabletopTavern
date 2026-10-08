@@ -231,9 +231,9 @@ namespace TJ.Engagement
             //remove any unit with a unit index of -1
             List<SquadToLoad> playerArmyList = new();
             if (CampaignManager.Instance.CampaignSaveManager.SaveData.playerArmy == null) return;
-            for (int i = 0; i < CampaignManager.Instance.CampaignSaveManager.SaveData.playerArmy.Length && i < 10; i++)
+            for (int i = 0; i < CampaignManager.Instance.CampaignSaveManager.SaveData.playerArmy.Length; i++)
             {
-                if (CampaignManager.Instance.CampaignSaveManager.SaveData.playerArmy[i].UnitIndex != -1)
+                if (SaveDataHandler.TakesTheField(CampaignManager.Instance.CampaignSaveManager.SaveData.playerArmy[i]))
                 {
                     // Debug.Log($"Adding {CampaignManager.Instance.CampaignSaveManager.SaveData.playerArmy[i].UnitName} to player army");
                     playerArmyList.Add(CampaignManager.Instance.CampaignSaveManager.SaveData.playerArmy[i]);
@@ -508,8 +508,8 @@ namespace TJ.Engagement
         if (CampaignManager.Instance.CampaignSaveManager.SaveData.playerArmy == null) return;
         if (CampaignManager.Instance.CampaignSaveManager.SaveData.enemyArmy == null) return;
         List<SquadToLoad> playerArmyList = new();
-        for (int i = 0; i < CampaignManager.Instance.CampaignSaveManager.SaveData.playerArmy.Length && i < 10; i++) {
-            if(CampaignManager.Instance.CampaignSaveManager.SaveData.playerArmy[i].UnitIndex != -1)
+        for (int i = 0; i < CampaignManager.Instance.CampaignSaveManager.SaveData.playerArmy.Length; i++) {
+            if(SaveDataHandler.TakesTheField(CampaignManager.Instance.CampaignSaveManager.SaveData.playerArmy[i]))
                 playerArmyList.Add(CampaignManager.Instance.CampaignSaveManager.SaveData.playerArmy[i]);
         }
         playerArmy = playerArmyList.ToArray();

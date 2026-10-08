@@ -174,7 +174,9 @@ namespace TJ
             InputHandler.Instance.SetBattleBlock(KeptActions);
             _speed.BeginPhotoHold();
             _on = true;
-            _hider.Hide(view.Canvas, _settings.ShowFlags);
+            UIManager ui = BattleManager.Instance.UIManager;
+            _hider.Hide(view.Canvas, _settings.ShowFlags, ui.HudRootCanvas);
+            ui.SetHudHidden(this, true);
             _camera.EnterPhoto();
             _settings.Fov = _camera.PhotoFov;
             _look.Create();
@@ -210,6 +212,7 @@ namespace TJ
             if (!sceneClosing) Guard(() => BattleManager.Instance.BattlefieldEnvManager.ClearPhotoWeatherLook());
             if (!sceneClosing) Guard(() => _camera.ExitPhoto());
             Guard(() => _hider.Restore(sceneClosing));
+            if (!sceneClosing) Guard(() => BattleManager.Instance.UIManager.SetHudHidden(this, false));
             Guard(() => { if (_speed != null) _speed.EndPhotoHold(!sceneClosing); });
             Guard(() => { if (InputHandler.HasInstance) InputHandler.Instance.ClearBattleBlock(); });
             Guard(() => GameEventTracker.PhotoModeUsed(_photosTaken, Time.realtimeSinceStartup - _enteredAt, _enteredPhase.ToString(),
@@ -493,6 +496,8 @@ namespace TJ
 
         private string BuildHints()
         {
+            // Every photo mode shortcut is a keyboard key; on a pad the panel's own buttons do the work.
+            if (InputDevices.UsingGamepad) return string.Empty;
             Keyboard keyboard = Keyboard.current;
             var hints = new System.Text.StringBuilder();
             void Add(Key key, string textKey)

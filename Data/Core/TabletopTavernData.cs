@@ -113,6 +113,7 @@ namespace TJ
             WeatherOverrideLoader.ClearOverrides();
             Memori.Localization.LocalizationOverrides.Clear();
             UnitVisualOverrideLoader.ClearOverrides();
+            UnitVisualOverrideLoader.RegisterBuiltIns(SquadStatsDictionary);
             foreach (string modFolder in modFolders)
             {
                 SquadStatsOverrideLoader.ApplyOverridesFromModFolder(modFolder, SquadStatsDictionary, SquadAssetsDictionary, UnitsOfRaceDictionary, _appliedHeroID);
@@ -673,7 +674,6 @@ namespace TJ
             if (squadStats.SquadAttributes.AntiLarge) unitAttributes.Add(UnitAttribute.AntiLarge);
             if (squadStats.SquadAttributes.StandardShields) unitAttributes.Add(UnitAttribute.StandardShields);
             if (squadStats.Armor >= 80) unitAttributes.Add(UnitAttribute.Armored);
-            if (squadStats.unitSize != UnitSize.Infantry && squadStats.unitSize != UnitSize.Artillery && squadStats.unitType != UnitType.Structure) unitAttributes.Add(UnitAttribute.Large);
             if (squadStats.SquadAttributes.Terrifying) unitAttributes.Add(UnitAttribute.Terrifying);
             if (squadStats.SquadAttributes.Stalwart) unitAttributes.Add(UnitAttribute.Stalwart);
             if (squadStats.SquadAttributes.Outrider) unitAttributes.Add(UnitAttribute.Outrider);

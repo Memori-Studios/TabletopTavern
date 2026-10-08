@@ -61,6 +61,8 @@ namespace TJ.Recruit
         bool isPurchased = false;
         bool isPointerOver = false;
         bool displayOnly = false;
+        // A recruit that joins already prestiged cannot combine with prestige 0 duplicates.
+        int recruitPrestige;
         // A display-only card sits above its panel's canvas, which can sort far above the Map Canvas.
         int restingSortingOrder = 1;
 
@@ -79,15 +81,16 @@ namespace TJ.Recruit
         float breathClock;
         #endregion
 
-        public void SetUp(SquadStats _squadData, RecruitPanel _recruitPanel, int _index, RenderTexture _recruitImage, bool _isPurchased)
+        public void SetUp(SquadStats _squadData, RecruitPanel _recruitPanel, int _index, RenderTexture _recruitImage, bool _isPurchased, int _prestige = 0)
         {
             squadStats = _squadData;
+            recruitPrestige = _prestige;
             recruitPanel = _recruitPanel;
             index = _index;
             if (cardContentRect == null) Debug.LogError("RecruitCard: cardContentRect is not assigned", this);
             iconHighlight.enabled = false;
             canvas = GetComponent<Canvas>();
-            // The prefab's order 0 sits under the Map Canvas (order 1), so the title banner draws over an unhovered card.
+            // The prefab's order 0 sits under the Map Canvas (order 1).
             canvas.sortingOrder = 1;
             graphicRaycaster = GetComponent<GraphicRaycaster>();
             graphicRaycaster.enabled = true;
@@ -106,10 +109,10 @@ namespace TJ.Recruit
             recruitImageRaw.texture = _recruitImage;
 
             unitAttributesUIContainer = GetComponent<UnitAttributesUIContainer>();
-            unitAttributesUIContainer.Load(squadStats.unitName);
+            unitAttributesUIContainer.Load(squadStats.unitName, _showCampaignTrait: true);
 
             unitStatsUIContainer = GetComponent<UnitStatsUIContainer>();
-            unitStatsUIContainer.Load(squadStats.unitName, true, 0);
+            unitStatsUIContainer.Load(squadStats.unitName, true, recruitPrestige);
             unitStatsUIContainer.DisableTooltips();
 
             // Before the refreshes below: the block sizes itself to its description, and the card's
@@ -190,7 +193,7 @@ namespace TJ.Recruit
 
             unitAttributesUIContainer = GetComponent<UnitAttributesUIContainer>();
             unitStatsUIContainer = GetComponent<UnitStatsUIContainer>();
-            unitAttributesUIContainer.Load(squadStats.unitName, true, prestigeTrait);
+            unitAttributesUIContainer.Load(squadStats.unitName, true, prestigeTrait, _showCampaignTrait: true);
             if (spellInfoBlock != null && spellInfoBlock.Load(squadStats.unitName, squadStats.unitType))
                 CollapseEmptyAttributesRow();
             ShowPrestige(prestige, prestigeTrait);
@@ -224,7 +227,7 @@ namespace TJ.Recruit
         /// <summary>Redraws the stats and traits at a prestige level, so the Prestige III picker can show the step up.</summary>
         public void ShowPrestige(int prestige, UnitAttribute prestigeTrait)
         {
-            unitAttributesUIContainer.Load(squadStats.unitName, true, prestigeTrait);
+            unitAttributesUIContainer.Load(squadStats.unitName, true, prestigeTrait, _showCampaignTrait: true);
             unitStatsUIContainer.Load(squadStats.unitName, true, prestige, prestigeTrait);
             unitStatsUIContainer.DisableTooltips();
             unitStatsUIContainer.Refresh();
@@ -234,22 +237,28 @@ namespace TJ.Recruit
 
         /// <summary>
         /// The attribute row reserves a flat 65px via its LayoutElement's minHeight, whether or not
-        /// it has any entries. On a caster that is dead space sitting directly under the spell block,
-        /// and it is what pushes the card past its fixed 580px frame.
-        ///
-        /// Only collapsed when the row is genuinely empty, so a prestige-granted trait on a mage
-        /// still gets its space. Cards are instantiated per recruit, so there is no authored value
-        /// to restore afterwards.
+        /// it has any entries. Under the info block that dead space pushes the card past its fixed
+        /// 580px frame, so the row shrinks to the height its chip grid needs (none when empty).
+        /// Cards are instantiated per recruit, so there is no authored value to restore afterwards.
         /// </summary>
         private void CollapseEmptyAttributesRow()
         {
-            if (unitAttributesUIContainer.DisplayedAttributeCount > 0) return;
-
             Transform attributesParent = unitAttributesUIContainer.UnitAttributesParent;
             if (attributesParent == null) return;
 
             LayoutElement layoutElement = attributesParent.GetComponent<LayoutElement>();
-            if (layoutElement != null) layoutElement.minHeight = 0f;
+            if (layoutElement == null) return;
+
+            if (unitAttributesUIContainer.DisplayedAttributeCount == 0)
+            {
+                layoutElement.minHeight = 0f;
+                return;
+            }
+            GridLayoutGroup grid = attributesParent.GetComponent<GridLayoutGroup>();
+            if (grid == null) return;
+            grid.CalculateLayoutInputHorizontal();
+            grid.CalculateLayoutInputVertical();
+            layoutElement.minHeight = Mathf.Min(layoutElement.minHeight, grid.preferredHeight);
         }
         private void SetUpTierVisuals()
         {
@@ -295,7 +304,7 @@ namespace TJ.Recruit
             if (recruitPanel.HasSelectedRecruitCard) return;
             canCombineGO.SetActive(false);
             canCombine = false;
-            if (!isPurchased && !CampaignManager.Instance.CampaignSaveManager.CheckForRoomToRecruit())
+            if (!isPurchased && recruitPrestige == 0 && !CampaignManager.Instance.CampaignSaveManager.CheckForRoomToRecruit())
             {
                 var army = CampaignManager.Instance.CampaignSaveManager.SaveData.playerArmy;
                 int minPrestige = int.MaxValue;

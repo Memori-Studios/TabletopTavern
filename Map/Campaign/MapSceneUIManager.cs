@@ -106,6 +106,7 @@ namespace TJ.Map
         // nothing is pending. See the prestige trait picker call sites for how this is used.
         public void TryDrainPendingPrestigeChoices(Action onDrained = null)
         {
+            campaignSaveManager.FreeThralls();
             if (!campaignSaveManager.TryGetNextPendingPrestigeTraitChoice(out Memori.SaveData.SquadToLoad pending))
             {
                 if (isDrainingPrestigeChoices)

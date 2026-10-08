@@ -25,7 +25,7 @@ namespace TabletopTavern.GpuAnim
                     vd.Lods.Add(ld);
                 }
                 foreach (TJBakeAttachment a in variant.Attachments)
-                    vd.Attachments.Add(new GpuAnimAttachmentData { Mesh = a.Mesh, MaterialIndex = a.MaterialIndex, AnchorIndex = a.AnchorIndex, Role = (GpuAnimPropRole)(byte)a.Role, LodMask = a.LodMask, Bounds = a.Bounds });
+                    vd.Attachments.Add(new GpuAnimAttachmentData { Mesh = a.Mesh, MaterialIndex = a.MaterialIndex, AnchorIndex = a.AnchorIndex, Role = (GpuAnimPropRole)(byte)a.Role, LodMask = a.LodMask, Bounds = a.Bounds, Tag = a.Tag });
                 data.Variants.Add(vd);
             }
             if (v.Rider != null) data.Rider = From(v.Rider);

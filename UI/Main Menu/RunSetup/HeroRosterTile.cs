@@ -12,10 +12,10 @@ namespace TJ.MainMenu
 {
     /// <summary>
     /// One hero in the run-setup roster: portrait, name, a frame in the metal of the best level won and a gem per level.
-    /// Hovering previews the hero on the hero panel; clicking picks it.
+    /// Hovering lifts the tile; clicking picks the hero. The hero panel only ever shows the picked hero.
     /// </summary>
     [RequireComponent(typeof(MemoriTooltipTrigger))]
-    public class HeroRosterTile : MonoBehaviour, IPointerEnterHandler, IPointerExitHandler
+    public class HeroRosterTile : MonoBehaviour, IPointerEnterHandler, IPointerExitHandler, IPointerDownHandler, IPointerUpHandler
     {
         private const float UnwonGemAlpha = 0.1f;
 
@@ -35,6 +35,7 @@ namespace TJ.MainMenu
         private PlayPanel playPanel;
         private MemoriTooltipTrigger tooltip;
         private bool listening;
+        private bool unlocked;
         private Sprite plainFrame;
 
         public Hero Hero => hero;
@@ -50,7 +51,7 @@ namespace TJ.MainMenu
 #else
             UnlockCondition condition = hero.UnlockCondition;
 #endif
-            bool unlocked = SaveDataHandler.IsUnlockConditionUnlocked(condition, hero.HeroID);
+            unlocked = SaveDataHandler.IsUnlockConditionUnlocked(condition, hero.HeroID);
 #if DEMO
             if (SaveDataHandler.IsDevToolUser()) unlocked = true;
 #endif
@@ -99,22 +100,84 @@ namespace TJ.MainMenu
             portrait.sprite = sprite;
         }
 
-        private void OnClicked() => playPanel.LoadHeroes(hero, true);
+        private void OnClicked()
+        {
+            // Picking the hero already picked changes nothing, so it only answers the click.
+            // A punch measures from the current scale, so it starts from the hovered rest, never mid-motion.
+            transform.localScale = Vector3.one * (lifted ? HoverScale : 1f);
+            if (playPanel.hero.HeroID == hero.HeroID)
+            {
+                Play(UIJuice.Punch(transform, 1.04f));
+                return;
+            }
+            playPanel.LoadHeroes(hero, true);
+            Play(PickRoutine());
+            if (!unlocked && lockedMark != null) StartCoroutine(UIJuice.Shake((RectTransform)lockedMark.transform, 4f));
+        }
 
         private void OnActiveHeroChanged(Hero activeHero) => selectedMark.SetActive(activeHero.HeroID == hero.HeroID);
 
+        #region Feel
+        private const float HoverLift = 6f, HoverScale = 1.04f, PressScale = 0.95f;
+        private Coroutine motion;
+        private Vector2 rest;
+        private bool lifted, hovered;
+
+        private void Play(System.Collections.IEnumerator routine)
+        {
+            if (!isActiveAndEnabled) return;
+            if (motion != null) StopCoroutine(motion);
+            motion = StartCoroutine(routine);
+        }
+
+        private void LiftTo(bool up, float scale)
+        {
+            // The roster's layout owns the resting position, so it is read again each time the tile leaves rest.
+            if (!lifted) rest = ((RectTransform)transform).anchoredPosition;
+            lifted = up;
+            Play(UIJuice.Lift((RectTransform)transform, rest, up ? HoverLift : 0f, scale));
+        }
+
+        private System.Collections.IEnumerator PickRoutine()
+        {
+            yield return UIJuice.Punch(transform, 1.06f);
+            if (selectedMark != null) yield return UIJuice.Punch(selectedMark.transform, 1.08f, 0.05f, 0.12f);
+        }
+
         public void OnPointerEnter(PointerEventData eventData)
         {
+            hovered = true;
             IAudioRequester.Instance.PlaySFX(SFXData.HoverHero);
-            MemoriUI.BloomItemScale(transform, 1.025f, 0.1f);
-            playPanel.ShowHeroDetailsBox(hero);
+            LiftTo(true, HoverScale);
         }
 
         public void OnPointerExit(PointerEventData eventData)
         {
-            MemoriUI.BloomItemScale(transform, 1f, 0.1f);
-            playPanel.RevertToActiveHeroDetailsBox(hero);
+            hovered = false;
+            LiftTo(false, 1f);
         }
+
+        public void OnPointerDown(PointerEventData eventData)
+        {
+            if (eventData.button != PointerEventData.InputButton.Left) return;
+            Play(UIJuice.Lift((RectTransform)transform, rest, lifted ? HoverLift : 0f, PressScale, 0.03f));
+        }
+
+        public void OnPointerUp(PointerEventData eventData)
+        {
+            if (eventData.button != PointerEventData.InputButton.Left) return;
+            LiftTo(hovered, hovered ? HoverScale : 1f);
+        }
+
+        // Unity sends no exit to a tile that goes inactive, so a hidden roster would keep it raised.
+        private void OnDisable()
+        {
+            motion = null;
+            if (lifted) ((RectTransform)transform).anchoredPosition = rest;
+            lifted = hovered = false;
+            transform.localScale = Vector3.one;
+        }
+        #endregion
 
         private void OnDestroy()
         {

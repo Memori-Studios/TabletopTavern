@@ -26,6 +26,7 @@ namespace TJ
         private string _note = "";
         private string _minBuild = "";
         private bool _confirming;
+        private bool _reading;
         private Vector2 _scroll;
 
         [MenuItem("Tabletop Tavern/Balance/Remote Balance")]
@@ -40,11 +41,28 @@ namespace TJ
             if (!string.IsNullOrEmpty(RemoteBalanceEditor.AdminKey)) Refresh();
         }
 
-        private void Refresh()
+        // Does not block, so opening the window never freezes the Editor; the pushed line stays above the new status.
+        private void Refresh(string pushed = null)
         {
             _confirming = false;
+            _reading = true;
+            _status = (pushed == null ? "" : pushed + "\n") + "Reading the server's newest unit stats...";
+            _statusType = MessageType.Info;
+            RemoteBalanceEditor.FetchLatestAsync((server, error) =>
+            {
+                // The window may have closed while the server answered.
+                if (this == null) return;
+                _reading = false;
+                ShowAnswer(server, error);
+                if (pushed != null) _status = $"{pushed}\n{_status}";
+                Repaint();
+            });
+        }
+
+        private void ShowAnswer(RemoteBalanceEditor.ServerRevision server, string error)
+        {
             _local = RemoteBalanceEditor.BuildLocal();
-            _server = RemoteBalanceEditor.FetchLatest(out string error);
+            _server = server;
             if (_server == null)
             {
                 _differences.Clear();
@@ -105,7 +123,10 @@ namespace TJ
                       (string.IsNullOrEmpty(_server.minBuild) ? "" : $", for build {_server.minBuild} and later") +
                       (string.IsNullOrEmpty(_server.note) ? "" : $"  \"{_server.note}\"");
                 EditorGUILayout.LabelField(summary, EditorStyles.boldLabel);
-                if (GUILayout.Button("Refresh", GUILayout.Width(80f))) Refresh();
+                using (new EditorGUI.DisabledScope(_reading))
+                {
+                    if (GUILayout.Button(_reading ? "Reading..." : "Refresh", GUILayout.Width(80f))) Refresh();
+                }
             }
             EditorGUILayout.LabelField($"This project is stamped with revision {RemoteBalanceEditor.BakedRevision}.", EditorStyles.miniLabel);
         }
@@ -146,7 +167,7 @@ namespace TJ
                 if (GUILayout.Button("Every build", GUILayout.Width(90f))) _minBuild = "";
             }
 
-            bool canPush = _server != null && _local != null && (_differences.Count > 0 || _server.rev == 0);
+            bool canPush = !_reading && _server != null && _local != null && (_differences.Count > 0 || _server.rev == 0);
             using (new EditorGUI.DisabledScope(!canPush))
             using (new EditorGUILayout.HorizontalScope())
             {
@@ -178,8 +199,7 @@ namespace TJ
             }
             Debug.Log($"[RemoteBalance] Pushed revision {rev} ({changes} value(s) changed). Players take it at their next launch.");
             _note = "";
-            Refresh();
-            _status = $"Pushed revision {rev} ({changes} value(s) changed). Players take it at their next launch.\n{_status}";
+            Refresh($"Pushed revision {rev} ({changes} value(s) changed). Players take it at their next launch.");
         }
     }
 }

@@ -2,6 +2,7 @@ using System;
 using Memori.Audio;
 using Memori.Localization;
 using Memori.SaveData;
+using Memori.UI;
 using TMPro;
 using UnityEngine;
 using UnityEngine.EventSystems;
@@ -49,6 +50,7 @@ namespace TJ.MainMenu
         [SerializeField] private Color armyChipColour = new(0.91f, 0.75f, 0.42f, 1f);
         [SerializeField, Range(0f, 1f)] private float dimAlpha = 0.5f;
 
+        public Button AddButton => addButton;
         public SquadToLoad Squad { get; private set; }
         public bool Found { get; private set; }
         public int Cost { get; private set; }
@@ -89,6 +91,10 @@ namespace TJ.MainMenu
             addButton.onClick.AddListener(OnAddClicked);
             removeButton.onClick.RemoveListener(OnRemoveClicked);
             removeButton.onClick.AddListener(OnRemoveClicked);
+            // The row owns the hover sound; its buttons stay quiet so one row never plays two sounds.
+            foreach (UIHoverSFX hoverSound in GetComponentsInChildren<UIHoverSFX>(true)) hoverSound.enabled = false;
+            // An undiscovered unit's + is switched off; a click on it still shakes the row and says no.
+            UIDenyFeedback.Attach(addButton, (RectTransform)background.transform);
             SetHovered(false);
         }
 
@@ -104,6 +110,7 @@ namespace TJ.MainMenu
             // Overspending stays allowed, as with gear: the treasury turns red and the validation strip blocks Start.
             addButton.interactable = Found;
             addIcon.color = Found && affordable && !armyFull ? addReady : addIdle;
+            this.armyFull = armyFull;
 
             bool inArmyNow = Found && inArmy > 0;
             armyChip.gameObject.SetActive(inArmyNow);
@@ -115,7 +122,12 @@ namespace TJ.MainMenu
 
         private void OnAddClicked()
         {
-            if (Found) onAdd?.Invoke(Squad);
+            if (!Found) return;
+            // A full army is refused by the manager's toast, which plays the fail sound; the row shakes with it.
+            background.transform.localScale = Vector3.one;
+            if (armyFull) Play(UIJuice.Shake((RectTransform)background.transform));
+            else Play(UIJuice.Punch(background.transform, 1.04f));
+            onAdd?.Invoke(Squad);
         }
 
         private void OnRemoveClicked() => onRemove?.Invoke(Squad);
@@ -123,7 +135,7 @@ namespace TJ.MainMenu
         public void OnPointerEnter(PointerEventData eventData)
         {
             SetHovered(true);
-            IAudioRequester.Instance.PlaySFX(SFXData.ButtonHover);
+            IAudioRequester.Instance.PlaySFX(SFXData.LightMouseOver);
             onHover?.Invoke(Squad);
         }
 
@@ -133,12 +145,53 @@ namespace TJ.MainMenu
             onExit?.Invoke();
         }
 
-        private void OnDisable() => SetHovered(false);
+        private void OnDisable()
+        {
+            motion = null;
+            tint = null;
+            background.color = restBackground;
+            hoverFrame.SetActive(false);
+            background.transform.localScale = Vector3.one;
+            addIcon.transform.localScale = Vector3.one;
+        }
 
+        private bool armyFull;
+        private Coroutine motion, tint;
+
+        private void Play(System.Collections.IEnumerator routine)
+        {
+            if (!isActiveAndEnabled) return;
+            if (motion != null) StopCoroutine(motion);
+            motion = StartCoroutine(routine);
+        }
+
+        // The row brightens over a moment rather than snapping, and its + grows a little while hovered.
         private void SetHovered(bool hovered)
         {
-            background.color = hovered ? hoverBackground : restBackground;
             hoverFrame.SetActive(hovered);
+            if (!isActiveAndEnabled)
+            {
+                background.color = hovered ? hoverBackground : restBackground;
+                return;
+            }
+            if (tint != null) StopCoroutine(tint);
+            tint = StartCoroutine(Tint(hovered ? hoverBackground : restBackground, hovered && addButton.interactable ? 1.1f : 1f));
+        }
+
+        private System.Collections.IEnumerator Tint(Color target, float plusScale)
+        {
+            Color from = background.color;
+            float fromScale = addIcon.transform.localScale.x;
+            for (float t = 0f; t < 1f; t += Mathf.Min(Time.unscaledDeltaTime, UIJuice.MaxStep) / 0.08f)
+            {
+                background.color = Color.Lerp(from, target, t);
+                float s = Mathf.Lerp(fromScale, plusScale, UIJuice.EaseOutCubic(t));
+                addIcon.transform.localScale = new Vector3(s, s, 1f);
+                yield return null;
+            }
+            background.color = target;
+            addIcon.transform.localScale = new Vector3(plusScale, plusScale, 1f);
+            tint = null;
         }
 
         private static string T(string key) => LocalizationManager.Instance.GetText(key);

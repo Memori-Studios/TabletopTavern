@@ -1,6 +1,8 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using Memori.Localization;
+using Memori.Utilities;
 using Memori.SaveData;
 using Memori.Tooltip;
 using TMPro;
@@ -94,7 +96,8 @@ namespace TJ.MainMenu
         [SerializeField] private Color body = new(0.93f, 0.9f, 0.85f, 1f);
         [SerializeField] private Color muted = new(0.56f, 0.6f, 0.6f, 1f);
         [SerializeField] private Color brass = new(0.69f, 0.54f, 0.24f, 1f);
-        [SerializeField] private Color traitColour = new(0.85f, 0.77f, 0.56f, 1f);
+        [Tooltip("The trait green the unit cards use, so Campaign Trait parchment stands apart here too.")]
+        [SerializeField] private Color traitColour = new(0.25618547f, 0.9528302f, 0.4162254f, 1f);
         [SerializeField] private Color lockedColour = new(0.85f, 0.53f, 0.42f, 1f);
         [SerializeField] private Color lockedIcon = new(0f, 0f, 0f, 0.55f);
 
@@ -216,8 +219,7 @@ namespace TJ.MainMenu
 
             string passive = T(race + "PassiveName");
             string passiveText = RacePassiveInfo.GetDescription(race);
-            unitFactionText.text = $"<color=#{ColorUtility.ToHtmlStringRGB(gold)}>{passive}.</color> {KeywordText.Render(passiveText, false)}";
-            unitFactionTooltip.SetUpToolTip(passive, KeywordText.ForTooltip(passiveText));
+            unitFactionText.text = $"<color=#{ColorUtility.ToHtmlStringRGB(gold)}>{passive}.</color> {KeywordText.Render(passiveText, false)}";            unitFactionTooltip.SetUpToolTip(passive, KeywordText.ForTooltip(passiveText));
         }
 
         private void BuildChips(UnitName unit)
@@ -229,18 +231,31 @@ namespace TJ.MainMenu
             }
 
             List<UnitAttribute> attributes = TabletopTavernData.Instance.GetUnitAttributesForDisplay(unit);
-            unitChips.gameObject.SetActive(attributes.Count > 0);
+            bool hasCampaignTrait = CampaignTraitText.TryGet(unit, out string traitName, out string traitLines);
+            unitChips.gameObject.SetActive(attributes.Count > 0 || hasCampaignTrait);
             float available = unitChips.rect.width > 0f ? unitChips.rect.width : 370f;
+
+            // Campaign Traits go last, after the unit's battle traits, in their own colour.
+            Color campaignColour = (Color)ColorData.HexToRgba(ColorData.CampaignTrait);
+            Color battleColour = ColorVision.Good(traitColour);
+            List<(string label, Color colour, string title, string body)> chips = new();
+            foreach (UnitAttribute attribute in attributes.OrderBy(a => TabletopTavernConstants.IsCampaignAttribute(a) ? 1 : 0))
+            {
+                string label = T(attribute.ToString());
+                bool campaign = TabletopTavernConstants.IsCampaignAttribute(attribute);
+                chips.Add((label, campaign ? campaignColour : battleColour, campaign ? $"{CampaignTraitText.Caption}: {label}" : label,
+                    KeywordText.ForTooltip(T(attribute + "Desc"), attribute.ToString())));
+            }
+            if (hasCampaignTrait) chips.Add((traitName, campaignColour, $"{CampaignTraitText.Caption}: {traitName}", traitLines));
 
             RectTransform row = null;
             float used = 0f;
-            foreach (UnitAttribute attribute in attributes)
+            foreach ((string label, Color colour, string title, string body) in chips)
             {
                 if (row == null) row = NewChipRow();
-                string label = T(attribute.ToString());
                 CollectionChip chip = Instantiate(chipTemplate, row);
                 chip.gameObject.SetActive(true);
-                chip.Set(label, traitColour, label, KeywordText.ForTooltip(T(attribute + "Desc"), attribute.ToString()));
+                chip.Set(label, colour, title, body);
                 RectTransform chipRect = (RectTransform)chip.transform;
                 LayoutRebuilder.ForceRebuildLayoutImmediate(chipRect);
                 float width = LayoutUtility.GetPreferredWidth(chipRect);

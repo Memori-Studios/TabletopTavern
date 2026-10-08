@@ -14,6 +14,8 @@ namespace TJ
         [SerializeField] private Vector2 reservedSize;
         // Floor so a reserved size larger than the canvas never collapses or flips the panel.
         [SerializeField] private float minScale = 0.5f;
+        // Widens the panel to the full reference width after scaling, so edge-anchored columns stay at the screen edges.
+        [SerializeField] private bool matchReferenceWidth;
 
         RectTransform rect;
         RectTransform reference;
@@ -61,6 +63,8 @@ namespace TJ
             Vector2 available = referenceSize - reservedSize;
             float scale = Mathf.Clamp(Mathf.Min(available.x / designSize.x, available.y / designSize.y), minScale, 1f);
             rect.localScale = new Vector3(baseScale.x * scale, baseScale.y * scale, baseScale.z);
+            if (matchReferenceWidth)
+                rect.sizeDelta = new Vector2(available.x / (baseScale.x * scale), rect.sizeDelta.y);
         }
     }
 }
