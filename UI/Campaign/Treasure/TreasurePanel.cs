@@ -71,10 +71,10 @@ namespace TJ.Treasure
         private void Awake()
         {
             memoriCanvasGroup = GetComponent<MemoriCanvasGroup>();
-            closeButton.onClick.RemoveAllListeners();
-            skipButton.onClick.RemoveAllListeners();
-            openChestButton.onClick.RemoveAllListeners();
-            claimGearButton.onClick.RemoveAllListeners();
+            closeButton.ClearClickListeners();
+            skipButton.ClearClickListeners();
+            openChestButton.ClearClickListeners();
+            claimGearButton.ClearClickListeners();
 
             skipButton.onClick.AddListener(Continue);
             closeButton.onClick.AddListener(Continue);
@@ -173,7 +173,7 @@ namespace TJ.Treasure
             view.PlayOpen();
             view.FocusFirstCard();
 
-            skipGearButton.Button.onClick.RemoveAllListeners();
+            skipGearButton.Button.ClearClickListeners();
             skipGearButton.Button.onClick.AddListener(Continue);
             skipGearButton.gameObject.SetActive(true);
 

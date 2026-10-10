@@ -528,6 +528,16 @@ public class SquadManager : MonoBehaviour
             ecb.AddComponent<BackStabbersTag>(squadEntity);
         }
 
+#if FACTIONUPDATE
+        if (squadStats.SquadAttributes.AresFury) ecb.AddComponent(squadEntity, new AresFuryBlessing());
+        if (squadStats.SquadAttributes.AthenasAegis) ecb.AddComponent(squadEntity, new AthenasAegisBlessing());
+        if (squadStats.SquadAttributes.ZeussBolt) ecb.AddComponent<ZeussBoltBlessing>(squadEntity);
+        if (squadStats.SquadAttributes.PoseidonsTremor) ecb.AddComponent(squadEntity, new PoseidonsTremorBlessing());
+        if (squadStats.SquadAttributes.ApollosSun) ecb.AddComponent(squadEntity, new ApollosSunBlessing());
+        if (squadStats.SquadAttributes.HadesShades) ecb.AddComponent(squadEntity, new HadesShadesBlessing());
+        if (squadStats.SquadAttributes.GorgonsGaze) ecb.AddComponent(squadEntity, new GorgonsGazeBlessing());
+#endif
+
         //Race passive
         Race squadRace = TabletopTavernData.Instance.GetRaceFromUnitName(_enemyData.unitName);
         switch (squadRace)
@@ -566,6 +576,14 @@ public class SquadManager : MonoBehaviour
                 ecb.AddComponent<DrakosaurBroodRaceTag>(squadEntity);
                 ecb.AddComponent(squadEntity, new ApexHuntersComponent());
                 break;
+#if FACTIONUPDATE
+            case Race.OlympianLeague:
+                ecb.AddComponent<OlympianLeagueRaceTag>(squadEntity);
+                int strikes = RaceBonusRuleData.AnsweredPrayers.TimesPerSquad;
+                if (hero.HeroID == TabletopTavernConstants.ORACLE_HERO_ID) strikes *= TabletopTavernConstants.ORACLE_PRAYER_MULTIPLIER;
+                ecb.AddComponent(squadEntity, new AnsweredPrayersComponent { StrikesLeft = strikes });
+                break;
+#endif
         }
 
         GearIDsSerialized gear = campaignSaveDataHolder.Gear;

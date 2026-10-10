@@ -1,4 +1,5 @@
 using UnityEngine;
+using Memori.UI;
 using UnityEngine.UI;
 using Memori.Scenes;
 using System.Threading.Tasks;
@@ -22,13 +23,13 @@ public class MapEscapePanel : MonoBehaviour
         panelCanvasGroup = GetComponent<MemoriCanvasGroup>();
         campaignSaveManager = _campaignSaveManager;
 
-        returnToMainMenuButton.onClick.RemoveAllListeners();
+        returnToMainMenuButton.ClearClickListeners();
         returnToMainMenuButton.onClick.AddListener(ReturnToMainMenu);
 
-        cancelExitButton.onClick.RemoveAllListeners();
+        cancelExitButton.ClearClickListeners();
         cancelExitButton.onClick.AddListener(CancelExit);
 
-        abandonCampaignButton.onClick.RemoveAllListeners();
+        abandonCampaignButton.ClearClickListeners();
         abandonCampaignButton.onClick.AddListener(AbandonRunConfirmationPopUp);
 
         abandonRunYesButton.onClick.AddListener(AbandonRun);

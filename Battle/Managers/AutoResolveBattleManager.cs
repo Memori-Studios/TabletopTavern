@@ -61,6 +61,12 @@ namespace TJ.Engagement
         [NonSerialized] public int RingIndex;
         [NonSerialized] public float TickLoss, TickDealt;
         [NonSerialized] public int BloodBank;           // Blood Drinker lifesteal no living model could take
+#if FACTIONUPDATE
+        // Olympian League blessings.
+        [NonSerialized] public int StartUnits;          // models fielded, for Poseidon's Tremor
+        [NonSerialized] public bool FurySpent, AegisSpent, TremorSpent, SunLit, ShadesSpent, GazeSpent;
+        [NonSerialized] public float FuryTimer, AegisTimer, ShadesTimer, PetrifiedTimer;
+#endif
     }
     // The hero inputs the live battle reads from CampaignSaveDataHolder, as plain data so the
     // difficulty sim can supply them without a campaign. default(...) means no hero.

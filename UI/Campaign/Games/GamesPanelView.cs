@@ -91,6 +91,8 @@ namespace TJ.Games
         [SerializeField] private Color valueReached = new(0.89f, 0.733f, 0.443f, 1f);
         [SerializeField] private Color valueEmpty = new(0.549f, 0.525f, 0.463f, 1f);
         [SerializeField] private Color cream = new(0.925f, 0.902f, 0.847f, 1f);
+        [SerializeField] private Color tieLit = new(0.914f, 0.753f, 0.416f, 1f);
+        [SerializeField] private Color houseGlow = new(0.925f, 0.902f, 0.847f, 1f);
         [SerializeField, Range(0f, 1f)] private float dimCellAlpha = 0.42f;
         [SerializeField] private float fadeSeconds = 0.2f;
         #endregion
@@ -99,7 +101,7 @@ namespace TJ.Games
         // Canvas units from the canvas top; the strip hangs here, just under the dice, when it fits above the army bar.
         [SerializeField] private float stripTop = 520f;
         // The dice table with its result row is the tallest strip, so it decides whether the strip fits under the dice.
-        [SerializeField] private float stripTallest = 260f;
+        [SerializeField] private float stripTallest = 272f;
         // The army bar's top edge sits this far above the canvas bottom at every UI Scale, plus a small gap.
         [SerializeField] private float armyBarClearance = 280f;
         // On a short canvas GamesPanel raises the dice, and the strip's bottom edge sits here, just above the army bar.
@@ -113,6 +115,9 @@ namespace TJ.Games
         // Read live so Colorblind Mode's swap applies.
         private static Color Positive => (Color)ColorData.HexToRgba(ColorData.Positive);
         private static Color Negative => (Color)ColorData.HexToRgba(ColorData.Negative);
+
+        // Payout rules in the strip's order: higher and six against one win, the tie pushes, lower loses.
+        private static readonly int[] PayoutSide = { 1, 1, 0, -1 };
 
         public Button SkipButton => skipButton;
         public Button PlayButton => playButton;
@@ -223,6 +228,18 @@ namespace TJ.Games
                 payoutCells[i].alpha = lit < 0 || i == lit ? 1f : dimCellAlpha;
                 payoutLit[i].SetActive(i == lit);
             }
+            if (lit >= 0 && lit < payoutLit.Length) TintLit(payoutLit[lit], PayoutSide[lit]);
+        }
+
+        // The lit rule's outline and wash keep the prefab's alpha; only the hue follows win, tie or loss.
+        private void TintLit(GameObject lit, int side)
+        {
+            Color colour = side > 0 ? Positive : side < 0 ? Negative : tieLit;
+            foreach (Image image in lit.GetComponentsInChildren<Image>(true))
+            {
+                colour.a = image.color.a;
+                image.color = colour;
+            }
         }
 
         public void SetLadderValues(string[] values)
@@ -282,9 +299,16 @@ namespace TJ.Games
                 houseFace.sprite = dieFaces[Mathf.Clamp(house, 1, 6) - 1];
             }
             SetRing(youRing, youResult);
-            SetRing(houseRing, houseResult);
+            // The house's glow never takes the win or loss colour, so green only ever means the player came out ahead.
+            SetRing(houseRing, houseResult, houseGlow);
             rewindHint.SetActive(offerRewind);
             roundNote.SetActive(false);
+            if (!isActiveAndEnabled) return;
+            CanvasGroup group = resultRow.GetComponent<CanvasGroup>();
+            if (group == null) group = resultRow.AddComponent<CanvasGroup>();
+            StartCoroutine(UIJuice.Open(group, null, fadeSeconds, 0f));
+            if (youResult > 0) StartCoroutine(UIJuice.Punch(youFace.transform.parent, 1.12f));
+            else if (houseResult > 0) StartCoroutine(UIJuice.Punch(houseFace.transform.parent, 1.12f));
         }
 
         // A bought round has no dice; the heal line takes the readout's place.
@@ -315,11 +339,11 @@ namespace TJ.Games
             stripRect.anchoredPosition = new Vector2(0f, shortCanvas ? -shortStripBottom : -stripTop);
         }
 
-        private void SetRing(Image ring, int result)
+        private void SetRing(Image ring, int result, Color? fixedHue = null)
         {
             ring.enabled = result != 0;
             // The glow keeps the alpha set on the prefab; only its hue follows the result.
-            Color colour = result > 0 ? Positive : Negative;
+            Color colour = fixedHue ?? (result > 0 ? Positive : Negative);
             colour.a = ring.color.a;
             ring.color = colour;
         }
@@ -347,17 +371,8 @@ namespace TJ.Games
 
         private IEnumerator Swap()
         {
-            float cardStart = card.alpha;
-            float stripStart = strip.alpha;
-            for (float t = 0f; t < fadeSeconds; t += Time.unscaledDeltaTime)
-            {
-                float k = t / fadeSeconds;
-                card.alpha = Mathf.Lerp(cardStart, 0f, k);
-                strip.alpha = Mathf.Lerp(stripStart, 1f, k);
-                yield return null;
-            }
             card.alpha = 0f;
-            strip.alpha = 1f;
+            yield return UIJuice.Open(strip, null, fadeSeconds, 0f);
             swap = null;
         }
 

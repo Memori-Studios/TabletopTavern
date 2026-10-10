@@ -286,6 +286,12 @@ public class BattleManager : Singleton<BattleManager>
         SpellTestMode.PushMageOptions();
 #endif
 
+#if FACTIONUPDATE
+        // Blessing systems skip their effect request when this is absent, so no request outlives the battle.
+        Entity olympianVisualBufferSingletonEntity = entityManager.CreateEntity();
+        entityManager.AddBuffer<OlympianVisualRequest>(olympianVisualBufferSingletonEntity);
+#endif
+
         amySaveDataManager.SpawnDeferredEnemy();
         amySaveDataManager.NotifyOutridersIfPresent();
 

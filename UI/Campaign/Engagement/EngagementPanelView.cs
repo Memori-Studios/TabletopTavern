@@ -21,7 +21,6 @@ namespace TJ.Engagement
         [SerializeField] private TMP_Text headerTitle;
         [SerializeField] private TMP_Text headerSubtitle;
         [SerializeField] private GameObject pill;
-        [SerializeField] private Image pillFrame;
         [SerializeField] private TMP_Text pillText;
         [SerializeField] private MemoriTooltipTrigger pillTooltip;
         [SerializeField] private float bandAlpha = 0.12f;
@@ -78,7 +77,6 @@ namespace TJ.Engagement
         [SerializeField] private GameObject stacks;
         [SerializeField] private RectTransform spoilsParent;
         [SerializeField] private RectTransform choicesParent;
-        [SerializeField] private RectTransform choiceThread;
         [SerializeField] private GameObject noChoices;
         [SerializeField] private EngagementSpoilRow spoilRowPrefab;
         [SerializeField] private EngagementChoiceRow choiceRowPrefab;
@@ -133,8 +131,6 @@ namespace TJ.Engagement
         const float CardHeight = 130f;
         const float FallenScale = 0.5f;
         const float WellPadding = 8f;
-        const float RowHeight = 56f;
-        const float RowGap = 4f;
 
         private readonly List<EngagementSpoilRow> spoilRows = new();
         private readonly List<EngagementChoiceRow> choiceRows = new();
@@ -346,7 +342,6 @@ namespace TJ.Engagement
             pill.SetActive(!string.IsNullOrEmpty(text));
             pillText.text = text;
             pillText.color = colour;
-            pillFrame.color = colour;
             // Null on a panel prefab built before the pill had a tooltip.
             if (pillTooltip == null) return;
             pillTooltip.enabled = tooltip != null;
@@ -471,7 +466,6 @@ namespace TJ.Engagement
             spoilRows.Clear();
             choiceRows.Clear();
             noChoices.SetActive(false);
-            choiceThread.gameObject.SetActive(false);
         }
 
         public EngagementSpoilRow AddSpoil()
@@ -486,7 +480,6 @@ namespace TJ.Engagement
             EngagementChoiceRow row = Instantiate(choiceRowPrefab.transform.parent.gameObject, choicesParent).GetComponentInChildren<EngagementChoiceRow>(true);
             row.SetUp(OnChoiceHover);
             choiceRows.Add(row);
-            LayoutThread();
             return row;
         }
 
@@ -495,15 +488,6 @@ namespace TJ.Engagement
 
         // A March win pays nothing, so both stacks go and the report stands alone.
         public void ShowStacks(bool show) => stacks.SetActive(show);
-
-        // The thread joins the diamonds from the first row's centre to the last's.
-        private void LayoutThread()
-        {
-            int count = choiceRows.Count;
-            choiceThread.gameObject.SetActive(count > 1);
-            choiceThread.anchoredPosition = new Vector2(choiceThread.anchoredPosition.x, -RowHeight / 2f);
-            choiceThread.sizeDelta = new Vector2(choiceThread.sizeDelta.x, (count - 1) * (RowHeight + RowGap));
-        }
 
         private void OnChoiceHover(EngagementChoiceRow hovered, bool isHovered)
         {
@@ -522,7 +506,6 @@ namespace TJ.Engagement
                 if (row == chosen) row.SetState(EngagementChoiceRow.State.Chosen);
                 else row.PopAway();
             }
-            choiceThread.gameObject.SetActive(false);
         }
         #endregion
 

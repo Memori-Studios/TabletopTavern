@@ -44,6 +44,8 @@ namespace TJ.Spells
             foreach (SpellData spellData in registry.AllSpells)
             {
                 if (spellData == null || spellData.Spell == Spell.None) continue;
+                // A hidden race's spells must not reach the browse pool, Spell Test Mode or the cast-every-spell achievement.
+                if (!TabletopTavernConstants.IsRaceInBuild(spellData.Race)) continue;
 
                 if (_bySpell.TryGetValue(spellData.Spell, out SpellData claimed))
                 {

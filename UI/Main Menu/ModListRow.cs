@@ -60,11 +60,11 @@ namespace TJ
             });
 
             moveUpButton.interactable = canMoveUp;
-            moveUpButton.onClick.RemoveAllListeners();
+            moveUpButton.ClearClickListeners();
             moveUpButton.onClick.AddListener(() => onMoveUp(_folder));
 
             moveDownButton.interactable = canMoveDown;
-            moveDownButton.onClick.RemoveAllListeners();
+            moveDownButton.ClearClickListeners();
             moveDownButton.onClick.AddListener(() => onMoveDown(_folder));
 
             loadedThisSessionIcon.SetActive(ModLoadOrder.LoadedFolderNamesThisSession.Contains(item.folder));
@@ -133,7 +133,7 @@ namespace TJ
             _publishLabel = LocalizationManager.Instance.GetText(alreadyPublished ? "modsUpdateButton" : "modsPublishButton");
             publishButtonText.text = _publishLabel;
 
-            publishButton.Button.onClick.RemoveAllListeners();
+            publishButton.Button.ClearClickListeners();
             publishButton.Button.onClick.AddListener(OnPublishButtonClicked);
         }
 

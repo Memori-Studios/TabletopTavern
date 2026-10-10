@@ -1,4 +1,5 @@
 using UnityEngine;
+using Memori.UI;
 using UnityEngine.UI;
 
 namespace TJ.MainMenu
@@ -9,7 +10,7 @@ public class ExitPanel : MainMenuPanel
     public override void SetUp(MainMenu _mainMenu)
     {
         base.SetUp(_mainMenu);
-        confirmButton.onClick.RemoveAllListeners();
+        confirmButton.ClearClickListeners();
         confirmButton.onClick.AddListener(ExitGame);
     }
     public override void OpenPanel()

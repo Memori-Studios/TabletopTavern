@@ -28,7 +28,8 @@ namespace TJ.Engagement.EditorTools
         const string SpoilRowPath = PartFolder + "/Engagement Spoil Row.prefab";
         const string ChoiceRowPath = PartFolder + "/Engagement Choice Row.prefab";
         const string EndBattlePopupPath = PartFolder + "/End Battle Pop Up.prefab";
-        const string StatCellPath = "Assets/Data/Prefabs/UI/Map/Town/Town Stat Cell.prefab";
+        const string StatPlaquePath = "Assets/Data/Prefabs/UI/Reuseable/Ornaments/Stat Plaque.prefab";
+        const string BandGradientPath = "Assets/ImportedPackages/InterfaceFantasyWarriorHUD/Sprites/HUD/SPR_HUD_FantasyWarrior_Gradient_Vertical_Smooth01.png";
         const string ScenePath = "Assets/Scenes/Map.unity";
         const string ButtonFolder = "Assets/Data/Prefabs/UI/Reuseable/Buttons";
         const string BasicBackgroundPath = "Assets/Data/Prefabs/UI/Reuseable/Basic Background.prefab";
@@ -83,11 +84,11 @@ namespace TJ.Engagement.EditorTools
         static readonly Color[] FightHue = { Hex("300F10"), Hex("C81616"), Hex("C81616"), Hex("FA0505"), Hex("FF0000"), Hex("FF5C5C"), Hex("CC8B8A", 0.8f) };
 
         static TMP_FontAsset displayDrop, display;
-        static Sprite mount, solid, shadow, squareSliced, edgeFade;
+        static Sprite mount, solid, shadow, frameEdge, frameWide, bandGradient;
         static Sprite skirmishIcon, hordeIcon, gateIcon, swordsIcon, skullIcon, speedIcon, rerollIcon, heartIcon, scrollIcon;
         static Sprite plainsIcon, forestIcon, riverIcon, swampIcon, clearIcon, rainIcon, fogIcon, snowIcon;
         static Sprite goldIcon, recruitIcon, ransomIcon, conscriptIcon, consumeIcon, purgeIcon, hourIcon;
-        static GameObject standardButton, primaryButton, basicBackground, statCellPart, endBattlePopupPart;
+        static GameObject standardButton, primaryButton, basicBackground, statPlaque, endBattlePopupPart;
         static SFXReference hoverSound;
 
         static void LoadAssets()
@@ -101,8 +102,9 @@ namespace TJ.Engagement.EditorTools
             sheet.TryGetValue("TooltipSolid", out solid);
             sheet.TryGetValue("TooltipShadow", out shadow);
             if (mount == null || solid == null || shadow == null) Debug.LogError("EngagementPanelBuilder: tooltip sheet sprites missing.");
-            squareSliced = Load<Sprite>("Assets/Art/Icons/UI/SquareSliced.png");
-            edgeFade = Load<Sprite>("Assets/ImportedPackages/ModernUIPack/Textures/Shadow/Vertical Shadow.png");
+            frameEdge = Load<Sprite>("Assets/ImportedPackages/InterfaceFantasyWarriorHUD/Sprites/HUD/SPR_HUD_FantasyWarrior_Frame_Box_Small01.png");
+            frameWide = Load<Sprite>("Assets/ImportedPackages/InterfaceFantasyWarriorHUD/Sprites/HUD/SPR_HUD_FantasyWarrior_Frame_Box_Medium04.png");
+            bandGradient = Load<Sprite>(BandGradientPath);
             skirmishIcon = Load<Sprite>("Assets/Art/Icons/Map/Skirmish.png");
             hordeIcon = Load<Sprite>("Assets/Art/Icons/Map/Horde.png");
             gateIcon = Load<Sprite>("Assets/Art/Icons/UnitTypes/Gate.png");
@@ -130,7 +132,7 @@ namespace TJ.Engagement.EditorTools
             standardButton = Load<GameObject>(ButtonFolder + "/Button - Standard.prefab");
             primaryButton = Load<GameObject>(ButtonFolder + "/Button - Primary.prefab");
             basicBackground = Load<GameObject>(BasicBackgroundPath);
-            statCellPart = Load<GameObject>(StatCellPath);
+            statPlaque = Load<GameObject>(StatPlaquePath);
             endBattlePopupPart = Load<GameObject>(EndBattlePopupPath);
             hoverSound = Load<SFXReference>(HoverSoundPath);
         }
@@ -543,8 +545,9 @@ namespace TJ.Engagement.EditorTools
 
             RectTransform taken = Stretch(Rect("Taken", slot));
             HLayout(taken, 10f, TextAnchor.MiddleCenter, new RectOffset());
-            Image takenEdge = Img(Stretch(Rect("Edge", taken)), squareSliced, A(WellEdge, 0.5f), Image.Type.Sliced);
+            Image takenEdge = Img(Stretch(Rect("Edge", taken)), frameEdge, A(WellEdge, 0.5f), Image.Type.Sliced);
             takenEdge.fillCenter = false;
+            takenEdge.pixelsPerUnitMultiplier = 4f;
             Ignore(takenEdge.gameObject);
             TMP_Text takenTitle = Text("Title", taken, display, 17f, TakenTitle, "Title");
             Image takenMark = Img(Rect("Mark", taken), null, TakenTitle);
@@ -558,10 +561,9 @@ namespace TJ.Engagement.EditorTools
             CanvasGroup popGroup = pop.gameObject.AddComponent<CanvasGroup>();
             Image fill = Img(Stretch(Rect("Fill", pop)), solid, Well);
             fill.raycastTarget = true;
-            Image edge = Img(Stretch(Rect("Edge", pop)), squareSliced, Color.white, Image.Type.Sliced);
+            Image edge = Img(Stretch(Rect("Edge", pop)), frameEdge, Color.white, Image.Type.Sliced);
             edge.fillCenter = false;
-            Image rule = Img(Stretch(Rect("Rule", pop), 3f, 3f, 3f, 3f), squareSliced, A(WellEdge, 0.7f), Image.Type.Sliced);
-            rule.fillCenter = false;
+            edge.pixelsPerUnitMultiplier = 4f;
 
             Button button = pop.gameObject.AddComponent<Button>();
             button.targetGraphic = edge;
@@ -596,14 +598,9 @@ namespace TJ.Engagement.EditorTools
 
             // The rarity tag sits in the row, not the title line, so it centres on the row like the gold value.
             RectTransform tag = Rect("Tag", content);
-            HLayout(tag, 0f, TextAnchor.MiddleCenter, new RectOffset(10, 10, 0, 0));
+            HLayout(tag, 0f, TextAnchor.MiddleCenter, new RectOffset());
             Fixed(tag.gameObject, -1f, 24f);
-            Image tagFrame = Img(Stretch(Rect("Frame", tag)), squareSliced, Coin, Image.Type.Sliced);
-            tagFrame.fillCenter = false;
-            Ignore(tagFrame.gameObject);
-            TMP_Text tagText = Text("Text", tag, display, 13f, Coin, "RARE");
-            tagText.fontStyle = FontStyles.UpperCase | FontStyles.Bold;
-            tagText.characterSpacing = 8f;
+            TMP_Text tagText = TagText(tag, "Text", Coin, "Rare");
             tag.gameObject.SetActive(false);
 
             RectTransform valueGroup = Rect("Value", content);
@@ -625,7 +622,6 @@ namespace TJ.Engagement.EditorTools
             Ref(so, "valueIcon", valueIcon);
             Ref(so, "value", value);
             Ref(so, "tag", tag.gameObject);
-            Ref(so, "tagFrame", tagFrame);
             Ref(so, "tagText", tagText);
             Ref(so, "tooltip", tooltip);
             Ref(so, "taken", taken.gameObject);
@@ -650,10 +646,9 @@ namespace TJ.Engagement.EditorTools
             glow.pixelsPerUnitMultiplier = 4f;
             Image fill = Img(Stretch(Rect("Fill", pop)), solid, Well);
             fill.raycastTarget = true;
-            Image edge = Img(Stretch(Rect("Edge", pop)), squareSliced, A(Brass, 0.65f), Image.Type.Sliced);
+            Image edge = Img(Stretch(Rect("Edge", pop)), frameEdge, A(Brass, 0.65f), Image.Type.Sliced);
             edge.fillCenter = false;
-            Image rule = Img(Stretch(Rect("Rule", pop), 3f, 3f, 3f, 3f), squareSliced, A(WellEdge, 0.8f), Image.Type.Sliced);
-            rule.fillCenter = false;
+            edge.pixelsPerUnitMultiplier = 4f;
 
             Button button = pop.gameObject.AddComponent<Button>();
             button.targetGraphic = fill;
@@ -699,8 +694,7 @@ namespace TJ.Engagement.EditorTools
             }
             units.gameObject.SetActive(false);
 
-            TMP_Text tag = CapLabel(head, "Tag");
-            tag.color = Blue;
+            TMP_Text tag = TagText(head, "Tag", Blue, "Tag");
             tag.gameObject.SetActive(false);
 
             RectTransform valueGroup = Rect("Value", content);
@@ -712,8 +706,7 @@ namespace TJ.Engagement.EditorTools
             value.alignment = TextAlignmentOptions.MidlineRight;
             valueGroup.gameObject.SetActive(false);
 
-            TMP_Text taken = CapLabel(content, "Taken");
-            taken.color = Gold;
+            TMP_Text taken = TagText(content, "Taken", Gold, "Taken", 16f);
             Localize(taken, "choiceTaken");
             taken.gameObject.SetActive(false);
 
@@ -791,8 +784,8 @@ namespace TJ.Engagement.EditorTools
                 if (textureImage != null) textureImage.pixelsPerUnitMultiplier = TexturePixelsPerUnit;
             }
 
-            // A wash inside the background, under its frame and corner ornaments, from the top edge to the header rule.
-            Image band = Img(Rect("Band", background.transform), edgeFade, A(Negative, BandAlpha));
+            // A top-down wash inside the background, under its frame and corner ornaments, from the top edge to the header's foot.
+            Image band = Img(Rect("Band", background.transform), bandGradient, A(Negative, BandAlpha));
             RectTransform bandRect = band.rectTransform;
             bandRect.anchorMin = new Vector2(0f, 1f);
             bandRect.anchorMax = Vector2.one;
@@ -903,9 +896,6 @@ namespace TJ.Engagement.EditorTools
             RectTransform header = Rect("Header", root);
             Fixed(header.gameObject, -1f, HeaderHeight);
             HLayout(header, 16f, TextAnchor.MiddleLeft, new RectOffset(24, 24, 0, 0));
-            Image rule = Img(Rect("Band Rule", header), solid, A(Brass, 0.45f));
-            Anchor(rule.rectTransform, Vector2.zero, new Vector2(1f, 0f), Vector2.zero, new Vector2(0f, 1f));
-            Ignore(rule.gameObject);
 
             RectTransform mountCell = Mount(header, "Mount", 64f, hordeIcon, 30f);
             Ref(so, "headerIcon", Child<Image>(mountCell, "Icon"));
@@ -918,15 +908,11 @@ namespace TJ.Engagement.EditorTools
             Ref(so, "headerTitle", title);
             Ref(so, "headerSubtitle", subtitle);
 
+            // The status word on the header's right (Twists, Run over): plain coloured text, its hit area carries the tooltip.
             RectTransform pill = Rect("Pill", header);
-            HLayout(pill, 0f, TextAnchor.MiddleCenter, new RectOffset(14, 14, 0, 0));
+            HLayout(pill, 0f, TextAnchor.MiddleCenter, new RectOffset());
             Fixed(pill.gameObject, -1f, 30f);
-            Image pillFrame = Img(Stretch(Rect("Frame", pill)), squareSliced, Hex("7BD66F"), Image.Type.Sliced);
-            pillFrame.fillCenter = false;
-            Ignore(pillFrame.gameObject);
-            TMP_Text pillText = Text("Text", pill, display, 14f, Hex("7BD66F"), "Victory");
-            pillText.fontStyle = FontStyles.UpperCase | FontStyles.Bold;
-            pillText.characterSpacing = 10f;
+            TMP_Text pillText = TagText(pill, "Text", Negative, "Run over", 16f);
             Image pillHit = GetOrAdd<Image>(pill.gameObject);
             pillHit.color = Color.clear;
             pillHit.raycastTarget = true;
@@ -934,7 +920,6 @@ namespace TJ.Engagement.EditorTools
             pillTooltip.enabled = false;
             pill.gameObject.SetActive(false);
             Ref(so, "pill", pill.gameObject);
-            Ref(so, "pillFrame", pillFrame);
             Ref(so, "pillText", pillText);
             Ref(so, "pillTooltip", pillTooltip);
         }
@@ -949,8 +934,9 @@ namespace TJ.Engagement.EditorTools
             RectTransform well = Rect("Enemy Well", body);
             Fixed(well.gameObject, -1f, 146f);
             Img(well, solid, Well);
-            Image wellEdge = Img(Stretch(Rect("Edge", well)), squareSliced, WellEdge, Image.Type.Sliced);
+            Image wellEdge = Img(Stretch(Rect("Edge", well)), frameEdge, WellEdge, Image.Type.Sliced);
             wellEdge.fillCenter = false;
+            wellEdge.pixelsPerUnitMultiplier = 4f;
             RectTransform slot = Stretch(Rect("Army Slot", well), 8f, 8f, 8f, 8f);
             Ref(so, "enemyArmySlot", slot);
             RectTransform grid = Rect("Enemy Army", slot);
@@ -1026,25 +1012,22 @@ namespace TJ.Engagement.EditorTools
             Fixed(actions.gameObject, -1f, ButtonHeight);
 
             // Battlefield and weather fill the left of the row; the two battle buttons sit on the right.
-            RectTransform strip = Rect("Strip", actions);
-            Fixed(strip.gameObject, -1f, 62f);
-            Flexible(strip.gameObject, 1f).preferredWidth = 0f;
-            StripRules(strip);
-            HorizontalLayoutGroup row = HLayout(strip, 0f, TextAnchor.MiddleLeft, new RectOffset());
-            row.childForceExpandWidth = true;
-            row.childForceExpandHeight = true;
-            GameObject battlefield = Cell(strip, "Battlefield", "townBattlefield", forestIcon, Hex("9CC48A"), false);
-            Ref(so, "battlefieldValue", Child<TMP_Text>(battlefield.transform, "Value Row/Value"));
-            Ref(so, "battlefieldIcon", Child<Image>(battlefield.transform, "Value Row/Icon"));
-            GameObject weather = Cell(strip, "Weather", "townWeather", clearIcon, Hex("F2C866"), true);
-            Ref(so, "weatherValue", Child<TMP_Text>(weather.transform, "Value Row/Value"));
-            Ref(so, "weatherIcon", Child<Image>(weather.transform, "Value Row/Icon"));
-            Image weatherHit = GetOrAdd<Image>(weather);
-            weatherHit.color = Color.clear;
-            weatherHit.raycastTarget = true;
-            MemoriTooltipTrigger weatherTooltip = weather.AddComponent<MemoriTooltipTrigger>();
-            weatherTooltip.enabled = false;
-            Ref(so, "weatherTooltip", weatherTooltip);
+            RectTransform strip = PlaqueRow(actions);
+            if (strip != null)
+            {
+                GameObject battlefield = Plaque(strip, "Battlefield", "townBattlefield", forestIcon, Hex("9CC48A"));
+                Ref(so, "battlefieldValue", Child<TMP_Text>(battlefield.transform, "Value"));
+                Ref(so, "battlefieldIcon", Child<Image>(battlefield.transform, "Icon"));
+                GameObject weather = Plaque(strip, "Weather", "townWeather", clearIcon, Hex("F2C866"));
+                Ref(so, "weatherValue", Child<TMP_Text>(weather.transform, "Value"));
+                Ref(so, "weatherIcon", Child<Image>(weather.transform, "Icon"));
+                Image weatherHit = GetOrAdd<Image>(weather);
+                weatherHit.color = Color.clear;
+                weatherHit.raycastTarget = true;
+                MemoriTooltipTrigger weatherTooltip = weather.AddComponent<MemoriTooltipTrigger>();
+                weatherTooltip.enabled = false;
+                Ref(so, "weatherTooltip", weatherTooltip);
+            }
 
             TMP_Text disabled = Text("Autoresolve Disabled", actions, display, 15f, Cap, "Autoresolve disabled");
             Localize(disabled, "difficultyModifier20");
@@ -1094,7 +1077,7 @@ namespace TJ.Engagement.EditorTools
             RectTransform head = Rect("Report Head", body);
             HLayout(head, 10f, TextAnchor.MiddleLeft, new RectOffset());
             Fixed(head.gameObject, -1f, 24f);
-            Localize(CapLabel(head, "Caption"), "engagementBattleReport");
+            Localize(SectionTitle(head, "Caption"), "engagementBattleReport");
             Spacer(head, true);
             RectTransform stats = Rect("Detailed Stats", head);
             HLayout(stats, 8f, TextAnchor.MiddleRight, new RectOffset());
@@ -1113,34 +1096,28 @@ namespace TJ.Engagement.EditorTools
             HLayout(report, 16f, TextAnchor.MiddleLeft, new RectOffset());
             RectTransform fallen = Rect("Fallen Slot", report);
             Img(fallen, solid, Well);
-            Image fallenEdge = Img(Stretch(Rect("Edge", fallen)), squareSliced, WellEdge, Image.Type.Sliced);
+            Image fallenEdge = Img(Stretch(Rect("Edge", fallen)), frameWide, WellEdge, Image.Type.Sliced);
             fallenEdge.fillCenter = false;
+            fallenEdge.pixelsPerUnitMultiplier = 4f;
             Fixed(fallen.gameObject, 390f, 81f);
             Ref(so, "fallenSlot", fallen);
-            RectTransform strip = Rect("Strip", report);
-            Fixed(strip.gameObject, -1f, 62f);
-            Flexible(strip.gameObject, 1f).preferredWidth = 0f;
-            StripRules(strip);
-            HorizontalLayoutGroup row = HLayout(strip, 0f, TextAnchor.MiddleLeft, new RectOffset());
-            row.childForceExpandWidth = true;
-            row.childForceExpandHeight = true;
-            var labels = new Object[2];
-            var values = new Object[2];
-            for (int i = 0; i < 2; i++)
+            RectTransform strip = PlaqueRow(report);
+            if (strip != null)
             {
-                GameObject cell = Instance(statCellPart, strip, "Cell " + (i + 1));
-                if (i == 0) cell.transform.Find("Divider").gameObject.SetActive(false);
-                Child<Image>(cell.transform, "Value Row/Icon").gameObject.SetActive(false);
-                TMP_Text label = Child<TMP_Text>(cell.transform, "Label");
-                Unlocalize(label, "Label");
-                TMP_Text value = Child<TMP_Text>(cell.transform, "Value Row/Value");
-                Unlocalize(value, "Value");
-                value.richText = true;
-                labels[i] = label;
-                values[i] = value;
+                var labels = new Object[2];
+                var values = new Object[2];
+                for (int i = 0; i < 2; i++)
+                {
+                    // The panel writes both the label and the value, so the plaque's label keeps no localizer.
+                    GameObject plaque = Plaque(strip, "Cell " + (i + 1), null, null, Color.white);
+                    TMP_Text value = Child<TMP_Text>(plaque.transform, "Value");
+                    value.richText = true;
+                    labels[i] = Child<TMP_Text>(plaque.transform, "Label");
+                    values[i] = value;
+                }
+                Refs(so, "reportLabels", labels);
+                Refs(so, "reportValues", values);
             }
-            Refs(so, "reportLabels", labels);
-            Refs(so, "reportValues", values);
 
             RectTransform stacks = Rect("Stacks", body);
             HLayout(stacks, 24f, TextAnchor.UpperLeft, new RectOffset()).childForceExpandHeight = true;
@@ -1152,17 +1129,6 @@ namespace TJ.Engagement.EditorTools
             Img(Stretch(Rect("Line", divider), 0f, 0f, 6f, 6f), null, A(Brass, 0.55f));
             RectTransform choiceRows = Column(stacks, "Spoils Of War", "engagementChooseOne");
             Ref(so, "choicesParent", choiceRows);
-
-            // A thin brass thread joins the choice diamonds, 20.5 px in from the row's left edge.
-            Image thread = Img(Rect("Thread", choiceRows), null, A(Brass, 0.55f));
-            Ignore(thread.gameObject);
-            RectTransform threadRect = thread.rectTransform;
-            threadRect.anchorMin = threadRect.anchorMax = new Vector2(0f, 1f);
-            threadRect.pivot = new Vector2(0.5f, 1f);
-            threadRect.sizeDelta = new Vector2(1f, 2f * (RowHeight + RowGap));
-            threadRect.anchoredPosition = new Vector2(20.5f, -RowHeight / 2f);
-            thread.gameObject.SetActive(false);
-            Ref(so, "choiceThread", threadRect);
 
             TMP_Text none = Text("None", choiceRows, display, 15f, Flavour, "Nothing to choose");
             none.fontStyle = FontStyles.Italic;
@@ -1188,18 +1154,37 @@ namespace TJ.Engagement.EditorTools
             return rows;
         }
 
-        // One Town Stat Cell with its caption and an optional icon; values are filled at runtime.
-        static GameObject Cell(RectTransform strip, string name, string captionKey, Sprite icon, Color tint, bool divider)
+        // A row of shared Stat Plaques side by side, no rules; null when the plaque prefab is missing, so the caller skips the row.
+        static RectTransform PlaqueRow(RectTransform parent)
         {
-            GameObject cell = Instance(statCellPart, strip, name);
-            cell.transform.Find("Divider").gameObject.SetActive(divider);
-            Localize(Child<TMP_Text>(cell.transform, "Label"), captionKey);
-            Image image = Child<Image>(cell.transform, "Value Row/Icon");
-            image.sprite = icon;
-            image.color = tint;
+            if (statPlaque == null)
+            {
+                Debug.LogError($"EngagementPanelBuilder: no Stat Plaque at {StatPlaquePath}; the stat row is skipped.");
+                return null;
+            }
+            RectTransform row = Rect("Stats", parent);
+            Flexible(row.gameObject, 1f).preferredWidth = 0f;
+            HLayout(row, 10f, TextAnchor.MiddleLeft, new RectOffset());
+            return row;
+        }
+
+        // One shared Stat Plaque: the builder sets only its icon, label and value, never its art, fonts or sizes.
+        // A null captionKey leaves the label unlocalized for the panel to write at runtime.
+        static GameObject Plaque(RectTransform row, string name, string captionKey, Sprite icon, Color tint)
+        {
+            GameObject plaque = Instance(statPlaque, row, name);
+            Image image = Child<Image>(plaque.transform, "Icon");
+            if (icon != null)
+            {
+                image.sprite = icon;
+                image.color = tint;
+            }
             image.gameObject.SetActive(icon != null);
-            Unlocalize(Child<TMP_Text>(cell.transform, "Value Row/Value"), "Value");
-            return cell;
+            TMP_Text label = Child<TMP_Text>(plaque.transform, "Label");
+            if (captionKey != null) Localize(label, captionKey);
+            else Unlocalize(label, "Label");
+            Unlocalize(Child<TMP_Text>(plaque.transform, "Value"), "Value");
+            return plaque;
         }
         #endregion
 
@@ -1236,22 +1221,22 @@ namespace TJ.Engagement.EditorTools
             if (image != null) image.color = new Color(colour.r, colour.g, colour.b, image.color.a);
         }
 
-        static void StripRules(RectTransform strip)
+        // A section title in normal case: no caps, no letter spacing, no rule beside it.
+        static TMP_Text SectionTitle(RectTransform parent, string name)
         {
-            Image top = Img(Rect("Top", strip), solid, A(Brass, 0.4f));
-            Anchor(top.rectTransform, new Vector2(0f, 1f), Vector2.one, new Vector2(0f, -1f), Vector2.zero);
-            Ignore(top.gameObject);
-            Image bottom = Img(Rect("Bottom", strip), solid, A(Brass, 0.4f));
-            Anchor(bottom.rectTransform, Vector2.zero, new Vector2(1f, 0f), Vector2.zero, new Vector2(0f, 1f));
-            Ignore(bottom.gameObject);
+            TMP_Text title = Text(name, parent, displayDrop, 18f, Gold, name);
+            title.fontStyle = FontStyles.Normal;
+            title.characterSpacing = 0f;
+            return title;
         }
 
-        static TMP_Text CapLabel(RectTransform parent, string name)
+        // A tag or status word as plain coloured text, never an outlined chip.
+        static TMP_Text TagText(RectTransform parent, string name, Color colour, string placeholder, float size = 15f)
         {
-            TMP_Text label = Text(name, parent, display, 12f, Cap, name);
-            label.fontStyle = FontStyles.UpperCase | FontStyles.Bold;
-            label.characterSpacing = 10f;
-            return label;
+            TMP_Text tag = Text(name, parent, displayDrop, size, colour, placeholder);
+            tag.fontStyle = FontStyles.Normal;
+            tag.characterSpacing = 0f;
+            return tag;
         }
 
         // Row text shrinks to fit its line in every locale; a choice row's tag rides the title line so the detail keeps the full width.
@@ -1331,14 +1316,6 @@ namespace TJ.Engagement.EditorTools
             rect.offsetMin = new Vector2(left, bottom);
             rect.offsetMax = new Vector2(-right, -top);
             return rect;
-        }
-
-        static void Anchor(RectTransform rect, Vector2 min, Vector2 max, Vector2 offsetMin, Vector2 offsetMax)
-        {
-            rect.anchorMin = min;
-            rect.anchorMax = max;
-            rect.offsetMin = offsetMin;
-            rect.offsetMax = offsetMax;
         }
 
         static void Centre(RectTransform rect, float width, float height)

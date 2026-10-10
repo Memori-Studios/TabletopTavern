@@ -39,6 +39,9 @@ public struct EntitiesReferences : IComponentData {
             UnitName.ArchersOfApollo => flamingArrowPrefabEntity,
             UnitName.Siegeclaws => siegeclawProjectilePrefabEntity,
             UnitName.TriceraPlatform => cannonBallPrefabEntity,
+#if FACTIONUPDATE
+            UnitName.FiresOfHephaestus => siegeclawProjectilePrefabEntity,
+#endif
             UnitName.Gate => arrowPrefabEntity,
             _ => arrowPrefabEntity
         };

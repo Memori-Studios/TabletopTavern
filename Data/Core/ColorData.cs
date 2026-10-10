@@ -217,6 +217,8 @@ namespace TJ
         public static string DisplayDeepstoneHold = "#C6A47D";
         public static string DisplayDrakosaurBrood = "#F76F79";
         public static string DisplaySpecial = "#A8B8CB";
+        // Sky blue: the League's crimson and gold are already Sanguine's and Taelindor's.
+        public static string DisplayOlympianLeague = "#5FC3F0";
 
         /// <summary>
         /// Alpha (0-255) for the faction wash behind a spell icon. One value for every race, unlike
@@ -248,6 +250,9 @@ namespace TJ
                 Race.SakuraDynasty   => (Color)HexToRgba(DisplaySakuraDynasty),
                 Race.DeepstoneHold   => (Color)HexToRgba(DisplayDeepstoneHold),
                 Race.DrakosaurBrood  => (Color)HexToRgba(DisplayDrakosaurBrood),
+#if FACTIONUPDATE
+                Race.OlympianLeague  => (Color)HexToRgba(DisplayOlympianLeague),
+#endif
                 _                    => (Color)HexToRgba(DisplaySpecial),
             };
         }

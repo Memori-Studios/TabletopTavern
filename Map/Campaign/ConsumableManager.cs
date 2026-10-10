@@ -13,7 +13,6 @@ namespace TJ.Map
     public class ConsumableManager : MonoBehaviour
     {
         [SerializeField] private string targetUnitGuid;
-        [SerializeField] private MetaprogressionModel _consumableSellValueMetaprogressionModel;
         public event Action OnConsumableUsed;
         public void UseConsumable(ConsumableEnum _consumable)
         {
@@ -114,7 +113,7 @@ namespace TJ.Map
                 }
                 case ConsumableEnum.Alchemist:
                     {
-                        int alchemistGold = SaveDataHandler.IsMetaprogressionNodeUnlocked(_consumableSellValueMetaprogressionModel) ? 10 : 5;
+                        int alchemistGold = ConsumableData.AlchemistGold();
                         string localizedString = LocalizationManager.Instance.GetText($"AlchemistName");
                         CampaignManager.Instance.GoldManager.ModifyGold(alchemistGold, localizedString);
                         break;
@@ -223,11 +222,6 @@ namespace TJ.Map
     public string GetConsumableDescription(ConsumableEnum _consumable)
     {
         string consumableDescriptionLocalized = LocalizationManager.Instance.GetText(_consumable.ToString() + "Desc");
-        if(_consumable == ConsumableEnum.Alchemist) 
-        {
-            int drinkValue = SaveDataHandler.IsMetaprogressionNodeUnlocked(_consumableSellValueMetaprogressionModel) ? 10 : 5;
-            consumableDescriptionLocalized = string.Format(consumableDescriptionLocalized, drinkValue);
-        }
         return ConsumableData.FormatDescription(_consumable, consumableDescriptionLocalized);
     }
 }

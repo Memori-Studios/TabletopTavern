@@ -38,7 +38,7 @@ public class ShopConsumable : MonoBehaviour
     public int Price => consumablePrice;
     public bool SoldOut => soldOut;
 
-    public void SetUp(ConsumableEnum _consumableType, int _consumablePrice, ShopPanel _shopPanel)
+    public void SetUp(ConsumableEnum _consumableType, int _consumablePrice, ShopPanel _shopPanel, bool playSound = true)
     {
         void CreateConsumableGameObject() {
             foreach (var consumableEnumToGameObject in consumableEnumToGameObjectList) {
@@ -57,7 +57,7 @@ public class ShopConsumable : MonoBehaviour
         outline = GetComponentInChildren<Outline>();
         shopPriceCanvas.SetUp(consumablePrice.ToString());
         StartCoroutine(OutlinePulse());
-        IAudioRequester.Instance.PlaySFX(SFXData.Drink);
+        if (playSound) IAudioRequester.Instance.PlaySFX(SFXData.Drink);
 
         string consumableNameLocalized = LocalizationManager.Instance.GetText(_consumableType.ToString()+"Name");
         string consumableDescriptionLocalized = CampaignManager.Instance.ConsumableManager.GetConsumableDescription(_consumableType);
@@ -106,21 +106,34 @@ public class ShopConsumable : MonoBehaviour
         if (shopPriceCanvas != null) shopPriceCanvas.SetSoldOut(true);
         shopItemInfoCanvas.AppendLine($"<color={ColorData.Error}>{LocalizationManager.Instance.GetText("OrdealSoldOut")}</color>");
     }
+    private Coroutine refuseShake;
+    private void ShakeRefused()
+    {
+        if (refuseShake != null || !isActiveAndEnabled) return;
+        refuseShake = StartCoroutine(Shake());
+        IEnumerator Shake() { yield return ShopRefusal.ShakeModel(consumableGOParentTransform); refuseShake = null; }
+    }
     public void AttemptPurchase()
     {
         if (soldOut) {
             NotificationManager.Instance.ErrorNotification(LocalizationManager.Instance.GetText("OrdealSoldOutNotice"));
+            shopPriceCanvas.Refuse();
+            ShakeRefused();
             shopPanel.RenableShopPanel();
             return;
         }
         if(!CampaignManager.Instance.GoldManager.CheckIfCanAfford(consumablePrice)) {
             NotificationManager.Instance.ErrorNotification(LocalizationManager.Instance.GetText("notEnoughGold"));
+            shopPriceCanvas.Refuse();
+            ShakeRefused();
             shopPanel.RenableShopPanel();
             return;
         }
 
         if(!CampaignManager.Instance.CampaignSaveManager.HasRoomForConsumable()){
             NotificationManager.Instance.ErrorNotification(LocalizationManager.Instance.GetText("noRoomForConsumable"));
+            shopPriceCanvas.Refuse();
+            ShakeRefused();
             shopPanel.RenableShopPanel();
             return;
         }

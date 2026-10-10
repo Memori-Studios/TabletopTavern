@@ -89,6 +89,8 @@ public class GameOverPanel : MonoBehaviour
     int _marchBattlesWon;
     // The submission this screen reports on, or null when the run goes on no board.
     string _boardRunId, _boardKind;
+    // Counted up when its row arrives; 0 leaves the row's text as written.
+    int _renownTotal;
 
     public void Start()
     {
@@ -171,6 +173,7 @@ public class GameOverPanel : MonoBehaviour
         }
 
         renownEarnedText.text = $"<color={ColorData.Tier4}>{renownAward.total}</color>";
+        _renownTotal = renownAward.total;
         renownBreakdownText.text = $"{renownAward.chaptersCompleted} {chaptersLocalized}  |  {renownAward.actsCompleted} {actsLocalized} (+{renownAward.actRenown})  |  {difficultyNamestring} (x{renownAward.difficultyMultiplier:0.00})";
         if (renownAward.marchBattles > 0)
             renownBreakdownText.text += $"  |  {string.Format(LocalizationManager.Instance.GetText("RunHistoryMarchBattles"), renownAward.marchBattles)} (+{renownAward.marchRenown})";
@@ -207,7 +210,7 @@ public class GameOverPanel : MonoBehaviour
         defeatObject.SetActive(!beatDemo);
         victoryObject.SetActive(beatDemo);
 
-        mainMenuButton.Button.onClick.RemoveAllListeners();
+        mainMenuButton.Button.ClearClickListeners();
         mainMenuButton.Button.onClick.AddListener(() => ExitAfterFadeOut());
         
         for (int i = 0; i < difficultyCrests.Length; i++)
@@ -250,19 +253,30 @@ public class GameOverPanel : MonoBehaviour
         if (showBoard) rows.Add(leaderboardRow);
         foreach (var row in rows) row.CGDisable();
 
-        const float rowFade = 0.4f;
-        const int rowGapMs = 100;
+        const float rowFade = 0.3f;
+        const int rowGapMs = 150;
 
+        // One sound for the whole deal-in; the rows overlap instead of waiting for each other.
+        IAudioRequester.Instance.PlaySFX(SFXData.LightMouseOver);
         foreach (var row in rows)
         {
-            IAudioRequester.Instance.PlaySFX(SFXData.LightMouseOver);
-
             if(row == difficultyRow)
                 crestSpawnFeedback.PlayFeedbacks();
 
-            await row.FadeIn(rowFade);
+            _ = row.FadeIn(rowFade);
+            if (row == renownEarnedRow && _renownTotal > 0) StartCoroutine(CountRenown());
             await Task.Delay(rowGapMs);
+            if (this == null) return;
         }
+        await Task.Delay(Mathf.RoundToInt(rowFade * 1000f));
+    }
+
+    // The run's reward counts up with ticks, then punches as it lands.
+    private IEnumerator CountRenown()
+    {
+        yield return UIJuice.CountUp(renownEarnedText, _renownTotal, 0.6f, v => $"<color={ColorData.Tier4}>{v}</color>",
+            () => IAudioRequester.Instance.PlaySFX(SFXData.TinyClick), 6);
+        yield return UIJuice.Punch(renownEarnedText.transform, 1.15f);
 
     }
 
@@ -312,7 +326,7 @@ public class GameOverPanel : MonoBehaviour
         heroUnlockContinueButton.gameObject.SetActive(true);
 
         var tcs = new TaskCompletionSource<bool>();
-        heroUnlockContinueButton.Button.onClick.RemoveAllListeners();
+        heroUnlockContinueButton.Button.ClearClickListeners();
         heroUnlockContinueButton.Button.onClick.AddListener(() => tcs.TrySetResult(true));
         await tcs.Task;
 
@@ -341,13 +355,13 @@ public class GameOverPanel : MonoBehaviour
 #if DEMO
         offerMarchOn = false;
 #endif
-        continueButton.Button.onClick.RemoveAllListeners();
+        continueButton.Button.ClearClickListeners();
         continueButton.Button.onClick.AddListener(CampaignManager.Instance.MapSceneUIManager.CompleteLayer);
-        marchOnButton.Button.onClick.RemoveAllListeners();
+        marchOnButton.Button.ClearClickListeners();
         marchOnButton.Button.onClick.AddListener(CampaignManager.Instance.MapSceneUIManager.CompleteLayer);
         // The Spell Update blocker is a child of the button, so a click on it would bubble up to March On.
         marchOnButton.Button.interactable = DifficultyRules.EndlessUnlocked;
-        claimVictoryButton.Button.onClick.RemoveAllListeners();
+        claimVictoryButton.Button.ClearClickListeners();
         claimVictoryButton.Button.onClick.AddListener(CampaignManager.Instance.MapSceneUIManager.ClaimVictory);
 
         bool centredChoice = offerMarchOn && marchChoiceDim != null;

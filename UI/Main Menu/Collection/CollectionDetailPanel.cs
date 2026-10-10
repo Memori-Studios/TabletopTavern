@@ -1,4 +1,5 @@
 using System;
+using Memori.UI;
 using System.Collections.Generic;
 using System.Linq;
 using Memori.Localization;
@@ -359,7 +360,7 @@ namespace TJ.MainMenu
             UnitName signature = hero.SignatureUnit;
             heroSignatureUnit.Set(TabletopTavernData.Instance.GetUnitIcon(signature), TierColour(signature));
             heroSignatureName.text = T(signature.ToString());
-            heroSignatureLink.onClick.RemoveAllListeners();
+            heroSignatureLink.ClearClickListeners();
             heroSignatureLink.onClick.AddListener(() => onSignatureUnit(signature));
 
 #if SPELLS

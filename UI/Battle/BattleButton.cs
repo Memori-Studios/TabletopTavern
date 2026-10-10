@@ -24,6 +24,7 @@ namespace TJ
         public bool IsOn => isOn;
         public void SetUp(string tooltipTitle, string tooltipDescription, Action<bool> onClickBoolToggleAction = null, Action onClickAction = null)
         {
+            // Not ClearClickListeners: the listener below plays the click itself.
             battleButton.Button.onClick.RemoveAllListeners();
             if (onClickBoolToggleAction != null)
             {

@@ -84,6 +84,18 @@ public static class RaceBonusRuleData
         public bool ImmuneToRetreatingAlliesMorale;
     }
 
+#if FACTIONUPDATE
+    // OlympianLeague - "Answered Prayers": each time a squad's morale first turns Wavering (up to TimesPerSquad a
+    // battle), lightning deals StrikeDamage to every enemy model within StrikeRadius of the squad's centre.
+    public struct AnsweredPrayersConfig
+    {
+        public float StrikeRadius;
+        public int StrikeDamage;
+        public int TimesPerSquad;
+    }
+    public static AnsweredPrayersConfig AnsweredPrayers;
+#endif
+
     public static CrashingHordeConfig CrashingHorde;
     public static ApexHuntersConfig ApexHunters;
     public static HuntersPatienceConfig HuntersPatience;
@@ -115,5 +127,8 @@ public static class RaceBonusRuleData
         IronResolve = new IronResolveConfig { ClampDurationSeconds = 10f };
         Deathcry = new DeathcryConfig { MeleeAttackBonus = 20, DurationSeconds = 20f };
         SanguineCourt = new SanguineCourtConfig { ImmuneToFlankMorale = true, ImmuneToTerror = true, ImmuneToRetreatingAlliesMorale = true };
+#if FACTIONUPDATE
+        AnsweredPrayers = new AnsweredPrayersConfig { StrikeRadius = 6f, StrikeDamage = 40, TimesPerSquad = 1 };
+#endif
     }
 }

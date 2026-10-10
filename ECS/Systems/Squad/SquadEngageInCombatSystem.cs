@@ -172,6 +172,9 @@ partial struct SquadEngageInCombatSystem : ISystem
                     if (flankCharge) ShockMorale(entityManager, squad.ValueRO.TargetSquadEntity, sanguineImmune);
                 }
 
+#if FACTIONUPDATE
+                if (!blocked) OlympianChargeLanded(entityManager, entityCommandBuffer, squad.ValueRO, collide.Position);
+#endif
                 entityCommandBuffer.AddComponent(squad.ValueRO.SelfEntity, new WearyTag { Remaining = TabletopTavernConstants.CHARGE_WEARY_TIME });
                 collide.Kind = blocked ? ChargeImpactKind.Blocked : flankCharge ? ChargeImpactKind.FlankCharge : ChargeImpactKind.Charge;
                 entityCommandBuffer.AddComponent(squad.ValueRO.SelfEntity, collide);
@@ -324,5 +327,24 @@ partial struct SquadEngageInCombatSystem : ISystem
         morale.CurrentMorale = math.max(0f, morale.CurrentMorale - TabletopTavernConstants.CHARGE_FLANK_MORALE_SHOCK);
         entityManager.SetComponentData(target, morale);
     }
+
+#if FACTIONUPDATE
+    // Zeus's Bolt rides the charger; Gorgon's Gaze waits on the charged. Spent is written at once so two squads
+    // landing on the Gorgon in the same frame cannot both be stoned.
+    static void OlympianChargeLanded(EntityManager entityManager, EntityCommandBuffer ecb, SquadEntity charger, float3 impact)
+    {
+        if (entityManager.HasComponent<ZeussBoltBlessing>(charger.SelfEntity))
+            ecb.AddComponent(charger.SelfEntity, new ZeusBoltStrike { Position = impact });
+
+        Entity target = charger.TargetSquadEntity;
+        if (!entityManager.HasComponent<GorgonsGazeBlessing>(target)) return;
+        if (entityManager.HasComponent<MonsterousSquadTag>(charger.SelfEntity)) return;
+        GorgonsGazeBlessing gaze = entityManager.GetComponentData<GorgonsGazeBlessing>(target);
+        if (gaze.Spent == 1) return;
+        gaze.Spent = 1;
+        entityManager.SetComponentData(target, gaze);
+        ecb.AddComponent<PetrifyRequest>(charger.SelfEntity);
+    }
+#endif
 }
 

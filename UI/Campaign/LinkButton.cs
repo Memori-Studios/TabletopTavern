@@ -12,6 +12,6 @@ public class LinkButton : MonoBehaviour
     }
     private void OnDestroy()
     {
-        button.Button.onClick.RemoveAllListeners();
+        button.Button.ClearClickListeners();
     }
 }

@@ -1,4 +1,5 @@
 using UnityEngine;
+using Memori.UI;
 using UnityEngine.UI;
 using Memori.Scenes;
 using System.Threading.Tasks;
@@ -19,9 +20,9 @@ public class ExitBattle : MonoBehaviour
     {
         panelCanvasGroup = GetComponent<MemoriCanvasGroup>();
 
-        returnToMainMenuButton.onClick.RemoveAllListeners();
+        returnToMainMenuButton.ClearClickListeners();
         returnToMainMenuButton.onClick.AddListener(ReturnToMainMenu);
-        cancelExitButton.onClick.RemoveAllListeners();
+        cancelExitButton.ClearClickListeners();
         cancelExitButton.onClick.AddListener(CancelExit);
     }
     // private void Update()

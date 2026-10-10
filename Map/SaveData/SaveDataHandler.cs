@@ -1749,6 +1749,8 @@ namespace Memori.SaveData
             //Hero counts mirror the hardcoded totals used by the max-difficulty-all-heroes check; bump if the roster grows.
 #if DEMO
             int totalHeroes = 4;
+#elif FACTIONUPDATE
+            int totalHeroes = 18;
 #else
             int totalHeroes = 16;
 #endif

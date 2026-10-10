@@ -26,7 +26,8 @@ namespace TJ.Campfire.EditorTools
         public const string PanelPath = PartFolder + "/Campfire Panel UI.prefab";
         const string ColumnPath = PartFolder + "/Campfire Choice Column.prefab";
         const string SlotPath = PartFolder + "/Campfire Train Slot.prefab";
-        const string StatCellPath = "Assets/Data/Prefabs/UI/Map/Town/Town Stat Cell.prefab";
+        const string StatPlaquePath = "Assets/Data/Prefabs/UI/Reuseable/Ornaments/Stat Plaque.prefab";
+        const string BandGradientPath = "Assets/ImportedPackages/InterfaceFantasyWarriorHUD/Sprites/HUD/SPR_HUD_FantasyWarrior_Gradient_Vertical_Smooth01.png";
         const string ScenePath = "Assets/Scenes/Map.unity";
         const string ButtonFolder = "Assets/Data/Prefabs/UI/Reuseable/Buttons";
         const string BasicBackgroundPath = "Assets/Data/Prefabs/UI/Reuseable/Basic Background.prefab";
@@ -35,6 +36,8 @@ namespace TJ.Campfire.EditorTools
         const string TableName = "MainLocalizationTable";
         static readonly string[] OldChildren = { "Options Panel", "Results Panel", "Train Picker" };
         const string ContinueName = "Continue Parent";
+        const string HaloFlarePath = "Assets/Data/Prefabs/UI/Reuseable/Ornaments/Halo Flare.prefab";
+        const float HaloSize = 112f;
         const float PanelWidth = 1160f;
         // The card's top edge sits 200 px below the top of a 1080 screen, so every state keeps its header in place.
         // The anchor height brings it to 130 on an 864-tall canvas (UI Scale 125%), clear of the Campfire banner.
@@ -50,6 +53,10 @@ namespace TJ.Campfire.EditorTools
         const float ChoiceButtonWidth = 246f;
         const float SlotWidth = 66f;
         const float SlotGap = 6f;
+        // Space alone separates the reserve slots from the deployed ten.
+        const float TrayGroupGap = 24f;
+        const float PlaqueGap = 10f;
+        const float PlaqueRowGap = 6f;
         const int DeployedSlots = 10;
         const int ReserveSlots = 3;
 
@@ -60,7 +67,6 @@ namespace TJ.Campfire.EditorTools
         static readonly Color Cream = Hex("ECE6D8");
         static readonly Color Sub = Hex("B4AA94");
         static readonly Color Flavour = Hex("A99F8A");
-        static readonly Color Cap = Hex("8C9AA2");
         static readonly Color Positive = Hex("7BD66F");
         static readonly Color Coin = Hex("E3BB71");
         static readonly Color Fire = Hex("E88C40");
@@ -68,9 +74,9 @@ namespace TJ.Campfire.EditorTools
         static readonly Color MarkEmpty = Hex("56605F");
 
         static TMP_FontAsset displayDrop, display;
-        static Sprite mount, solid, squareSliced, edgeFade;
+        static Sprite mount, solid, frameEdge, bandGradient;
         static Sprite fireIcon, healIcon, prestigeIcon, gearIcon, eyeIcon, goldIcon, chestIcon, mapIcon;
-        static GameObject standardButton, backButton, basicBackground, statCellPart;
+        static GameObject standardButton, backButton, basicBackground, statPlaque;
 
         static void LoadAssets()
         {
@@ -82,8 +88,8 @@ namespace TJ.Campfire.EditorTools
             sheet.TryGetValue("TooltipMount", out mount);
             sheet.TryGetValue("TooltipSolid", out solid);
             if (mount == null || solid == null) Debug.LogError("CampfirePanelBuilder: tooltip sheet sprites missing.");
-            squareSliced = Load<Sprite>("Assets/Art/Icons/UI/SquareSliced.png");
-            edgeFade = Load<Sprite>("Assets/ImportedPackages/ModernUIPack/Textures/Shadow/Vertical Shadow.png");
+                        frameEdge = Load<Sprite>("Assets/ImportedPackages/InterfaceFantasyWarriorHUD/Sprites/HUD/SPR_HUD_FantasyWarrior_Frame_Box_Small01.png");
+            bandGradient = Load<Sprite>(BandGradientPath);
             fireIcon = Load<Sprite>("Assets/ImportedPackages/InterfaceFantasyWarriorHUD/Sprites/Icons_Status/ICON_FantasyWarrior_Status_Burninating01_Clean.png");
             healIcon = Load<Sprite>("Assets/ImportedPackages/InterfaceFantasyWarriorHUD/Sprites/Icons_Map/ICON_FantasyWarrior_Map_Healing01_Clean.png");
             prestigeIcon = Load<Sprite>("Assets/Art/Icons/Events/PrestigeUnit.png");
@@ -95,7 +101,15 @@ namespace TJ.Campfire.EditorTools
             standardButton = Load<GameObject>(ButtonFolder + "/Button - Standard.prefab");
             backButton = Load<GameObject>(ButtonFolder + "/Button - Back.prefab");
             basicBackground = Load<GameObject>(BasicBackgroundPath);
-            statCellPart = Load<GameObject>(StatCellPath);
+            statPlaque = Load<GameObject>(StatPlaquePath);
+        }
+
+        // The view writes into every plaque Value, so a panel built without them would fail at runtime.
+        static bool PlaqueLoaded()
+        {
+            if (statPlaque != null) return true;
+            Debug.LogError($"CampfirePanelBuilder: no Stat Plaque at {StatPlaquePath}; nothing was rebuilt.");
+            return false;
         }
 
         static T Load<T>(string path) where T : Object
@@ -124,13 +138,7 @@ namespace TJ.Campfire.EditorTools
         static readonly (string key, string english)[] Keys =
         {
             ("campfirePickOne", "Pick One"),
-            ("campfirePickOneSub", "The fire burns out after that."),
             ("campfireReadyTitle", "Ready to March"),
-            ("campfireReadySub", "Press Continue when you are ready."),
-            ("campfireRestFlavor", "Dress wounds by the fire."),
-            ("campfireTrainFlavor", "Evening drills for one squad."),
-            ("campfireScavengeFlavor", "Search the camp for lost gear."),
-            ("campfireScoutFlavor", "Send riders down the road."),
             ("campfireRestLine", "Every squad heals {0}% of its health, reserves too."),
             ("campfireNoRisk", "No gold, no risk."),
             ("campfireTrainLine", "{0} of your {1} squads can train."),
@@ -142,8 +150,6 @@ namespace TJ.Campfire.EditorTools
             ("campfireChooseSquad", "Choose a Squad"),
             ("campfireNoSquadCanTrain", "No squad can train"),
             ("campfireTrainTitle", "Choose a squad to train"),
-            ("campfireTrainSub", "Squads at Prestige 2 show Max."),
-            ("campfireTrainHint", "Click a card to train it. Hover it for its stats."),
             ("campfireCanTrainCount", "{0} of {1} can train"),
             ("campfireMax", "Max"),
             ("campfireTrainDetail", "{0}: Prestige {1} for {2}"),
@@ -239,7 +245,9 @@ namespace TJ.Campfire.EditorTools
             EnsureKeys();
             LoadAssets();
             LoadTable();
+            if (!PlaqueLoaded()) return;
             EnsureParts(false);
+            if (!PartsCurrent()) return;
             BuildPanel();
         }
 
@@ -259,6 +267,7 @@ namespace TJ.Campfire.EditorTools
             EnsureKeys();
             LoadAssets();
             LoadTable();
+            if (!PlaqueLoaded()) return;
             EnsureParts(true);
             BuildPanel();
         }
@@ -488,6 +497,14 @@ namespace TJ.Campfire.EditorTools
             if (slotPart == null) slotPart = SavePart(SlotPath, "Campfire Train Slot", SlotPart);
         }
 
+        // A column part saved before the Stat Plaque strip has no plaques to fill; only Reset Part Prefabs replaces it.
+        static bool PartsCurrent()
+        {
+            if (columnPart.transform.Find("Strip/Plaque 1") != null) return true;
+            Debug.LogError($"CampfirePanelBuilder: {ColumnPath} has no Stat Plaques; run Tabletop Tavern > Campfire Panel > Reset Part Prefabs.");
+            return false;
+        }
+
         static GameObject SavePart(string path, string name, Action<GameObject> build)
         {
             // Built in a preview scene so the open scenes are never touched or marked changed.
@@ -512,7 +529,7 @@ namespace TJ.Campfire.EditorTools
             }
         }
 
-        // One choice: head, a two-cell stat strip, two lines on what it does, and its button.
+        // One choice: head, two stat plaques, two lines on what it does, and its button.
         static void ColumnPart(GameObject go)
         {
             RectTransform column = (RectTransform)go.transform;
@@ -531,21 +548,11 @@ namespace TJ.Campfire.EditorTools
             title.enableAutoSizing = true;
             title.fontSizeMin = 15f;
             title.fontSizeMax = 22f;
-            TMP_Text subtitle = Text("Subtitle", titles, display, 14f, Flavour, "Subtitle");
-            subtitle.fontStyle = FontStyles.Italic;
-            Wrap(subtitle);
 
+            // One plaque per row: two side by side overflow the 246 px column ("Reveals" beside "This act").
             RectTransform strip = Rect("Strip", column);
-            Fixed(strip.gameObject, -1f, 60f);
-            StripRules(strip);
-            HorizontalLayoutGroup row = HLayout(strip, 0f, TextAnchor.MiddleLeft, new RectOffset());
-            row.childForceExpandWidth = true;
-            row.childForceExpandHeight = true;
-            for (int i = 0; i < 2; i++)
-            {
-                GameObject cell = Instance(statCellPart, strip, "Cell " + (i + 1));
-                if (i == 0) cell.transform.Find("Divider").gameObject.SetActive(false);
-            }
+            VLayout(strip, PlaqueRowGap, new RectOffset());
+            for (int i = 0; i < 2; i++) Instance(statPlaque, strip, "Plaque " + (i + 1));
 
             RectTransform body = Rect("Body", column);
             VLayout(body, 10f, new RectOffset());
@@ -583,8 +590,9 @@ namespace TJ.Campfire.EditorTools
 
             RectTransform holder = Rect("Card Holder", slot);
             Fixed(holder.gameObject, 60f, 130f);
-            Image ring = Img(Stretch(Rect("Hover Ring", holder), -3f, -3f, -3f, -3f), squareSliced, Gold, Image.Type.Sliced);
+            Image ring = Img(Stretch(Rect("Hover Ring", holder), -3f, -3f, -3f, -3f), frameEdge, Gold, Image.Type.Sliced);
             ring.fillCenter = false;
+            ring.pixelsPerUnitMultiplier = 4f;
             ring.enabled = false;
 
             RectTransform marks = Rect("Marks", slot);
@@ -660,8 +668,8 @@ namespace TJ.Campfire.EditorTools
                 if (textureImage != null) textureImage.pixelsPerUnitMultiplier = TexturePixelsPerUnit;
             }
 
-            // A firelight wash inside the background, under its frame and corner ornaments, from the top edge to the header rule.
-            Image band = Img(Rect("Band", background.transform), edgeFade, A(Fire, BandAlpha));
+            // A firelight wash inside the background, under its frame and corner ornaments, falling from the top edge over the header.
+            Image band = Img(Rect("Band", background.transform), bandGradient, A(Fire, BandAlpha));
             RectTransform bandRect = band.rectTransform;
             bandRect.anchorMin = new Vector2(0f, 1f);
             bandRect.anchorMax = Vector2.one;
@@ -742,18 +750,13 @@ namespace TJ.Campfire.EditorTools
             RectTransform header = Rect("Header", root);
             Fixed(header.gameObject, -1f, HeaderHeight);
             HLayout(header, 16f, TextAnchor.MiddleLeft, new RectOffset(22, 22, 0, 0));
-            Image rule = Img(Rect("Band Rule", header), solid, A(Brass, 0.35f));
-            Anchor(rule.rectTransform, Vector2.zero, new Vector2(1f, 0f), Vector2.zero, new Vector2(0f, 1f));
-            Ignore(rule.gameObject);
 
             Mount(header, "Mount", 64f, fireIcon, 28f);
             RectTransform names = Rect("Names", header);
             VLayout(names, 2f, new RectOffset());
             Flexible(names.gameObject, 1f).preferredWidth = 0f;
             TMP_Text title = Text("Title", names, displayDrop, 32f, Gold, English("campfirePickOne"));
-            TMP_Text subtitle = Text("Subtitle", names, display, 16f, Sub, English("campfirePickOneSub"));
             Ref(so, "headerTitle", title);
-            Ref(so, "headerSubtitle", subtitle);
         }
 
         static void BuildChoosing(RectTransform root, SerializedObject so)
@@ -764,7 +767,7 @@ namespace TJ.Campfire.EditorTools
             Ref(so, "choosingBody", body.gameObject);
 
             // Rest
-            GameObject rest = ChoiceColumn(body, "Rest Column", healIcon, "CampfireRest", "campfireRestFlavor");
+            GameObject rest = ChoiceColumn(body, "Rest Column", healIcon, "CampfireRest");
             TMP_Text[] restValues = Cells(rest, new[] { "townHeal", "Cost" }, new[] { healIcon, goldIcon }, new[] { Positive, Positive });
             restValues[0].color = Positive;
             Unlocalize(restValues[0], "30%");
@@ -778,7 +781,7 @@ namespace TJ.Campfire.EditorTools
             Divider(body);
 
             // Train
-            GameObject train = ChoiceColumn(body, "Train Column", prestigeIcon, "Train", "campfireTrainFlavor");
+            GameObject train = ChoiceColumn(body, "Train Column", prestigeIcon, "Train");
             TMP_Text[] trainValues = Cells(train, new[] { "Prestige", "Cost" }, new[] { prestigeIcon, goldIcon }, new[] { Gold, Coin });
             trainValues[0].text = "+1";
             trainValues[0].color = Gold;
@@ -797,7 +800,7 @@ namespace TJ.Campfire.EditorTools
             Divider(body);
 
             // Scavenge
-            GameObject scavenge = ChoiceColumn(body, "Scavenge Column", gearIcon, "Scavenge", "campfireScavengeFlavor");
+            GameObject scavenge = ChoiceColumn(body, "Scavenge Column", gearIcon, "Scavenge");
             TMP_Text[] scavengeValues = Cells(scavenge, new[] { "campfireCaptionGear", "Cost" }, new[] { gearIcon, goldIcon }, new[] { Sub, Positive });
             Unlocalize(scavengeValues[0], "1 of 3");
             Localize(scavengeValues[1], "campfireFree");
@@ -810,7 +813,7 @@ namespace TJ.Campfire.EditorTools
             Divider(body);
 
             // Scout Ahead
-            GameObject scout = ChoiceColumn(body, "Scout Column", eyeIcon, "CampfireScoutAhead", "campfireScoutFlavor");
+            GameObject scout = ChoiceColumn(body, "Scout Column", eyeIcon, "CampfireScoutAhead");
             TMP_Text[] scoutValues = Cells(scout, new[] { "campfireCaptionReveals", "Gold" }, new[] { eyeIcon, goldIcon }, new[] { Sub, Coin });
             Localize(scoutValues[0], "campfireThisAct");
             Unlocalize(scoutValues[1], "+5");
@@ -848,40 +851,33 @@ namespace TJ.Campfire.EditorTools
             VLayout(titles, 1f, new RectOffset());
             Flexible(titles.gameObject, 1f).preferredWidth = 0f;
             Localize(Text("Title", titles, displayDrop, 22f, Gold, "Title"), "campfireTrainTitle");
-            TMP_Text sub = Text("Subtitle", titles, display, 14f, Flavour, "Subtitle");
-            sub.fontStyle = FontStyles.Italic;
-            Localize(sub, "campfireTrainSub");
             TMP_Text count = Text("Count", head, displayDrop, 17f, Cream, "11 of 13 can train");
             count.alignment = TextAlignmentOptions.MidlineRight;
             Ref(so, "trainCanCount", count);
 
-            // The strip mirrors the army bar: ten deployed slots, a rule, then the reserve slots.
+            // The strip mirrors the army bar: ten deployed slots, then the reserve slots.
             RectTransform tray = Rect("Tray", body);
             Img(tray, solid, Well);
-            Image trayEdge = Img(Stretch(Rect("Edge", tray)), squareSliced, WellEdge, Image.Type.Sliced);
+            Image trayEdge = Img(Stretch(Rect("Edge", tray)), frameEdge, WellEdge, Image.Type.Sliced);
             trayEdge.fillCenter = false;
+            trayEdge.pixelsPerUnitMultiplier = 4f;
             Ignore(trayEdge.gameObject);
-            HLayout(tray, 10f, TextAnchor.UpperCenter, new RectOffset(12, 12, 10, 10));
+            HLayout(tray, TrayGroupGap, TextAnchor.UpperCenter, new RectOffset(12, 12, 10, 10));
 
             SlotGroup(tray, "Deployed", "Deployed", DeployedSlots, out RectTransform deployedRow);
             RectTransform reserve = SlotGroup(tray, "Reserve", "Reserve", ReserveSlots, out RectTransform reserveRow);
-            // The rule between the groups belongs to the reserves: no reserve squads, no rule.
-            Image divider = Img(Rect("Divider", reserve), null, A(Brass, 0.45f));
-            Ignore(divider.gameObject);
-            Anchor(divider.rectTransform, Vector2.zero, new Vector2(0f, 1f), new Vector2(-6f, 0f), new Vector2(-5f, 0f));
             Ref(so, "deployedRow", deployedRow);
             Ref(so, "reserveRow", reserveRow);
             Ref(so, "reserveGroup", reserve.gameObject);
 
-            TMP_Text detail = Text("Detail", body, display, 16f, Cream, English("campfireTrainHint"));
+            // Blank until a slot is hovered; the line keeps its height so the footer never jumps.
+            TMP_Text detail = Text("Detail", body, display, 16f, Cream, "");
             detail.alignment = TextAlignmentOptions.Center;
             Fixed(detail.gameObject, -1f, 24f);
             Ref(so, "trainDetail", detail);
 
             RectTransform footer = Rect("Footer", body);
             VLayout(footer, 0f, new RectOffset(0, 0, 0, 14)).childAlignment = TextAnchor.UpperCenter;
-            Image footerRule = Img(Rect("Rule", footer), solid, A(Brass, 0.35f));
-            Fixed(footerRule.gameObject, -1f, 1f);
             RectTransform actions = Rect("Actions", footer);
             HLayout(actions, 0f, TextAnchor.MiddleCenter, new RectOffset(0, 0, 12, 0));
             GameObject back = Instance(backButton, actions, "Back");
@@ -895,7 +891,7 @@ namespace TJ.Campfire.EditorTools
             VLayout(group, 6f, new RectOffset());
             // Fixed to the full slot count, so a smaller army keeps every card in its army bar position.
             Fixed(group.gameObject, slots * SlotWidth + (slots - 1) * SlotGap, -1f);
-            Localize(CapLabel(group, "Caption"), captionKey);
+            Localize(SectionTitle(group, "Caption"), captionKey);
             row = Rect("Row", group);
             HorizontalLayoutGroup layout = HLayout(row, SlotGap, TextAnchor.UpperLeft, new RectOffset());
             layout.childForceExpandWidth = false;
@@ -916,6 +912,16 @@ namespace TJ.Campfire.EditorTools
             Fixed(mountRow.gameObject, 1070f, 84f);
             RectTransform mountCell = Mount(mountRow, "Mount", 84f, healIcon, 36f);
             Ref(so, "resultIcon", Child<Image>(mountCell, "Icon"));
+            // A round glow under the result's diamond, so a choice blooms behind it (RunSetupBuilder.AddHalo).
+            GameObject halo = Instance(Load<GameObject>(HaloFlarePath), mountCell, "Halo Flare");
+            halo.transform.SetAsFirstSibling();
+            RectTransform haloRect = (RectTransform)halo.transform;
+            haloRect.anchorMin = haloRect.anchorMax = new Vector2(0.5f, 0.5f);
+            haloRect.anchoredPosition = Vector2.zero;
+            haloRect.sizeDelta = new Vector2(HaloSize, HaloSize);
+            Ignore(halo);
+            // By name: this assembly does not reference Memori.UI.
+            Ref(so, "resultHalo", halo.GetComponent("UIFlare"));
 
             TMP_Text title = Text("Title", body, displayDrop, 30f, Gold, "Title");
             title.alignment = TextAlignmentOptions.Center;
@@ -927,25 +933,23 @@ namespace TJ.Campfire.EditorTools
             Fixed(description.gameObject, 760f, -1f);
             Ref(so, "resultDescription", description);
 
+            // Up to three plaques side by side; at about 246 px each a squad name still fits.
             RectTransform strip = Rect("Strip", body);
-            Fixed(strip.gameObject, 760f, 64f);
-            StripRules(strip);
-            HorizontalLayoutGroup row = HLayout(strip, 0f, TextAnchor.MiddleLeft, new RectOffset());
-            row.childForceExpandWidth = true;
-            row.childForceExpandHeight = true;
+            Fixed(strip.gameObject, 760f, -1f);
+            HLayout(strip, PlaqueGap, TextAnchor.MiddleLeft, new RectOffset());
             var cells = new Object[3];
             var labels = new Object[3];
             var values = new Object[3];
             for (int i = 0; i < 3; i++)
             {
-                GameObject cell = Instance(statCellPart, strip, "Cell " + (i + 1));
-                if (i == 0) cell.transform.Find("Divider").gameObject.SetActive(false);
-                Child<Image>(cell.transform, "Value Row/Icon").gameObject.SetActive(false);
-                TMP_Text label = Child<TMP_Text>(cell.transform, "Label");
+                GameObject plaque = Instance(statPlaque, strip, "Plaque " + (i + 1));
+                Child<Image>(plaque.transform, "Icon").gameObject.SetActive(false);
+                // CampfirePanel writes each label per result, so the plaque label keeps no localizer.
+                TMP_Text label = Child<TMP_Text>(plaque.transform, "Label");
                 Unlocalize(label, "Label");
-                TMP_Text value = Child<TMP_Text>(cell.transform, "Value Row/Value");
+                TMP_Text value = Child<TMP_Text>(plaque.transform, "Value");
                 Unlocalize(value, "Value");
-                cells[i] = cell;
+                cells[i] = plaque;
                 labels[i] = label;
                 values[i] = value;
             }
@@ -956,28 +960,26 @@ namespace TJ.Campfire.EditorTools
         #endregion
 
         #region Widgets
-        static GameObject ChoiceColumn(RectTransform parent, string name, Sprite icon, string titleKey, string flavourKey)
+        static GameObject ChoiceColumn(RectTransform parent, string name, Sprite icon, string titleKey)
         {
             GameObject column = Instance(columnPart, parent, name);
             Child<Image>(column.transform, "Head/Mount/Icon").sprite = icon;
             Localize(Child<TMP_Text>(column.transform, "Head/Titles/Title"), titleKey);
-            Localize(Child<TMP_Text>(column.transform, "Head/Titles/Subtitle"), flavourKey);
             return column;
         }
 
-        // Sets both stat cells' captions and icons. Gold values carry the coin sprite in their text, so the coin icon hides.
+        // Sets both stat plaques' labels and icons. Gold values carry the coin sprite in their text, so the coin slot stays clear.
         static TMP_Text[] Cells(GameObject column, string[] keys, Sprite[] icons, Color[] tints)
         {
             var values = new TMP_Text[keys.Length];
             for (int i = 0; i < keys.Length; i++)
             {
-                Transform cell = column.transform.Find("Strip/Cell " + (i + 1));
-                Localize(Child<TMP_Text>(cell, "Label"), keys[i]);
-                Image image = Child<Image>(cell, "Value Row/Icon");
+                Transform plaque = column.transform.Find("Strip/Plaque " + (i + 1));
+                Localize(Child<TMP_Text>(plaque, "Label"), keys[i]);
+                Image image = Child<Image>(plaque, "Icon");
                 image.sprite = icons[i];
-                image.color = tints[i];
-                image.gameObject.SetActive(icons[i] != goldIcon);
-                values[i] = Child<TMP_Text>(cell, "Value Row/Value");
+                image.color = icons[i] == goldIcon ? Color.clear : tints[i];
+                values[i] = Child<TMP_Text>(plaque, "Value");
             }
             return values;
         }
@@ -1021,16 +1023,6 @@ namespace TJ.Campfire.EditorTools
             Img(Stretch(Rect("Line", divider), 0f, 0f, 16f, 16f), null, A(Brass, 0.45f));
         }
 
-        static void StripRules(RectTransform strip)
-        {
-            Image top = Img(Rect("Top", strip), solid, A(Brass, 0.4f));
-            Anchor(top.rectTransform, new Vector2(0f, 1f), Vector2.one, new Vector2(0f, -1f), Vector2.zero);
-            Ignore(top.gameObject);
-            Image bottom = Img(Rect("Bottom", strip), solid, A(Brass, 0.4f));
-            Anchor(bottom.rectTransform, Vector2.zero, new Vector2(1f, 0f), Vector2.zero, new Vector2(0f, 1f));
-            Ignore(bottom.gameObject);
-        }
-
         static void Line(RectTransform parent, string name, Sprite icon)
         {
             RectTransform line = Rect(name, parent);
@@ -1044,13 +1036,8 @@ namespace TJ.Campfire.EditorTools
             Flexible(text.gameObject, 1f).preferredWidth = 0f;
         }
 
-        static TMP_Text CapLabel(RectTransform parent, string name)
-        {
-            TMP_Text label = Text(name, parent, display, 11f, Cap, name);
-            label.fontStyle = FontStyles.UpperCase;
-            label.characterSpacing = 10f;
-            return label;
-        }
+        // Section labels are normal case with no letter spacing; spaced capitals read as a web dashboard.
+        static TMP_Text SectionTitle(RectTransform parent, string name) => Text(name, parent, displayDrop, 18f, Gold, name);
 
         static void Spacer(RectTransform parent)
         {
@@ -1118,14 +1105,6 @@ namespace TJ.Campfire.EditorTools
             rect.offsetMin = new Vector2(left, bottom);
             rect.offsetMax = new Vector2(-right, -top);
             return rect;
-        }
-
-        static void Anchor(RectTransform rect, Vector2 min, Vector2 max, Vector2 offsetMin, Vector2 offsetMax)
-        {
-            rect.anchorMin = min;
-            rect.anchorMax = max;
-            rect.offsetMin = offsetMin;
-            rect.offsetMax = offsetMax;
         }
 
         static void Centre(RectTransform rect, float width, float height)

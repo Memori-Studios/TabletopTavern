@@ -21,12 +21,12 @@ namespace TJ
         [SerializeField] private Image headerBand;
         [SerializeField] private float bandAlpha = 0.12f;
         [SerializeField] private Image headerIcon;
+        [SerializeField] private UIFlare victoryHalo;
         [SerializeField] private Sprite victoryIcon;
         [SerializeField] private Sprite defeatIcon;
         [Tooltip("The Damage dealt panel's header icon, as on the Engagement panel.")]
         [SerializeField] private Sprite damageIcon;
         [SerializeField] private TMP_Text title;
-        [SerializeField] private TMP_Text subtitle;
         [SerializeField] private TMP_Text contextCaption;
         [SerializeField] private TMP_Text contextValue;
         [SerializeField] private TMP_Text slainValue;
@@ -63,7 +63,7 @@ namespace TJ
         }
 
         /// <summary>Fills the card, then fades it in. defeatText empty hides the defeat line; custom swaps Continue for Exit and Rematch.</summary>
-        public void Show(bool won, string titleText, string subtitleText, string caption, string context, string slain, string losses, string defeatText, bool custom)
+        public void Show(bool won, string titleText, string caption, string context, string slain, string losses, string defeatText, bool custom)
         {
             gameObject.SetActive(true);
             // Keys and a controller stay on the card instead of wandering onto the battle HUD behind it.
@@ -71,7 +71,6 @@ namespace TJ
             Color bad = Parse(ColorData.Negative);
             title.text = titleText;
             title.color = won ? Gold : bad;
-            subtitle.text = subtitleText;
             contextCaption.text = caption;
             contextValue.text = context;
             slainValue.text = slain;
@@ -98,6 +97,7 @@ namespace TJ
                 restingKnown = true;
             }
             StopAllCoroutines();
+            shownWon = won;
             IAudioRequester.Instance.PlaySFX(won ? SFXData.Trumpet : SFXData.Failure);
             StartCoroutine(Open());
         }
@@ -144,6 +144,9 @@ namespace TJ
             }
             cardGroup.interactable = true;
 
+            // A victory lands with the halo behind the crest; the title stays still, it is left aligned. A defeat lands quietly.
+            if (shownWon && victoryHalo != null) victoryHalo.Play();
+
             // The numbers count up while the badges deal in along the army bar; one sound for the whole deal.
             StartCoroutine(CountTo(slainValue, finalSlain, true));
             StartCoroutine(CountTo(lossesValue, finalLosses, false));
@@ -157,6 +160,7 @@ namespace TJ
         }
 
         string finalSlain, finalLosses;
+        bool shownWon;
         static readonly Regex FirstNumber = new(@"\d[\d,.\u00A0 ]*\d|\d");
 
         // Counts the first number in a finished line up from zero, keeping any words and colour tags around it.

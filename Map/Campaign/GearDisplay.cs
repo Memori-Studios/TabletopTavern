@@ -136,9 +136,10 @@ namespace TJ
             string bonusValueString = bonusValue > 0 ? $"<color={ColorData.Green}>+{bonusValue}</color>" : "";
             sellValueText.text = $"{sellLocalizedText}    {sellValue}{bonusValueString} <sprite name=GoldSprite>";
 
+            // Not ClearClickListeners: OnGearDisplaySelected plays the click itself.
             Button.onClick.RemoveAllListeners();
             Button.onClick.AddListener(OnGearDisplaySelected);
-            sellButton.onClick.RemoveAllListeners();
+            sellButton.ClearClickListeners();
             sellButton.onClick.AddListener(SellGear);
         }
         public void AquireGearJuice()
@@ -199,7 +200,7 @@ namespace TJ
         public void SellGear()
         {
             TooltipManager.Instance.HideTooltip();
-            sellButton.onClick.RemoveAllListeners();
+            sellButton.ClearClickListeners();
 
             //prestige a random unit
             if(gear.GearName == GearData.Mitre.GearName && !broken)

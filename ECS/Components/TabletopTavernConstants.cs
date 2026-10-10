@@ -461,6 +461,45 @@ public static class TabletopTavernConstants
         PlayerPrefs.GetInt(PREF_DEFAULT_FIRE_MODE, 0) == 1 ? RangedFireMode.FireAtWill : RangedFireMode.Volley;
     #endregion
 
+    #region Faction Update
+    // Olympian League exists in every build's enum and data; without FACTIONUPDATE no roster, enemy pool or list may show it.
+    public static bool IsRaceInBuild(Race race)
+    {
+#if FACTIONUPDATE
+        return true;
+#else
+        return race != Race.OlympianLeague;
+#endif
+    }
+
+    // A unit only a spell brings to the field: it keeps its stats and visuals but never joins a roster or a shop.
+    public static bool IsSummonOnly(UnitName unitName) => unitName == UnitName.NemeanLion;
+    #endregion
+
+#if FACTIONUPDATE
+    #region Olympian League blessings
+    // The numbers the AresFuryDesc .. GorgonsGazeDesc texts state; change both together.
+    public const float ARES_FURY_WEAPON_STRENGTH_SHARE = 0.5f;
+    public const int ARES_FURY_MELEE_ATTACK = 10;
+    public const float ARES_FURY_SECONDS = 20f;
+    public const float ATHENAS_AEGIS_HOLD_SECONDS = 10f;
+    public const float ATHENAS_AEGIS_SECONDS = 5f;
+    public const int ZEUS_BOLT_DAMAGE = 60;
+    public const float ZEUS_BOLT_RADIUS = 5f;
+    public const float POSEIDON_TREMOR_MODEL_SHARE = 0.5f;
+    public const float POSEIDON_TREMOR_FORCE = 14f;
+    public const float POSEIDON_TREMOR_RADIUS = 8f;
+    public const int APOLLO_SUN_ACCURACY = 15;
+    public const float HADES_SHADES_MORALE_PER_SECOND = -4f;
+    public const float HADES_SHADES_SECONDS = 10f;
+    public const float HADES_SHADES_RADIUS = 10f;
+    public const float GORGON_GAZE_SECONDS = 5f;
+    // Kassandra of Delphi's "Olympus Listens" (heroBonusDescription36): Answered Prayers strikes this many times per squad.
+    public const int ORACLE_HERO_ID = 18;
+    public const int ORACLE_PRAYER_MULTIPLIER = 2;
+    #endregion
+#endif
+
     public static bool IsAGoblinUnit(UnitName unitName) =>
         unitName == UnitName.GoblinRabble || unitName == UnitName.GoblinScrapShooters || unitName == UnitName.StonegulletEnforcers;
 
@@ -541,6 +580,13 @@ public static class TabletopTavernConstants
         UnitAttribute.ProjectileWard => attributes.ProjectileWard,
         UnitAttribute.SpellWard => attributes.SpellWard,
         UnitAttribute.BloodDrinker => attributes.BloodDrinker,
+        UnitAttribute.AresFury => attributes.AresFury,
+        UnitAttribute.AthenasAegis => attributes.AthenasAegis,
+        UnitAttribute.ZeussBolt => attributes.ZeussBolt,
+        UnitAttribute.PoseidonsTremor => attributes.PoseidonsTremor,
+        UnitAttribute.ApollosSun => attributes.ApollosSun,
+        UnitAttribute.HadesShades => attributes.HadesShades,
+        UnitAttribute.GorgonsGaze => attributes.GorgonsGaze,
         _ => false,
     };
 
@@ -669,6 +715,13 @@ public static class TabletopTavernConstants
             case UnitAttribute.ProjectileWard: attributes.ProjectileWard = true; break;
             case UnitAttribute.SpellWard: attributes.SpellWard = true; break;
             case UnitAttribute.BloodDrinker: attributes.BloodDrinker = true; break;
+            case UnitAttribute.AresFury: attributes.AresFury = true; break;
+            case UnitAttribute.AthenasAegis: attributes.AthenasAegis = true; break;
+            case UnitAttribute.ZeussBolt: attributes.ZeussBolt = true; break;
+            case UnitAttribute.PoseidonsTremor: attributes.PoseidonsTremor = true; break;
+            case UnitAttribute.ApollosSun: attributes.ApollosSun = true; break;
+            case UnitAttribute.HadesShades: attributes.HadesShades = true; break;
+            case UnitAttribute.GorgonsGaze: attributes.GorgonsGaze = true; break;
             default:
                 Debug.LogWarning($"[TabletopTavernConstants] SetAttribute: '{trait}' has no SquadAttributes backing field, ignoring.");
                 break;

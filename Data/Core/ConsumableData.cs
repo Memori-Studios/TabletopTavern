@@ -266,12 +266,20 @@ namespace TJ
         {
             return ConsumableCost(_consumableRarity) / 2;
         }
-        // Fills the {0} in ManaDraughtDesc from the constant, so a tuning change never needs a re-translation.
+        // Node id of the "Sell Value Consumable" Renown upgrade, which also doubles the Alchemist Potion's gold.
+        private const int SELL_VALUE_CONSUMABLE_NODE_ID = 18;
+        public static int AlchemistGold()
+        {
+            return Memori.SaveData.SaveDataHandler.GetUnlockedMetaprogressionNodes().Contains(SELL_VALUE_CONSUMABLE_NODE_ID) ? 10 : 5;
+        }
+        // Fills the {0} in ManaDraughtDesc and AlchemistDesc, so a tuning change never needs a re-translation.
         // Static because the Collection panel and reward tooltips read the key with no ConsumableManager.
         public static string FormatDescription(ConsumableEnum _consumableEnum, string _localizedDescription)
         {
             if (_consumableEnum == ConsumableEnum.ManaDraught)
                 return string.Format(_localizedDescription, TabletopTavernConstants.SPELL_MANA_POOL_DRAUGHT);
+            if (_consumableEnum == ConsumableEnum.Alchemist)
+                return string.Format(_localizedDescription, AlchemistGold());
             return _localizedDescription;
         }
         public static bool ConsumableRequiresTarget(ConsumableEnum _consumableEnum)

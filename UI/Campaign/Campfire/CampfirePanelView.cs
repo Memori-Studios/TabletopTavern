@@ -17,7 +17,6 @@ namespace TJ.Campfire
 
         #region Header
         [SerializeField] private TMP_Text headerTitle;
-        [SerializeField] private TMP_Text headerSubtitle;
         #endregion
 
         #region Choosing
@@ -57,6 +56,8 @@ namespace TJ.Campfire
         #region Result
         [SerializeField] private GameObject resultBody;
         [SerializeField] private Image resultIcon;
+        [Tooltip("Round glow behind the result mount; plays as the result lands.")]
+        [SerializeField] private UIFlare resultHalo;
         [SerializeField] private TMP_Text resultTitle;
         [SerializeField] private TMP_Text resultDescription;
         [SerializeField] private GameObject[] resultCells;
@@ -69,7 +70,6 @@ namespace TJ.Campfire
         #endregion
 
         private readonly List<CampfireTrainSlot> slots = new();
-        private string trainHint;
 
         public Button RestButton => restButton;
         public Button TrainButton => trainButton;
@@ -82,11 +82,7 @@ namespace TJ.Campfire
             if (scoutMapTrigger != null) scoutMapTrigger.SetUp(mapOverviewPanel, mapSceneUIManager);
         }
 
-        public void SetHeader(string title, string subtitle)
-        {
-            headerTitle.text = title;
-            headerSubtitle.text = subtitle;
-        }
+        public void SetHeader(string title) => headerTitle.text = title;
 
         public void ShowState(State state)
         {
@@ -162,16 +158,15 @@ namespace TJ.Campfire
             return slot;
         }
 
-        public void SetTrainCounts(string canCount, string hint, bool hasReserve)
+        public void SetTrainCounts(string canCount, bool hasReserve)
         {
             trainCanCount.text = canCount;
-            trainHint = hint;
-            trainDetail.text = hint;
+            trainDetail.text = string.Empty;
             reserveGroup.SetActive(hasReserve);
         }
 
-        // An empty detail puts the hint back.
-        public void SetTrainDetail(string detail) => trainDetail.text = string.IsNullOrEmpty(detail) ? trainHint : detail;
+        // A null detail clears the line when the cursor leaves a slot.
+        public void SetTrainDetail(string detail) => trainDetail.text = detail ?? string.Empty;
         #endregion
 
         #region Result
@@ -195,6 +190,12 @@ namespace TJ.Campfire
                 resultValues[i].text = cells[i].value;
             }
             ShowState(State.Result);
+            if (!isActiveAndEnabled) return;
+            CanvasGroup group = resultBody.GetComponent<CanvasGroup>();
+            if (group == null) group = resultBody.AddComponent<CanvasGroup>();
+            StartCoroutine(UIJuice.Open(group, null, UIJuice.OpenTime, 0f));
+            StartCoroutine(UIJuice.Punch(resultIcon.transform.parent, 1.1f));
+            if (resultHalo != null) resultHalo.Play();
         }
         #endregion
     }

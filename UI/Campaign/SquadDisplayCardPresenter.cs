@@ -107,6 +107,12 @@ namespace TJ
                 case Race.DrakosaurBrood:
                     drakosaurBroodBackground.enabled = true;
                     break;
+#if FACTIONUPDATE
+                // The League borrows Iron Legion's card background until it has its own art.
+                case Race.OlympianLeague:
+                    ironLegionBackground.enabled = true;
+                    break;
+#endif
             }
         }
         public void SetPrestigeFrames(int prestige)

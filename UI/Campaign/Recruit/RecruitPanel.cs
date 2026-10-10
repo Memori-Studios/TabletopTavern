@@ -1,4 +1,5 @@
 using TJ.Map;
+using Memori.UI;
 using UnityEngine;
 using Memori.Utilities;
 using UnityEngine.UI;
@@ -164,7 +165,7 @@ namespace TJ.Recruit
 
             StartCoroutine(CampaignManager.Instance.MapCamera.LerpFocusedOnNodeVolume(1, 0.25f));
 
-            skipButton.onClick.RemoveAllListeners();
+            skipButton.ClearClickListeners();
             skipButton.onClick.AddListener(CloseRecruitPanel);
 
             GearID[] recruitableGear = campaignSaveManager.SaveData.recruitableGear;
@@ -190,7 +191,7 @@ namespace TJ.Recruit
             OpenFeedback.PlayFeedbacks();
             StartCoroutine(CampaignManager.Instance.MapCamera.LerpFocusedOnNodeVolume(1, 0.25f));
 
-            skipButton.onClick.RemoveAllListeners();
+            skipButton.ClearClickListeners();
             skipButton.onClick.AddListener(CloseRecruitPanel);
 
             UnitName[] recruitableNames = campaignSaveManager.SaveData.recruitableUnits;
@@ -256,6 +257,7 @@ namespace TJ.Recruit
                 if(!_recruitCard.CanCombine) {
                     string errorLocalized = LocalizationManager.Instance.GetText("Max Units Recruited");
                     NotificationManager.Instance.ErrorNotification(errorLocalized);
+                    _recruitCard.PlayRefused();
                     return;
                 }
                 
@@ -273,6 +275,7 @@ namespace TJ.Recruit
                 {
                     string errorLocalized = LocalizationManager.Instance.GetText("Max Units Recruited");
                     NotificationManager.Instance.ErrorNotification(errorLocalized);
+                    _recruitCard.PlayRefused();
                     return;
                 }
 
@@ -302,6 +305,7 @@ namespace TJ.Recruit
                 {
                     string errorLocalized = LocalizationManager.Instance.GetText("Max Units Recruited");
                     NotificationManager.Instance.ErrorNotification(errorLocalized);
+                    _recruitCard.PlayRefused();
                     return;
                 }
 

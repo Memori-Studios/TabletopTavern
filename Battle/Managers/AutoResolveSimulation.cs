@@ -189,6 +189,11 @@ namespace TJ.Engagement
             q.ContactIndex = -1;
             q.ChargeWindow = 0; q.MoveSeconds = 0; q.SprintSeconds = 0; q.WearyTimer = q.StartWeary; q.HitCarry = 0; q.ShotCarry = 0; q.ThrownModels = 0;
             q.RetreatingAlliesTimer = 0; q.FireAtWill = false; q.ArmyLosses = false; q.DefensiveStance = false;
+#if FACTIONUPDATE
+            q.StartUnits = q.UnitsAlive;
+            q.FurySpent = q.AegisSpent = q.TremorSpent = q.SunLit = q.ShadesSpent = q.GazeSpent = false;
+            q.FuryTimer = q.AegisTimer = q.ShadesTimer = q.PetrifiedTimer = 0f;
+#endif
             q.SimReady = true;
         }
 
@@ -250,6 +255,10 @@ namespace TJ.Engagement
                 UpdateMorale(enemy, player, true);
                 UpdateMorale(player, enemy, false);
             }
+#if FACTIONUPDATE
+            Blessings(player, enemy);
+            Blessings(enemy, player);
+#endif
             EndOfTick(player);
             EndOfTick(enemy);
             return TotalHealth(player) + TotalHealth(enemy) != healthBefore || AnyoneClosing(player, enemy) || AnyoneClosing(enemy, player);
@@ -421,6 +430,9 @@ namespace TJ.Engagement
                 q.ChargeWindow = charged ? Model.ChargeWindow : 0f;
                 // Anti-large stops a charge from the front, and this model has no flanks (SquadEngageInCombatSystem).
                 if (target.squadStats.SquadAttributes.AntiLarge) q.ChargeWindow = 0f;
+#if FACTIONUPDATE
+                if (q.ChargeWindow > 0f) ChargeLanded(ref q, ref target, foes);
+#endif
                 if (charged) q.WearyTimer = TabletopTavernConstants.CHARGE_WEARY_TIME;
                 q.MoveSeconds = 0;
                 q.SprintSeconds = 0;
@@ -435,6 +447,9 @@ namespace TJ.Engagement
                     target.TargetIndex = q.SquadIndex;
                     target.ContactIndex = q.SquadIndex;
                     target.ChargeWindow = counterCharge ? Model.ChargeWindow : 0f;
+#if FACTIONUPDATE
+                    if (counterCharge) ChargeLanded(ref target, ref q, own);
+#endif
                     if (targetCharged) target.WearyTimer = TabletopTavernConstants.CHARGE_WEARY_TIME;
                     target.MoveSeconds = 0;
                     target.SprintSeconds = 0;
@@ -475,6 +490,9 @@ namespace TJ.Engagement
                         if (!q.squadStats.SquadAttributes.SteadyAim) accuracy -= TabletopTavernConstants.FIRE_AT_WILL_ACCURACY_PENALTY / 100f;
                     }
                 }
+#if FACTIONUPDATE
+                if (q.SunLit) accuracy += TabletopTavernConstants.APOLLO_SUN_ACCURACY / 100f;
+#endif
                 accuracy = math.clamp(accuracy, 0f, 1f);
 
                 float shots = q.UnitsAlive * Model.Dt / cadence;
@@ -515,6 +533,9 @@ namespace TJ.Engagement
             float block = target.shieldBlockChance;
             if (block > 0f && UnityEngine.Random.value < block) return 0;
             if (shooter.squadStats.SquadAttributes.FlamingAmmo) target.OnFireTimer = 5f;
+#if FACTIONUPDATE
+            if (shooter.SunLit) target.OnFireTimer = 5f;
+#endif
             return ApplyTakenMultiplier(damage, ref target);
         }
 
@@ -564,6 +585,9 @@ namespace TJ.Engagement
 
                     // ShieldedStanceSwitchSystem: a defensive squad trades half its attack for half again its defence.
                     int meleeAttack = q.squadStats.MeleeAttack - (q.DefensiveStance ? q.squadStats.MeleeAttack / 2 : 0) + (q.ChargeWindow > 0 ? q.ChargeBonus : 0);
+#if FACTIONUPDATE
+                    if (q.FuryTimer > 0f) meleeAttack += TabletopTavernConstants.ARES_FURY_MELEE_ATTACK;
+#endif
                     int meleeDefense = target.squadStats.MeleeDefense + (target.DefensiveStance ? target.squadStats.MeleeDefense / 2 : 0);
                     if (flanking) meleeDefense = (int)(meleeDefense * 0.5f);
                     int hitChance = TabletopTavernConstants.MELEE_BASE_HIT_CHANCE + (meleeAttack - meleeDefense) * TabletopTavernConstants.MELEE_HIT_CHANCE_PER_POINT;
@@ -620,6 +644,9 @@ namespace TJ.Engagement
         // Models able to swing this second: the front rank less anyone airborne.
         private static int Attackers(ref AutoResolveSquad q, int contacts = 1)
         {
+#if FACTIONUPDATE
+            if (q.PetrifiedTimer > 0f) return 0;
+#endif
             if (q.squadStats.unitSize == UnitSize.SingleUnit) return math.min(1, q.UnitsAlive);
             int front = (int)math.ceil(q.FormationWidth * Model.FrontFraction * (1f + Model.ExtraContactFront * math.max(0, contacts - 1)));
             return math.max(0, math.min(q.UnitsAlive - q.ThrownModels, front));
@@ -668,6 +695,9 @@ namespace TJ.Engagement
                 for (int j = 0; j < foes.Length; j++)
                     if (foes[j].squadStats.unitSize == UnitSize.Monstrous || foes[j].squadStats.unitSize == UnitSize.SingleUnit) { ws += q.squadStats.WeaponStrength; break; }
             if (q.squadStats.SquadAttributes.ThrowingAxes) ws = (int)(ws * 1.15f);
+#if FACTIONUPDATE
+            if (q.FuryTimer > 0f) ws += (int)(q.squadStats.WeaponStrength * TabletopTavernConstants.ARES_FURY_WEAPON_STRENGTH_SHARE);
+#endif
             return ws;
         }
 
@@ -751,6 +781,9 @@ namespace TJ.Engagement
         private static void Hit(ref AutoResolveSquad target, int victim, int damage, ref AutoResolveSquad striker, AutoResolveSquad[] targetSide)
         {
             if (damage <= 0 || target.UnitsAlive <= 0) return;
+#if FACTIONUPDATE
+            if (target.AegisTimer > 0f) return;
+#endif
             victim = math.clamp(victim, 0, target.UnitsAlive - 1);
             int before = target.UnitHealth[victim];
             int dealt = math.min(before, damage);
@@ -773,6 +806,86 @@ namespace TJ.Engagement
         }
 
         #endregion
+
+#if FACTIONUPDATE
+        #region Olympian League blessings
+
+        // Checked after the second's fighting and morale, the way the live systems read them on the next frame.
+        private static void Blessings(AutoResolveSquad[] own, AutoResolveSquad[] foes)
+        {
+            for (int i = 0; i < own.Length; i++)
+            {
+                ref AutoResolveSquad q = ref own[i];
+                if (!q.SimReady || q.UnitsAlive <= 0) continue;
+                SquadAttributes blessed = q.squadStats.SquadAttributes;
+
+                if (blessed.AresFury && !q.FurySpent && q.UnitsSlain > 0)
+                {
+                    q.FurySpent = true;
+                    q.FuryTimer = TabletopTavernConstants.ARES_FURY_SECONDS;
+                }
+                if (blessed.ApollosSun && q.UnitsSlain > 0) q.SunLit = true;
+                if (blessed.AthenasAegis && !q.AegisSpent && q.EngagedSeconds >= TabletopTavernConstants.ATHENAS_AEGIS_HOLD_SECONDS)
+                {
+                    q.AegisSpent = true;
+                    q.AegisTimer = TabletopTavernConstants.ATHENAS_AEGIS_SECONDS;
+                }
+
+                if (blessed.PoseidonsTremor && !q.TremorSpent && q.UnitsAlive < q.StartUnits * TabletopTavernConstants.POSEIDON_TREMOR_MODEL_SHARE)
+                {
+                    q.TremorSpent = true;
+                    for (int j = 0; j < foes.Length; j++)
+                    {
+                        ref AutoResolveSquad foe = ref foes[j];
+                        if (!Standing(ref foe) || ResistsKnockback(ref foe)) continue;
+                        if (Distance(ref q, ref foe) > TabletopTavernConstants.POSEIDON_TREMOR_RADIUS) continue;
+                        foe.ThrownModels = math.min(foe.UnitsAlive, foe.ThrownModels + ModelsInHalfCircle(ref foe, TabletopTavernConstants.POSEIDON_TREMOR_RADIUS));
+                    }
+                }
+
+                if (blessed.HadesShades && !q.ShadesSpent && q.Morale <= q.squadStats.Leadership * TabletopTavernConstants.MORALE_WAVERING_THRESHOLD)
+                {
+                    q.ShadesSpent = true;
+                    for (int j = 0; j < foes.Length; j++)
+                        if (Standing(ref foes[j]) && Distance(ref q, ref foes[j]) <= TabletopTavernConstants.HADES_SHADES_RADIUS)
+                            foes[j].ShadesTimer = TabletopTavernConstants.HADES_SHADES_SECONDS;
+                }
+            }
+        }
+
+        // Zeus's Bolt strikes where the charge lands; Gorgon's Gaze stones the first squad to land a charge on her.
+        private static void ChargeLanded(ref AutoResolveSquad charger, ref AutoResolveSquad charged, AutoResolveSquad[] chargedSide)
+        {
+            if (charger.squadStats.SquadAttributes.ZeussBolt)
+            {
+                // Highest slot first, so a model that dies and is replaced by the last one is never struck twice.
+                int models = ModelsInHalfCircle(ref charged, TabletopTavernConstants.ZEUS_BOLT_RADIUS);
+                for (int victim = models - 1; victim >= 0; victim--)
+                    Hit(ref charged, victim, TabletopTavernConstants.ZEUS_BOLT_DAMAGE, ref charger, chargedSide);
+            }
+
+            UnitSize size = charger.squadStats.unitSize;
+            if (charged.squadStats.SquadAttributes.GorgonsGaze && !charged.GazeSpent && size != UnitSize.Monstrous && size != UnitSize.SingleUnit)
+            {
+                charged.GazeSpent = true;
+                charger.PetrifiedTimer = TabletopTavernConstants.GORGON_GAZE_SECONDS;
+            }
+        }
+
+        // UnitSetUpSystem gives these ResistKnockbackTag.
+        private static bool ResistsKnockback(ref AutoResolveSquad q) =>
+            q.squadStats.unitSize == UnitSize.Monstrous || q.squadStats.unitSize == UnitSize.SingleUnit || q.squadStats.unitSize == UnitSize.Artillery;
+
+        // A burst at the contact line covers about half its circle of the enemy formation.
+        private static int ModelsInHalfCircle(ref AutoResolveSquad target, float radius)
+        {
+            float spread = math.max(1f, TabletopTavernConstants.GetSpread(target.squadStats.unitSize));
+            int models = (int)math.ceil(0.5f * math.PI * radius * radius / (spread * spread));
+            return math.clamp(models, 0, target.UnitsAlive);
+        }
+
+        #endregion
+#endif
 
         #region Morale and bookkeeping
 
@@ -831,6 +944,9 @@ namespace TJ.Engagement
                 if (winning) modifier += TabletopTavernConstants.MORALE_WINNING_BONUS;
                 if (losing) modifier += TabletopTavernConstants.MORALE_LOSING_PENALTY;
                 if (q.OnFireTimer > 0f) modifier -= TabletopTavernConstants.MORALE_FIRE_DAMAGE_PENALTY;
+#if FACTIONUPDATE
+                if (q.ShadesTimer > 0f) modifier += TabletopTavernConstants.HADES_SHADES_MORALE_PER_SECOND;
+#endif
                 modifier *= TabletopTavernConstants.MORALE_LOSS_MODIFIER;
 
                 q.Morale = math.clamp(q.Morale + modifier * Model.Dt, 0f, q.squadStats.Leadership);
@@ -856,6 +972,12 @@ namespace TJ.Engagement
                 q.FlankedTimer = math.max(0f, q.FlankedTimer - Model.Dt);
                 q.RetreatingAlliesTimer = math.max(0f, q.RetreatingAlliesTimer - Model.Dt);
                 q.OnFireTimer = math.max(0f, q.OnFireTimer - Model.Dt);
+#if FACTIONUPDATE
+                q.FuryTimer = math.max(0f, q.FuryTimer - Model.Dt);
+                q.AegisTimer = math.max(0f, q.AegisTimer - Model.Dt);
+                q.ShadesTimer = math.max(0f, q.ShadesTimer - Model.Dt);
+                q.PetrifiedTimer = math.max(0f, q.PetrifiedTimer - Model.Dt);
+#endif
                 // Thrown models land again after the throw time; half of them per second is close enough.
                 q.ThrownModels = math.max(0, q.ThrownModels - (int)math.ceil(q.ThrownModels * (Model.Dt / Model.ThrowSeconds)));
                 if (q.UnitsAlive <= 0) { q.Broken = true; q.finalHealth = math.min(q.finalHealth, 0); }

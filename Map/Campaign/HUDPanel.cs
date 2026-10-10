@@ -61,6 +61,8 @@ namespace TJ.Map
         [SerializeField] private CanvasGroup renameSquadConfirmationPopup;
         [SerializeField] private Button renameSquadButtonConfirm, renameSquadButtonCancel;
         [SerializeField] private TMP_InputField renameSquadInputField;
+        [SerializeField] private RectTransform disbandPopupBody;
+        [SerializeField] private RectTransform renamePopupBody;
 
         [Header("Weather Hover")]
         [SerializeField] private CanvasGroup weatherHoverPanel;
@@ -160,7 +162,7 @@ namespace TJ.Map
             disbandSquadButtonConfirm.onClick.AddListener(() => DisbandPendingSquads());
             disbandSquadButtonCancel.onClick.AddListener(() => HideDisbandSquadConfirmation());
             renameSquadButtonConfirm.onClick.AddListener(() => RenameSquad());
-            renameSquadButtonCancel.onClick.AddListener(() => { renameSquadConfirmationPopup.CGDisable(); mapSceneUIManager.MapSceneManager.SetMapInput(true); });
+            renameSquadButtonCancel.onClick.AddListener(() => { ClosePopup(renameSquadConfirmationPopup); mapSceneUIManager.MapSceneManager.SetMapInput(true); });
             // testAquireConsumableButton.onClick.AddListener(() => CampaignManager.Instance.CampaignSaveManager.AquireConsumable(ConsumableData.GetRandomConsumable(campaignSaveManager.GetCampaignRandom())));
 
             campaignSaveManager.OnChapterCompleted += UpdateChapterText;
@@ -270,7 +272,9 @@ namespace TJ.Map
             // Debug.Log($"Army structure changed");
             RefreshTroopsPanel();
             UpdateHeroNameAndRace(); // Kobold count in the hero tooltip
-            CloseAllPopUps();
+            // Silent: CloseAllPopUps plays the close sound, which then played on every move and merge.
+            CloseNonSquadPopUps();
+            DeselectAllCards();
             squadBattleInfo.InvalidateSnapshotCache();
             squadBattleInfo.Unhover();
         }
@@ -558,12 +562,12 @@ namespace TJ.Map
         public void ShowDisbandSquadConfirmation(string _guID)
         {
             pendingDisbandGuids = new List<string> { _guID };
-            disbandSquadConfirmationPopup.CGEnable();
+            OpenPopup(disbandSquadConfirmationPopup, disbandPopupBody);
             disbandSquadConfirmationPopup.GetComponentInChildren<SettingsToggle>().OverrideToggleFromSettings();
         }
         public void HideDisbandSquadConfirmation()
         {
-            disbandSquadConfirmationPopup.CGDisable();
+            ClosePopup(disbandSquadConfirmationPopup);
         }
         public void DisbandSquad(string _guID)
         {
@@ -592,7 +596,7 @@ namespace TJ.Map
             else
             {
                 pendingDisbandGuids = guids;
-                disbandSquadConfirmationPopup.CGEnable();
+                OpenPopup(disbandSquadConfirmationPopup, disbandPopupBody);
                 disbandSquadConfirmationPopup.GetComponentInChildren<SettingsToggle>().OverrideToggleFromSettings();
                 IAudioRequester.Instance.PlaySFX(SFXData.DisbandSquad);
             }
@@ -600,15 +604,24 @@ namespace TJ.Map
         public void MergeSelectedSquads()
         {
             List<string> guids = new();
+            SquadDisplayCardMenu survivor = null;
             foreach (SquadDisplayCardMenu card in selectedCards)
+            {
                 guids.Add(card.UniqueID);
+                // MergeSquads fills the squad in the lowest slot first, so that one survives.
+                if (survivor == null || card.GetSquadToLoad().UnitIndex < survivor.GetSquadToLoad().UnitIndex) survivor = card;
+            }
+            if (survivor == null) return;
+            string survivorGuid = survivor.UniqueID;
+            int unitsBefore = UnitCount(survivor.GetSquadToLoad());
             campaignSaveManager.MergeSquads(guids);
+            LandAfterRebuild(survivorGuid, true, unitsBefore);
         }
         public void GiveRenameSquadPrompt(string _guID)
         {
             renameSquadGUID = _guID;
             renameSquadInputField.text = campaignSaveManager.GetUnitNameOrUnitNameOverride(_guID);
-            renameSquadConfirmationPopup.CGEnable();
+            OpenPopup(renameSquadConfirmationPopup, renamePopupBody);
             mapSceneUIManager.MapSceneManager.SetMapInput(false);
             renameSquadInputField.ActivateInputField();
             renameSquadInputField.Select();
@@ -616,17 +629,19 @@ namespace TJ.Map
         public void RenameSquad()
         {
             campaignSaveManager.RenameSquad(renameSquadGUID, renameSquadInputField.text);
-            renameSquadConfirmationPopup.CGDisable();
+            ClosePopup(renameSquadConfirmationPopup);
             mapSceneUIManager.MapSceneManager.SetMapInput(true);
         }
         public void MoveUnit(string _guID, int _index)
         {
             campaignSaveManager.MoveUnitToIndex(_guID, _index);
+            LandAfterRebuild(_guID, false);
             TutorialManager.Instance.CompleteStepCheck(TutorialStepEnum.ReorderUnits);
         }
         public void ShiftUnit(string _guID, int _index)
         {
             campaignSaveManager.ShiftUnitToIndex(_guID, _index);
+            LandAfterRebuild(_guID, false);
             TutorialManager.Instance.CompleteStepCheck(TutorialStepEnum.ReorderUnits);
         }
         // Bounds-check (not raycast) lookup so the boosted-sorting-order dragged card can't occlude its own hover target.
@@ -773,7 +788,19 @@ namespace TJ.Map
             goldMMFeedback.StopFeedbacks();
             goldMMFeedback.PlayFeedbacks();
             if (rollGoldCoroutine != null) StopCoroutine(rollGoldCoroutine);
-            rollGoldCoroutine = StartCoroutine(MemoriUI.RollTextCoroutine(float.Parse(goldAmountText.text), _goldAmount, goldAmountText));
+            int shownGold = int.TryParse(goldAmountText.text, out int parsedGold) ? parsedGold : _goldAmount;
+            if (!_goldShown)
+            {
+                // The first value on load arrives without ticks.
+                _goldShown = true;
+                rollGoldCoroutine = StartCoroutine(MemoriUI.RollTextCoroutine(shownGold, _goldAmount, goldAmountText));
+            }
+            else
+            {
+                bool gain = _goldAmount > shownGold;
+                rollGoldCoroutine = StartCoroutine(UIJuice.CountTo(goldAmountText, shownGold, _goldAmount, GoldCountTime, v => v.ToString(), gain ? PlayCoinTick : null));
+                if (_goldAmount < shownGold) FlashGoldLoss();
+            }
 
             string earnedLocalized = LocalizationManager.Instance.GetText("earned interest per");
             string bonusLocalized = LocalizationManager.Instance.GetText("bonus interest from Omen of Famine");
@@ -938,6 +965,99 @@ namespace TJ.Map
             isFreeCameraMode = false;
         }
 
+        #region Juice
+        private const float GoldCountTime = 0.35f;
+        private const float GoldFlashTime = 0.45f;
+        private bool _goldShown;
+        private Color _goldRestColor;
+        private bool _goldRestKnown;
+        private Coroutine _goldFlash;
+
+        private static void PlayCoinTick() => IAudioRequester.Instance.PlaySFX(SFXData.CoinClink);
+
+        // A loss flashes the bad colour once; buying already plays its own sound.
+        private void FlashGoldLoss()
+        {
+            if (!_goldRestKnown) { _goldRestColor = goldAmountText.color; _goldRestKnown = true; }
+            if (_goldFlash != null) StopCoroutine(_goldFlash);
+            _goldFlash = StartCoroutine(FlashGold());
+        }
+
+        private IEnumerator FlashGold()
+        {
+            Color bad = ColorVision.Bad(Color.red);
+            for (float t = 0f; t < 1f; t += Mathf.Min(Time.unscaledDeltaTime, UIJuice.MaxStep) / GoldFlashTime)
+            {
+                goldAmountText.color = Color.Lerp(bad, _goldRestColor, UIJuice.EaseOutCubic(t));
+                yield return null;
+            }
+            goldAmountText.color = _goldRestColor;
+            _goldFlash = null;
+        }
+
+        // A move or merge rebuilds the whole bar, sometimes twice in one frame; the card lands on the next frame.
+        private void LandAfterRebuild(string _guid, bool _merge, int _unitsBefore = 0)
+        {
+            if (string.IsNullOrEmpty(_guid) || !isActiveAndEnabled) return;
+            StartCoroutine(LandNextFrame(_guid, _merge, _unitsBefore));
+        }
+
+        // A merge shows the troops that joined with the card's own green +N, the heal pop's language.
+        private IEnumerator LandNextFrame(string _guid, bool _merge, int _unitsBefore)
+        {
+            yield return null;
+            if (playerSquadsCards == null) yield break;
+            SquadDisplayCardMenu card = playerSquadsCards.Find(c => c != null && c.UniqueID == _guid);
+            if (card == null) yield break;
+            card.PlayLanded();
+            IAudioRequester.Instance.PlaySFX(_merge ? SFXData.UpgradeUnlock : SFXData.TinyClick);
+            if (!_merge) yield break;
+            int joined = UnitCount(card.GetSquadToLoad()) - _unitsBefore;
+            if (joined > 0) card.ShowHealthRecoveryJuice(joined);
+        }
+
+        private static int UnitCount(SquadToLoad _squad) =>
+            int.TryParse(TabletopTavernData.Instance.GetSquadCurrentUnitCount(_squad), out int count) ? count : 0;
+
+        private readonly Dictionary<CanvasGroup, Coroutine> _popupMotion = new();
+
+        private void OpenPopup(CanvasGroup _popup, RectTransform _body)
+        {
+            StopPopupMotion(_popup);
+            _popup.CGEnable();
+            _popupMotion[_popup] = StartCoroutine(UIJuice.Open(_popup, _body));
+            IAudioRequester.Instance.PlaySFX(SFXData.OpenUI);
+        }
+
+        // Runs on every army change too, so a pop-up that is already shut stays silent.
+        private void ClosePopup(CanvasGroup _popup)
+        {
+            StopPopupMotion(_popup);
+            if (_popup.alpha <= 0f)
+            {
+                _popup.CGDisable();
+                return;
+            }
+            _popup.interactable = false;
+            _popup.blocksRaycasts = false;
+            IAudioRequester.Instance.PlaySFX(SFXData.ClosePopUp);
+            _popupMotion[_popup] = StartCoroutine(FadeOutPopup(_popup));
+        }
+
+        private IEnumerator FadeOutPopup(CanvasGroup _popup)
+        {
+            yield return UIJuice.Close(_popup);
+            _popup.CGDisable();
+            _popupMotion.Remove(_popup);
+        }
+
+        private void StopPopupMotion(CanvasGroup _popup)
+        {
+            if (!_popupMotion.TryGetValue(_popup, out Coroutine motion)) return;
+            if (motion != null) StopCoroutine(motion);
+            _popupMotion.Remove(_popup);
+        }
+        #endregion
         public void OnDestroy()
         {
             InputDevices.Changed -= RefreshFreeCameraPrompts;

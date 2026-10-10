@@ -147,6 +147,9 @@ namespace TJ.Spells
         {
             Race.Special, Race.IronLegion, Race.Gruntkin, Race.RavenHost, Race.TaelindorForest,
             Race.SanguineCourt, Race.SakuraDynasty, Race.DeepstoneHold, Race.DrakosaurBrood,
+#if FACTIONUPDATE
+            Race.OlympianLeague,
+#endif
         };
 
         // Rows are built once from the full pool, in a fixed order, and never rebuilt - so swapping a

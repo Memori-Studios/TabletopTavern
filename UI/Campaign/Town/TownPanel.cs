@@ -103,7 +103,7 @@ namespace TJ.Town
 
             // A garrison fight hands the screen to the engagement panel, which brings this panel back after the battle.
             if (townSaveData.townInteractionStatus == TownInteractionStatus.None || townSaveData.townInteractionStatus == TownInteractionStatus.Entered)
-                townPanelCanvasGroup.FadeInAsync(0.25f);
+                OpenPanel();
             TutorialManager.Instance.LoadStepsFromRandomSpot(new TutorialStep[1] { TutorialData.TownExplanation });
 
         }
@@ -153,7 +153,7 @@ namespace TJ.Town
                 campaignSaveManager.SaveData.ordealWeather);
 
             string weatherNameLocalized = LocalizationManager.Instance.GetText(weather.ToString());
-            string weatherDescriptionLocalized = LocalizationManager.Instance.GetText(weather.ToString() + "Desc");
+            string weatherDescriptionLocalized = WeatherInfo.GetDescription(weather);
             view.SetWeather(weather, weatherNameLocalized, weatherDescriptionLocalized);
         }
         // Deliberately not the node's biome roll. Sacking a town is always a garrison fight, and both
@@ -249,7 +249,7 @@ namespace TJ.Town
                 Destroy(child.gameObject);
             }
             SquadToLoad[] garrison = campaignSaveManager.SaveData.townData.townGarrisonUnits;
-            view.SetGarrisonCount(garrison.Length, string.Format(LocalizationManager.Instance.GetText("townSquadCount"), garrison.Length));
+            view.SetGarrisonCount(garrison.Length);
             List<SquadDisplayCardMenu> enemySquadsCards = new ();
             foreach (SquadToLoad squad in garrison)
             {
@@ -275,7 +275,12 @@ namespace TJ.Town
         }
         public void ReloadTownPanel()
         {
-            townPanelCanvasGroup.FadeInAsync(0.25f);
+            OpenPanel();
+        }
+        private void OpenPanel()
+        {
+            townPanelCanvasGroup.CGEnable();
+            StartCoroutine(UIJuice.Open(townPanelCanvasGroup.GetComponent<CanvasGroup>(), view.transform as RectTransform));
         }
         private void LogTownChoice(string choice)
         {
@@ -301,8 +306,9 @@ namespace TJ.Town
             SetUpTownInfo();
             ShowRoad(TownPanelView.Road.Sacked, false);
             view.SetFightSubtitle($"{LocalizationManager.Instance.GetText("townGarrisonDefeated")} <color={ColorData.Negative}>{LocalizationManager.Instance.GetText("townReservesDidNotHeal")}</color>");
-            townPanelCanvasGroup.FadeInAsync(0.25f);
+            OpenPanel();
             LootTown();
+            view.PlaySacked();
 
             if (HeroBonusManager.Instance.ActiveHeroID == 5 || HeroBonusManager.Instance.ActiveHeroID == 6)
             {
@@ -382,6 +388,7 @@ namespace TJ.Town
             campaignSaveManager.SetTownData(townSaveData);
 
             ShowRoad(TownPanelView.Road.Entered, true);
+            view.PlayEntered();
             view.SetEnterStrip(LocalizationManager.Instance.GetText("townHealed"), HealPercentText(), RecruitRarityText());
             view.SetEnterLines($"<color={ColorData.Positive}>{string.Format(LocalizationManager.Instance.GetText("townHealedLine"), HealPercentText())}</color>",
                 LocalizationManager.Instance.GetText("townRecruitLine"), RecruitLimitNote());

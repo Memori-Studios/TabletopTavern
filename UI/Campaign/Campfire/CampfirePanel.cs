@@ -139,7 +139,7 @@ namespace TJ.Campfire
 
         private void ShowChoosing()
         {
-            view.SetHeader(Text("campfirePickOne"), Text("campfirePickOneSub"));
+            view.SetHeader(Text("campfirePickOne"));
             view.ShowState(CampfirePanelView.State.Choosing);
         }
 
@@ -244,7 +244,7 @@ namespace TJ.Campfire
                     trainable ? PriceText(squad) : Text("campfireMax"), trainable, OnTrainSquadPicked, OnTrainSquadHovered);
             }
 
-            view.SetTrainCounts(string.Format(Text("campfireCanTrainCount"), GetTrainableSquads().Count, CountLiveSquads()), Text("campfireTrainHint"), hasReserve);
+            view.SetTrainCounts(string.Format(Text("campfireCanTrainCount"), GetTrainableSquads().Count, CountLiveSquads()), hasReserve);
             view.ShowState(CampfirePanelView.State.Train);
             trainPickerOpen = true;
             IAudioRequester.Instance.PlaySFX(SFXData.OpenUI);
@@ -381,7 +381,7 @@ namespace TJ.Campfire
         private void ShowResult(CampfireChoice choice, string title, string description, List<(string, string)> cells)
         {
             IAudioRequester.Instance.PlaySFX(SFXData.ChoiceMade);
-            view.SetHeader(Text("campfireReadyTitle"), Text("campfireReadySub"));
+            view.SetHeader(Text("campfireReadyTitle"));
             view.ShowResult(choice, title, description, cells);
             SetContinueVisible(true);
         }
@@ -396,6 +396,7 @@ namespace TJ.Campfire
         public override async void ClosePanel()
         {
             CloseFeedback();
+            IAudioRequester.Instance.PlaySFX(SFXData.CloseUI);
             view.ClearSlots();
             campaignSaveManager.RemoveZeroHealthSquads();
             await Task.Delay(200);

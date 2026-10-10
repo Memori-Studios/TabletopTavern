@@ -35,7 +35,10 @@ SpellStatBonus,
 // Edric's signature. Squad-level like Snow and LesserMoraleSpell, so it carries a ChargeEmpoweredTag
 // rather than a per-unit stat: ChargeBonus is not a live stat, it is read from the stats blob by
 // SquadChargeBonusApplicationSystem at charge time and emitted there as MeleeAttack + WeaponStrength.
-RallyTheBanners
+RallyTheBanners,
+// Olympian League blessings, applied by the default per-unit UnitStat switch. Their keys share the trait names.
+AresFury,
+ApollosSun
 }
 public struct BattlefieldBonusApplicator : IComponentData
 {

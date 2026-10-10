@@ -81,7 +81,11 @@ partial struct SpellSystem : ISystem
             // A tick spell or a single-unit strike locked to a squad draws from that squad's own units. A
             // sphere at SquadCenter misses a wide line outright: the centre is the mean of the unit positions,
             // and a spread formation can have no unit within SpellRadius of it.
-            bool hitsTargetSquad = (spellEntity.ValueRO.HitsSingleUnit
+            bool wholeSquad = false;
+#if FACTIONUPDATE
+            wholeSquad = spellEntity.ValueRO.HitsWholeSquad;
+#endif
+            bool hitsTargetSquad = (spellEntity.ValueRO.HitsSingleUnit || wholeSquad
                     || (!spellEntity.ValueRO.IsOneOff && spellEntity.ValueRO.TickInterval > 0f))
                 && targetSquadEntity != Entity.Null
                 && SystemAPI.Exists(targetSquadEntity)

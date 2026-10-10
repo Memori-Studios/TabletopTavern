@@ -57,6 +57,8 @@ public class GameSpeedButton : MonoBehaviour, IPointerEnterHandler, IPointerExit
     public void Deselect()
     {
         selected.SetActive(false);
+        // Any -> Pressed cannot fire into itself, so a repeat Select leaves the trigger armed to re-press this button later.
+        animator.ResetTrigger("Pressed");
         animator.SetTrigger("Normal");
     }
 
@@ -73,6 +75,7 @@ public class GameSpeedButton : MonoBehaviour, IPointerEnterHandler, IPointerExit
             disabled.SetActive(true);
             button.interactable = false;
             selected.SetActive(false);
+            animator.ResetTrigger("Pressed");
             animator.SetTrigger("Disabled");
             button.onClick.RemoveListener(GameSpeedButtonButtonClicked);
         }

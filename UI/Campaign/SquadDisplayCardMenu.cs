@@ -10,6 +10,7 @@ using Memori.Audio;
 using MoreMountains.Feedbacks;
 using Memori.Localization;
 using Memori.Utilities;
+using Memori.UI;
 
 namespace TJ
 {
@@ -120,6 +121,8 @@ namespace TJ
             renameButton.onClick.AddListener(RenameSquad);
             prestigeUnitButton.PrestigeButton.onClick.AddListener(PrestigeUnit);
             mergeButton.onClick.AddListener(() => hudPanel.MergeSelectedSquads());
+            // A merge that would change nothing stays dimmed; its click shakes instead of doing nothing.
+            UIDenyFeedback.Attach(mergeButton);
 
             if (hudPanel != null && !isEnemy)
             {
@@ -306,7 +309,32 @@ namespace TJ
                 CampaignManager.Instance.MapSceneUIManager.HUDPanel.ToggleCardInSelection(this);
             else
                 CampaignManager.Instance.MapSceneUIManager.HUDPanel.SelectSingleCard(isSelected ? null : this);
+            PlaySelectFeedback();
         }
+        #region Juice
+        private const float SelectPunch = 1.04f;
+        private Coroutine _punch;
+
+        // A pick punches and clicks; a deselect only clicks.
+        private void PlaySelectFeedback()
+        {
+            IAudioRequester.Instance.PlaySFX(SFXData.TinyClick);
+            if (isSelected) Punch(SelectPunch);
+        }
+
+        private void Punch(float peak)
+        {
+            if (_punch != null) StopCoroutine(_punch);
+            transform.localScale = Vector3.one;
+            _punch = StartCoroutine(UIJuice.Punch(transform, peak));
+        }
+
+        /// <summary>The card a move or merge put here lands with a punch. No glow: in the tight row it spilled onto neighbours.</summary>
+        public void PlayLanded()
+        {
+            Punch(1.06f);
+        }
+        #endregion
         public override void SelectSquad(bool _selected)
         {
             base.SelectSquad(_selected);
@@ -676,6 +704,8 @@ namespace TJ
             {
                 if (!committed)
                 {
+                    // The other side was full; a refused drop says so instead of snapping back in silence.
+                    IAudioRequester.Instance.PlaySFX(SFXData.ActionFailed);
                     RevertHoverPreview();
                     hudPanel.RefreshTroopsPanel();
                 }
@@ -736,7 +766,8 @@ namespace TJ
             string key = inReserve ? "QuickMoveToDeployedTooltip" : "QuickMoveToReserveTooltip";
             quickMoveTooltip.SetUpToolTip(_description: InputText.Get(key), _delay: QUICK_MOVE_TOOLTIP_DELAY);
         }
-        public void SpawnInJuice(bool makeInteractable)
+        // A whole army dealing in plays the sound once, from its first card.
+        public void SpawnInJuice(bool makeInteractable, bool playSound = true)
         {
             if (spawnInJuice == null) return;
 
@@ -744,7 +775,7 @@ namespace TJ
 
             // MakeInteractable(makeInteractable);
             spawnInJuice.PlayFeedbacks();
-            IAudioRequester.Instance.PlaySFX(SFXData.SquadCardSpawn);
+            if (playSound) IAudioRequester.Instance.PlaySFX(SFXData.SquadCardSpawn);
         }
         public void SpawnInComplete()
         {

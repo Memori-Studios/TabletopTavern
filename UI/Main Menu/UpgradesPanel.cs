@@ -185,13 +185,15 @@ namespace TJ.MainMenu
 
             if(_selectedNode.ParentPresenter != null && !_unlockedNodes.Contains(_selectedNode.ParentPresenter.MetaprogressionModel))
             {
-                NotificationManager.Instance.DisplayNotification(LocalizationManager.Instance.GetText("upgradesRequiresPreviousNodeUnlock"));
+                NotificationManager.Instance.ErrorNotification(LocalizationManager.Instance.GetText("upgradesRequiresPreviousNodeUnlock"));
+                _selectedNode.PlayRefused();
                 return;
             }
 
             if(_renownAvailable < _selectedNode.MetaprogressionModel.NodeCost)
             {
-                NotificationManager.Instance.DisplayNotification(LocalizationManager.Instance.GetText("upgradesInsufficientRenown"));
+                NotificationManager.Instance.ErrorNotification(LocalizationManager.Instance.GetText("upgradesInsufficientRenown"));
+                _selectedNode.PlayRefused();
                 return;
             }
 
@@ -199,6 +201,7 @@ namespace TJ.MainMenu
             List<int> unlockedNodeIds = SaveDataHandler.GetUnlockedMetaprogressionNodes();
             _unlockedNodes = GetUnlockedNodesFromIds(unlockedNodeIds);
             _selectedNode.Unlock(false);
+            _selectedNode.PlayUnlockLanded();
             IAudioRequester.Instance.PlaySFX(SFXData.SelectHero);
             CalculateRenownSpent();
             _metaprogressionManager.HighlightAvailableUpgrades(_unlockedNodes, _renownAvailable);

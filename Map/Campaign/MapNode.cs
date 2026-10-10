@@ -338,6 +338,14 @@ namespace TJ.Map
             selectionParticles.SetActive(false);
             iconTransform.localScale = Vector3.one;
         }
+        // The pick lands on the click: the icon punches before the token sets off.
+        public void PlayPicked()
+        {
+            mMF_Player.StopFeedbacks();
+            iconTransform.localScale = Vector3.one;
+            StartCoroutine(Memori.UI.UIJuice.Punch(iconTransform, PickPunch, 0.08f, 0.2f));
+        }
+        private const float PickPunch = 1.25f;
         public void NodeClicked()
         {
             if(completed) return;

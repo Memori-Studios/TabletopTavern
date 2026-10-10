@@ -1,4 +1,5 @@
 using UnityEngine;
+using Memori.UI;
 using UnityEngine.UI;
 using Unity.Collections;
 using TMPro;
@@ -125,7 +126,7 @@ namespace TJ
             SettingsManager.Instance.UIScale.OnValueChanged -= OnUIScaleChangedForHealthBars;
             SettingsManager.Instance.UIScale.OnValueChanged += OnUIScaleChangedForHealthBars;
 
-            startBattleButton.onClick.RemoveAllListeners();
+            startBattleButton.ClearClickListeners();
 
             UnitName[] ironLegion =TabletopTavernData.Instance.GetUnitsOfRace(Race.IronLegion);
             UnitName[] Gruntkin =TabletopTavernData.Instance.GetUnitsOfRace(Race.Gruntkin);
@@ -146,7 +147,7 @@ namespace TJ
 
             SetUpBattleButtons();
             
-            settingsToggleButton.onClick.RemoveAllListeners();
+            settingsToggleButton.ClearClickListeners();
             settingsToggleButton.onClick.AddListener(SettingsManager.Instance.OpenSettingsPanel);
 
             BattleManager.Instance.OnGamePhaseChanged += OnGamePhaseChanged;
@@ -394,7 +395,12 @@ namespace TJ
         private void SlideDeploymentIn()
         {
             deploymentCanvasGroup.CGEnable();
-            if (deploymentSlide == null) return;
+            // The battle's first deployment slides in too; it used to appear in one frame.
+            if (deploymentSlide == null)
+            {
+                deploymentSlide = new BattleHudSlide((RectTransform)deploymentCanvasGroup.transform);
+                deploymentSlide.SnapOut();
+            }
             if (deploymentSlideRoutine != null) StopCoroutine(deploymentSlideRoutine);
             deploymentSlideRoutine = StartCoroutine(deploymentSlide.Slide(false));
         }
@@ -543,7 +549,9 @@ namespace TJ
         private void StartBattle()
         {
             IAudioRequester.Instance.PlaySFX("start-battle");
-            // The button slides away with the deployment panels, switched off so it cannot be pressed twice.
+            // The commit lands on the click, then the button slides away with the deployment panels.
+            StartCoroutine(UIJuice.Punch(startBattleButton.transform));
+            // Switched off so it cannot be pressed twice.
             startBattleButton.interactable = false;
             saveFormationButton.gameObject.SetActive(false);
             loadFormationButton.gameObject.SetActive(false);
@@ -1253,34 +1261,33 @@ namespace TJ
             Race enemyRace = enemyFirst.HasValue ? data.GetRaceFromUnitName(enemyFirst.Value) : Race.IronLegion;
 
             string title = GetText(playerWon ? "Victory" : "Defeat");
-            string outcome = playerWon ? GetText(saves.IsGarrisonBattle ? "engagementOutcomeGarrison" : "engagementOutcomeHost") : GetText("CompanyShattered");
             string caption = isCustomBattle ? GetText("customBattleButton") : GetText("Act") + " " + Memori.UI.MemoriUI.ConvertNumberToRomanNumeral(Mathf.Max(1, SaveDataHandler.Load().bookNumber));
             string losses = string.Format(GetText("engagementTroopsCount"), troopsLost.ToString("N0"));
             if (troopsLost > 0) losses = $"<color={ColorData.Negative}>{losses}</color>";
             // A lost campaign battle ends the run; the map's result says so again with the run summary.
             string defeatLine = !playerWon && !isCustomBattle ? GetText("engagementDefeatLine") : null;
-            endBattleStats = DamageReportTooltip.Build(yours, enemy, string.Format(GetText("engagementResultSub"), outcome, caption),
+            endBattleStats = DamageReportTooltip.Build(yours, enemy, "",
                 endBattleView.DamageIcon, yourRace, slain, troopsLost, squadsLost, pinned: true);
 
             endBattleView.ClearBadges();
-            endBattleView.Show(playerWon, title, outcome, caption, GetText(enemyRace.ToString()), slain.ToString("N0"), losses, defeatLine, isCustomBattle);
+            endBattleView.Show(playerWon, title, caption, GetText(enemyRace.ToString()), slain.ToString("N0"), losses, defeatLine, isCustomBattle);
             ShowEndBattleBadges(results);
 
-            endBattleView.DetailedStatsButton.onClick.RemoveAllListeners();
+            endBattleView.DetailedStatsButton.ClearClickListeners();
             endBattleView.DetailedStatsButton.onClick.AddListener(ToggleEndBattleStats);
-            endBattleView.ContinueButton.onClick.RemoveAllListeners();
+            endBattleView.ContinueButton.ClearClickListeners();
             endBattleView.ContinueButton.onClick.AddListener(() =>
             {
                 CloseEndBattleStats();
                 BattleManager.Instance.BattleCleanUpManager.LeaveBattleLoadMap();
             });
-            endBattleView.ExitButton.onClick.RemoveAllListeners();
+            endBattleView.ExitButton.ClearClickListeners();
             endBattleView.ExitButton.onClick.AddListener(() =>
             {
                 CloseEndBattleStats();
                 BattleManager.Instance.BattleCleanUpManager.LeaveBattleLoadMainMenu();
             });
-            endBattleView.RematchButton.onClick.RemoveAllListeners();
+            endBattleView.RematchButton.ClearClickListeners();
             endBattleView.RematchButton.onClick.AddListener(() =>
             {
                 CloseEndBattleStats();

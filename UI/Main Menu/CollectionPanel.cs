@@ -90,6 +90,8 @@ namespace TJ.MainMenu
 
         [Header("Detail")]
         [SerializeField] private CollectionDetailPanel detail;
+        // Units use the game's own squad panel, so the Collection reads the same as the map and battle.
+        [SerializeField] private SquadBattleInfo unitInfo;
         [SerializeField] private CanvasGroup contentGroup;
         [SerializeField] private float fadeTime = 0.15f;
         [SerializeField] private float previewDelay = 0.12f;
@@ -159,7 +161,7 @@ namespace TJ.MainMenu
                 Debug.LogError("[CollectionPanel] closeButton is not assigned - the panel cannot be closed.");
             else
             {
-                closeButton.onClick.RemoveAllListeners();
+                closeButton.ClearClickListeners();
                 closeButton.onClick.AddListener(() => onClose());
             }
 
@@ -267,7 +269,7 @@ namespace TJ.MainMenu
 
             Hero[] heroes = HeroData.Heroes;
             _factions = Enum.GetValues(typeof(Race)).Cast<Race>()
-                .Where(race => race != Race.Special)
+                .Where(race => race != Race.Special && TabletopTavernConstants.IsRaceInBuild(race))
                 .Select(race => new Faction
                 {
                     Race = race,
@@ -494,6 +496,9 @@ namespace TJ.MainMenu
             // The marker's slot holds its place in the header row, so the slot is what hides.
             headerMarker.transform.parent.gameObject.SetActive(isFaction);
             detail.gameObject.SetActive(!isRecords);
+            // Closed first, or an open comparison copy stays on screen after the panel switches off.
+            unitInfo.HideComparison();
+            unitInfo.gameObject.SetActive(false);
             if (!isRecords) records.Hide();
             if (!isFaction)
             {
@@ -687,9 +692,18 @@ namespace TJ.MainMenu
                     if (_faction == null || _tab != FactionTab.Units) return;
                     UnitName unit = _faction.Units[index];
                     bool found = _unitFound.Contains(unit);
-                    // A hovered unit is measured against the kept one, Total War style.
+                    detail.gameObject.SetActive(false);
+                    unitInfo.gameObject.SetActive(true);
+                    // A hovered unit is measured against the kept one with the panel's own compare chips, Total War style.
                     int kept = PinnedIndex();
-                    detail.ShowUnit(unit, _faction.Race, found, index != kept ? (UnitName?)_faction.Units[kept] : null);
+                    unitInfo.SetUpCollection(CollectionSquad(_faction.Units[kept]), Team.Player);
+                    // After the content is in and before the compare copy exists, which takes this panel's scale.
+                    FitUnitInfo();
+                    if (index != kept)
+                    {
+                        SquadToLoad hovered = CollectionSquad(unit);
+                        unitInfo.ShowComparison(panel => panel.SetUpCollection(hovered, Team.Player));
+                    }
                     if (loadModel) _rig.ShowUnit(unit, _faction.Race, found);
                     if (found && _unitSeen.Add(unit))
                     {
@@ -700,6 +714,30 @@ namespace TJ.MainMenu
                     break;
                 }
             }
+        }
+
+        const float UnitInfoScale = 1.2f;
+
+        // 120% fits the 1080 canvas; at UI Scale 125% the body is shorter, so the panel shrinks only by what is missing.
+        private void FitUnitInfo()
+        {
+            var rect = (RectTransform)unitInfo.transform;
+            // Its height comes from a ContentSizeFitter, so it reads 0 until the layout is built.
+            LayoutRebuilder.ForceRebuildLayoutImmediate(rect);
+            float room = ((RectTransform)rect.parent).rect.height;
+            float scale = Mathf.Min(UnitInfoScale, room / rect.rect.height);
+            rect.localScale = new Vector3(scale, scale, 1f);
+        }
+
+        // A full-strength squad of the unit, as the panel shows it before any battle.
+        private static SquadToLoad CollectionSquad(UnitName unit)
+        {
+            SquadToLoad squad = new SquadToLoad(unit, 0, 0);
+            int count = TabletopTavernData.Instance.GetBaseUnitCount(unit);
+            squad.HitPointsPerUnit = TabletopTavernData.Instance.GetHitPointsPerUnit(unit);
+            squad.maxUnitCount = count;
+            squad.SquadCurrentHealth = count * squad.HitPointsPerUnit;
+            return squad;
         }
 
         private void OnTileHovered(CollectionTile tile)
@@ -731,6 +769,7 @@ namespace TJ.MainMenu
             IAudioRequester.Instance.PlaySFX(SFXData.ButtonClick);
             StopPending();
             Pin(tile.Index);
+            tile.PlayPicked();
         }
 
         private IEnumerator After(float seconds, Action action)

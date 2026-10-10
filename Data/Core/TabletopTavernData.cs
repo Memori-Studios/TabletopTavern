@@ -154,6 +154,9 @@ namespace TJ
                 // leave a live unit reading past the end of the blob.
                 if (allSOs[i].stats.unitType == UnitType.Mage) continue;
 #endif
+                // Same rule as the mages above: a faction outside this build stays in the stat dictionaries but off every roster.
+                if (!TabletopTavernConstants.IsRaceInBuild(allSOs[i].assets.race)) continue;
+                if (TabletopTavernConstants.IsSummonOnly(allSOs[i].stats.unitName)) continue;
 
                 // Populate UnitsOfRaceDictionary
                 if (!UnitsOfRaceDictionary.ContainsKey(allSOs[i].assets.race))
@@ -674,6 +677,7 @@ namespace TJ
             if (squadStats.SquadAttributes.AntiLarge) unitAttributes.Add(UnitAttribute.AntiLarge);
             if (squadStats.SquadAttributes.StandardShields) unitAttributes.Add(UnitAttribute.StandardShields);
             if (squadStats.Armor >= 80) unitAttributes.Add(UnitAttribute.Armored);
+            if (squadStats.unitSize != UnitSize.Infantry && squadStats.unitSize != UnitSize.Artillery && squadStats.unitType != UnitType.Structure) unitAttributes.Add(UnitAttribute.Large);
             if (squadStats.SquadAttributes.Terrifying) unitAttributes.Add(UnitAttribute.Terrifying);
             if (squadStats.SquadAttributes.Stalwart) unitAttributes.Add(UnitAttribute.Stalwart);
             if (squadStats.SquadAttributes.Outrider) unitAttributes.Add(UnitAttribute.Outrider);
@@ -701,6 +705,15 @@ namespace TJ
             if (squadStats.SquadAttributes.Demolisher) unitAttributes.Add(UnitAttribute.Demolisher);
             if (squadStats.SquadAttributes.PowderReserves) unitAttributes.Add(UnitAttribute.PowderReserves);
             if (squadStats.SquadAttributes.DeepQuivers) unitAttributes.Add(UnitAttribute.DeepQuivers);
+#if FACTIONUPDATE
+            if (squadStats.SquadAttributes.AresFury) unitAttributes.Add(UnitAttribute.AresFury);
+            if (squadStats.SquadAttributes.AthenasAegis) unitAttributes.Add(UnitAttribute.AthenasAegis);
+            if (squadStats.SquadAttributes.ZeussBolt) unitAttributes.Add(UnitAttribute.ZeussBolt);
+            if (squadStats.SquadAttributes.PoseidonsTremor) unitAttributes.Add(UnitAttribute.PoseidonsTremor);
+            if (squadStats.SquadAttributes.ApollosSun) unitAttributes.Add(UnitAttribute.ApollosSun);
+            if (squadStats.SquadAttributes.HadesShades) unitAttributes.Add(UnitAttribute.HadesShades);
+            if (squadStats.SquadAttributes.GorgonsGaze) unitAttributes.Add(UnitAttribute.GorgonsGaze);
+#endif
             foreach (UnitAttribute mageTrait in TabletopTavernConstants.PRESTIGE_TRAIT_POOL)
                 if (TabletopTavernConstants.IsMageTrait(mageTrait) && TabletopTavernConstants.GetAttribute(squadStats.SquadAttributes, mageTrait))
                     unitAttributes.Add(mageTrait);
@@ -786,7 +799,7 @@ namespace TJ
         {
             List<Race> everyone = new();
             foreach (Race race in Enum.GetValues(typeof(Race)))
-                if (race != Race.Special && race != activeRace) everyone.Add(race);
+                if (race != Race.Special && race != activeRace && TabletopTavernConstants.IsRaceInBuild(race)) everyone.Add(race);
 
             List<Race> unmet = new(everyone);
             for (int act = 1; act <= TabletopTavernConstants.FINAL_STORY_ACT; act++)

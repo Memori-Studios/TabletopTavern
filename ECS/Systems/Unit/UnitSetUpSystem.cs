@@ -330,7 +330,12 @@ partial struct UnitSetUpSystem : ISystem
             });
 
             //has rider
-            if( unit.ValueRO.unitName == UnitName.BorderlandRiders || 
+            bool olympianRider = false;
+#if FACTIONUPDATE
+            olympianRider = unit.ValueRO.unitName == UnitName.Hippeis || unit.ValueRO.unitName == UnitName.RidersOfTheDioscuri;
+#endif
+            if( olympianRider ||
+                unit.ValueRO.unitName == UnitName.BorderlandRiders ||
                 unit.ValueRO.unitName == UnitName.HearthboundKnights || 
                 unit.ValueRO.unitName == UnitName.RoyalCavaliers ||
                 unit.ValueRO.unitName == UnitName.StarStriders ||

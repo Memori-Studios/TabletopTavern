@@ -112,7 +112,7 @@ namespace TJ
         {
             var races = new List<Race>();
             foreach (Race race in Enum.GetValues(typeof(Race)))
-                if (race != Race.Special) races.Add(race);
+                if (race != Race.Special && TabletopTavernConstants.IsRaceInBuild(race)) races.Add(race);
             return races.ToArray();
         }
 

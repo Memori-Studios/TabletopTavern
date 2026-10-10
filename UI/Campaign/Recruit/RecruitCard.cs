@@ -43,6 +43,8 @@ namespace TJ.Recruit
         [SerializeField] private TMP_Text unitRarityText;
         [Tooltip("Optional. Only casters show it; it hides itself for everything else.")]
         [SerializeField] private SpellInfoBlock spellInfoBlock;
+        [Tooltip("Flares behind the portrait when a Rare or Legendary card turns face up.")]
+        [SerializeField] private UIFlare rarityHalo;
 
         RecruitPanel recruitPanel;
         SquadStats squadStats;
@@ -338,7 +340,7 @@ namespace TJ.Recruit
             purchaseMMF.PlayFeedbacks();
             graphicRaycaster.enabled = false;
             OnPointerExit(null);
-            GetComponent<Button>().onClick.RemoveAllListeners();
+            GetComponent<Button>().ClearClickListeners();
             TooltipManager.Instance.HideTooltip();
 
             TutorialManager.Instance.LoadStepsFromRandomSpot(new TutorialStep[2] { TutorialData.ReorderUnits, TutorialData.DisbandUnit });
@@ -382,6 +384,18 @@ namespace TJ.Recruit
 
             recruitPanel.AttemptToPurchaseRecruit(squadStats, this);
         }
+        // A prestige trait lands on this unit: a gold halo behind the portrait and a small punch.
+        public void PlayPrestigeLanded()
+        {
+            if (!isActiveAndEnabled) return;
+            if (rarityHalo != null) rarityHalo.Play((Color)ColorData.HexToRgba(ColorData.Gold));
+            StartCoroutine(UIJuice.Punch(cardParentTransform, 1.04f));
+        }
+        public void PlayRefused()
+        {
+            // Shakes the parent: cardContentRect belongs to the hover motion.
+            StartCoroutine(UIJuice.Shake((RectTransform)cardParentTransform));
+        }
         public void PlayCardDrawSFX()
         {
             IAudioRequester.Instance.PlaySFX(SFXData.CardDraw);
@@ -390,6 +404,8 @@ namespace TJ.Recruit
         {
             IAudioRequester.Instance.PlaySFX(SFXData.CardFlip);
             if(squadStats.RarityTier != UnitRarity.Common) SetTierParticlesActive(true);
+            if (rarityHalo != null && squadStats.RarityTier >= UnitRarity.Rare)
+                rarityHalo.Play((Color)ColorData.GetRarityTierColor(squadStats.RarityTier));
             if (displayOnly) return;
             canInteract = true;
             StartHoverMotion();

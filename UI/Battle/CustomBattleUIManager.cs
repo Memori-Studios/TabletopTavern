@@ -325,8 +325,8 @@ namespace TJ
         }
         private void OnDestroy()
         {
-            deleteAllSquadsButton.onClick.RemoveAllListeners();
-            generateBattlefieldButton.Button.onClick.RemoveAllListeners();
+            deleteAllSquadsButton.ClearClickListeners();
+            generateBattlefieldButton.Button.ClearClickListeners();
             useRandomSeedToggle.onValueChanged.RemoveAllListeners();
             seedInputField.onValueChanged.RemoveAllListeners();
             unitCountInputField.onValueChanged.RemoveAllListeners();

@@ -165,7 +165,11 @@ namespace TJ.Prestige
 
             campaignSaveManager.ResolvePrestigeTraitChoice(currentSquad.UniqueID, trait);
             IAudioRequester.Instance.PlaySFX(SFXData.PrestigeUnit);
-            if (recruitCard != null) recruitCard.ShowPrestige(MAX_PRESTIGE, trait);
+            if (recruitCard != null)
+            {
+                recruitCard.ShowPrestige(MAX_PRESTIGE, trait);
+                recruitCard.PlayPrestigeLanded();
+            }
 
             await Task.Delay(Mathf.RoundToInt(pickedHoldSeconds * 1000f));
             if (this == null) return;

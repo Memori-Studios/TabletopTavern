@@ -68,6 +68,8 @@ namespace TJ
             HeroDataSO[] allSOs = Resources.LoadAll<HeroDataSO>("HeroData");
             foreach (var so in allSOs)
             {
+                // A faction outside this build keeps its hero assets but offers no commander.
+                if (!TabletopTavernConstants.IsRaceInBuild(so.heroData.Race)) continue;
                 _heroesByID[so.heroData.HeroID] = so.heroData;
             }
 

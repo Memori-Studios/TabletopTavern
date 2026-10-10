@@ -112,7 +112,7 @@ namespace TJ.Event
             descMemoriCanvasGroup = eventDescriptionText.GetComponent<MemoriCanvasGroup>();
             choiceParentMemoriCanvasGroup = eventChoicesParent.GetComponent<MemoriCanvasGroup>();
 
-            acceptRollButton.Button.onClick.RemoveAllListeners();
+            acceptRollButton.Button.ClearClickListeners();
             acceptRollButton.Button.onClick.AddListener(AcceptRoll);
 
             gc_Events = EventData.GetAllEvents();
@@ -130,7 +130,7 @@ namespace TJ.Event
             // startlitGuidanceButton.onClick.AddListener(() => ActivateStartLitGuidance());
 
             claimedByDestinyButton = claimedByDestiny.GetComponent<Button>();
-            claimedByDestinyButton.onClick.RemoveAllListeners();
+            claimedByDestinyButton.ClearClickListeners();
             claimedByDestinyButton.onClick.AddListener(() => ActivateClaimedByDestiny());
         }
         /// <summary>Dev Tools: the next Event node shows this event instead of drawing one. Read once, then cleared.</summary>
@@ -212,7 +212,7 @@ namespace TJ.Event
             rerollButton.gameObject.SetActive(false);
             acceptRollButton.gameObject.SetActive(false);
             rollAccepted = false;
-            acceptRollButton.Button.onClick.RemoveAllListeners();
+            acceptRollButton.Button.ClearClickListeners();
             acceptRollButton.Button.onClick.AddListener(AcceptRoll);
 
             eventChoices.ForEach(x => Destroy(x.gameObject));
@@ -473,7 +473,7 @@ namespace TJ.Event
             string localizedString = LocalizationManager.Instance.GetText("Cost");
             CampaignManager.Instance.GoldManager.ModifyGold(-rollBonus, localizedString);
             rerollButton.gameObject.SetActive(false);
-            acceptRollButton.Button.onClick.RemoveAllListeners();
+            acceptRollButton.Button.ClearClickListeners();
             acceptRollButton.Button.onClick.AddListener(() => CompleteEvent());
 
             string continueButtonTextLocalized = LocalizationManager.Instance.GetText("continueButton");

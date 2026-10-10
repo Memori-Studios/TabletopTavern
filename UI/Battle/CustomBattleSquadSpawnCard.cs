@@ -31,6 +31,10 @@ namespace TJ
             UnitName = _unitName;
             Race race = TabletopTavernData.Instance.GetRaceFromUnitName(_unitName);
             ironLegionImage.enabled = race == Race.IronLegion;
+#if FACTIONUPDATE
+            // The League borrows Iron Legion's card background until it has its own art.
+            ironLegionImage.enabled |= race == Race.OlympianLeague;
+#endif
             greenTideImage.enabled = race == Race.Gruntkin;
             ravenhostImage.enabled = race == Race.RavenHost;
             taelindorBackground.enabled = race == Race.TaelindorForest;

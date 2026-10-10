@@ -368,7 +368,7 @@ namespace TJ.MainMenu
 
         private void WireTab(CollectionTab tab, WarbandSection section)
         {
-            tab.Button.onClick.RemoveAllListeners();
+            tab.Button.ClearClickListeners();
             tab.Button.onClick.AddListener(() => SetFocus(section));
         }
         #endregion
@@ -388,19 +388,16 @@ namespace TJ.MainMenu
                 string.Format(LocalizationManager.Instance.GetText("warbandPurseBreakdown"), startingGold, armySpend, gearSpend) +
                 "</size></color>";
             string PurseText(int amount) =>
-                $"<color={ColorData.Secondary}><size=75%><uppercase>{goldLeftLabel}</uppercase></size></color>  " +
+                $"<color={ColorData.Secondary}><size=75%>{goldLeftLabel}</size></color>  " +
                 $"<b><color={amountColor}><size=125%>{amount}</size></color></b> <sprite name=GoldSprite>\n" + breakdown;
 
-            // Gold spent or refunded on the screen counts with coin ticks; the first overspend shakes the purse.
+            // Gold spent or refunded on the screen counts with coin ticks. An overspend hides the purse behind the blocked line,
+            // which fades in on its own (RunSetupValidation).
             if (purseCount != null) { StopCoroutine(purseCount); purseCount = null; }
             bool count = shown && isActiveAndEnabled && shownPurse != int.MinValue && shownPurse != remaining;
             if (count)
-            {
                 purseCount = StartCoroutine(UIJuice.CountTo(remainingTreasuryText, shownPurse, remaining, 0.25f, PurseText,
                     () => IAudioRequester.Instance.PlaySFX(SFXData.CoinClink)));
-                if (remaining < 0 && shownPurse >= 0)
-                    StartCoroutine(UIJuice.Shake((RectTransform)remainingTreasuryText.transform.parent, 5f));
-            }
             else remainingTreasuryText.text = PurseText(remaining);
             shownPurse = remaining;
 
@@ -457,6 +454,9 @@ namespace TJ.MainMenu
         {
             Race.Special, Race.IronLegion, Race.Gruntkin, Race.RavenHost, Race.TaelindorForest,
             Race.SanguineCourt, Race.SakuraDynasty, Race.DeepstoneHold, Race.DrakosaurBrood,
+#if FACTIONUPDATE
+            Race.OlympianLeague,
+#endif
         };
 
         /// <summary>

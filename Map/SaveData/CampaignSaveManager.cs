@@ -2497,6 +2497,8 @@ namespace TJ
 
 #if DEMO
             if (godkingCompletions >= 4)
+#elif FACTIONUPDATE
+            if (godkingCompletions >= 18)
 #else
             if (godkingCompletions >= 16)
 #endif

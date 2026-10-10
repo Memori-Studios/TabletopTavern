@@ -18,7 +18,6 @@ namespace TJ.Engagement
         [SerializeField] private Image valueIcon;
         [SerializeField] private TMP_Text value;
         [SerializeField] private GameObject tag;
-        [SerializeField] private Image tagFrame;
         [SerializeField] private TMP_Text tagText;
         [SerializeField] private MemoriTooltipTrigger tooltip;
         [SerializeField] private GameObject taken;
@@ -62,7 +61,6 @@ namespace TJ.Engagement
             tag.SetActive(true);
             tagText.text = _text;
             tagText.color = _colour;
-            tagFrame.color = _colour;
         }
 
         public void SetTooltip(string _title, string _body)

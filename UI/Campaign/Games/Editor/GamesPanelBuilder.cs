@@ -26,7 +26,8 @@ namespace TJ.Games.EditorTools
         const string StakePath = PartFolder + "/Games Stake Button.prefab";
         const string CallPath = PartFolder + "/Games Call Button.prefab";
         const string DiceFolder = "Assets/Art/Icons/UI/Dice";
-        const string StatCellPath = "Assets/Data/Prefabs/UI/Map/Town/Town Stat Cell.prefab";
+        const string StatPlaquePath = "Assets/Data/Prefabs/UI/Reuseable/Ornaments/Stat Plaque.prefab";
+        const string BandGradientPath = "Assets/ImportedPackages/InterfaceFantasyWarriorHUD/Sprites/HUD/SPR_HUD_FantasyWarrior_Gradient_Vertical_Smooth01.png";
         const string ScenePath = "Assets/Scenes/Map.unity";
         const string ButtonFolder = "Assets/Data/Prefabs/UI/Reuseable/Buttons";
         const string BasicBackgroundPath = "Assets/Data/Prefabs/UI/Reuseable/Basic Background.prefab";
@@ -49,6 +50,12 @@ namespace TJ.Games.EditorTools
         // The strip's inner width: 800 less the frame edge and the body's side padding.
         const float StripInner = 738f;
         const float LadderStep = 90f;
+        const float PlaqueGap = 10f;
+        const float PlaqueRowGap = 6f;
+        // Room for the longest label and value pair ("Einsätze" and "Akt III") at the header's right edge.
+        const float HeaderPlaqueWidth = 180f;
+        // The dice strip is the tallest: 5 + header 72 + 14 + two payout rows 70 + 12 + result row 80 + 14 + 5.
+        const float StripTallest = 272f;
 
         #region Style
         static readonly Color Brass = Hex("B08A3E");
@@ -56,12 +63,12 @@ namespace TJ.Games.EditorTools
         static readonly Color Cream = Hex("ECE6D8");
         static readonly Color White = Hex("ECF0F1");
         static readonly Color Sub = Hex("B4AA94");
-        static readonly Color Flavour = Hex("A99F8A");
         static readonly Color Cap = Hex("8C9AA2");
         static readonly Color Positive = Hex("7BD66F");
         static readonly Color Double = Hex("A6F29E");
         static readonly Color Negative = Hex("E3695E");
         static readonly Color Coin = Hex("E3BB71");
+        static readonly Color PlaqueBacking = Hex("131D21");
         static readonly Color Motes = Hex("9ED8FF");
         static readonly Color PrimaryDetail = Hex("A6D9A0");
         static readonly Color Ivory = Hex("EEE7D8");
@@ -69,10 +76,10 @@ namespace TJ.Games.EditorTools
         static readonly Color Candle = Hex("E8A054");
 
         static TMP_FontAsset displayDrop, display;
-        static Sprite mount, solid, squareSliced, edgeFade;
+        static Sprite mount, frameEdge, bandGradient;
         static Sprite diceIcon, hiloIcon, roundIcon, arrowIcon, rewindIcon, dieBlank;
         static Sprite[] dieFaces;
-        static GameObject primaryButton, standardButton, backButton, basicBackground, statCellPart;
+        static GameObject primaryButton, standardButton, backButton, basicBackground, statPlaque;
 
         static void LoadAssets()
         {
@@ -82,10 +89,9 @@ namespace TJ.Games.EditorTools
             foreach (Object asset in AssetDatabase.LoadAllAssetsAtPath(SheetPath))
                 if (asset is Sprite sprite) sheet[sprite.name] = sprite;
             sheet.TryGetValue("TooltipMount", out mount);
-            sheet.TryGetValue("TooltipSolid", out solid);
-            if (mount == null || solid == null) Debug.LogError("GamesPanelBuilder: tooltip sheet sprites missing.");
-            squareSliced = Load<Sprite>("Assets/Art/Icons/UI/SquareSliced.png");
-            edgeFade = Load<Sprite>("Assets/ImportedPackages/ModernUIPack/Textures/Shadow/Vertical Shadow.png");
+            if (mount == null) Debug.LogError("GamesPanelBuilder: tooltip sheet sprites missing.");
+            frameEdge = Load<Sprite>("Assets/ImportedPackages/InterfaceFantasyWarriorHUD/Sprites/HUD/SPR_HUD_FantasyWarrior_Frame_Box_Small01.png");
+            bandGradient = Load<Sprite>(BandGradientPath);
             diceIcon = Load<Sprite>("Assets/Art/Icons/Achievements/DiceClean.png");
             hiloIcon = Load<Sprite>("Assets/Art/Icons/Achievements/ChevronTwoClean.png");
             roundIcon = Load<Sprite>("Assets/ImportedPackages/InterfaceFantasyWarriorHUD/Sprites/Icons_Map/ICON_FantasyWarrior_Map_Healing01_Clean.png");
@@ -98,7 +104,15 @@ namespace TJ.Games.EditorTools
             standardButton = Load<GameObject>(ButtonFolder + "/Button - Standard.prefab");
             backButton = Load<GameObject>(ButtonFolder + "/Button - Back.prefab");
             basicBackground = Load<GameObject>(BasicBackgroundPath);
-            statCellPart = Load<GameObject>(StatCellPath);
+            statPlaque = Load<GameObject>(StatPlaquePath);
+        }
+
+        // The view writes into every plaque Value, so a panel built without them would fail at runtime.
+        static bool PlaqueLoaded()
+        {
+            if (statPlaque != null) return true;
+            Debug.LogError($"GamesPanelBuilder: no Stat Plaque at {StatPlaquePath}; nothing was rebuilt.");
+            return false;
         }
 
         static T Load<T>(string path) where T : Object
@@ -171,6 +185,7 @@ namespace TJ.Games.EditorTools
         {
             LoadAssets();
             LoadTable();
+            if (!PlaqueLoaded()) return;
             EnsureParts(false);
             BuildPanel();
         }
@@ -190,6 +205,7 @@ namespace TJ.Games.EditorTools
         {
             LoadAssets();
             LoadTable();
+            if (!PlaqueLoaded()) return;
             EnsureParts(true);
             BuildPanel();
         }
@@ -485,6 +501,7 @@ namespace TJ.Games.EditorTools
             else Debug.LogError("GamesPanelBuilder: no Card to dress.");
 
             Refs(so, "tableIcons", new Object[] { diceIcon, hiloIcon, roundIcon });
+            so.FindProperty("stripTallest").floatValue = StripTallest;
             so.ApplyModifiedPropertiesWithoutUndo();
         }
 
@@ -541,7 +558,7 @@ namespace TJ.Games.EditorTools
         }
         #endregion
 
-        // The panel's frame, with a candlelit wash inside it from the top edge down to the header rule.
+        // The panel's frame, with a candlelit wash inside it falling from the top edge over the header.
         static void Frame(RectTransform panel, float headerHeight)
         {
             GameObject background = Instance(basicBackground, panel, "Basic Background");
@@ -556,7 +573,7 @@ namespace TJ.Games.EditorTools
                 Image textureImage = texture.GetComponent<Image>();
                 if (textureImage != null) textureImage.pixelsPerUnitMultiplier = TexturePixelsPerUnit;
             }
-            Image band = Img(Rect("Band", background.transform), edgeFade, A(Candle, BandAlpha));
+            Image band = Img(Rect("Band", background.transform), bandGradient, A(Candle, BandAlpha));
             RectTransform bandRect = band.rectTransform;
             bandRect.anchorMin = new Vector2(0f, 1f);
             bandRect.anchorMax = Vector2.one;
@@ -595,15 +612,15 @@ namespace TJ.Games.EditorTools
             RectTransform header = Rect("Header", card);
             Fixed(header.gameObject, -1f, CardHeaderHeight);
             HLayout(header, 16f, TextAnchor.MiddleLeft, new RectOffset(22, 22, 0, 0));
-            HeaderRule(header);
             Mount(header, "Mount", 64f, diceIcon, 30f);
             RectTransform names = Rect("Names", header);
             VLayout(names, 2f, new RectOffset());
             Flexible(names.gameObject, 1f).preferredWidth = 0f;
-            // The scene's banner is off, so the card carries the node's own name and line.
+            // The scene's banner is off, so the card carries the node's own name and line (TJ's pick, 2026-10-02).
             Localize(Text("Title", names, displayDrop, 32f, Gold, "Tavern Games"), "Tavern Games");
             Localize(Text("Subtitle", names, display, 17f, Sub, "Subtitle"), "gamesDesc");
-            TMP_Text stakes = CapValue(header, "Stakes", "gamesStakes", 17f, out _);
+            TMP_Text stakes = HeaderPlaque(header, "Stakes", out TMP_Text stakesLabel);
+            Localize(stakesLabel, "gamesStakes");
             stakes.text = "Act III";
             Ref(so, "stakesValue", stakes);
 
@@ -618,8 +635,6 @@ namespace TJ.Games.EditorTools
             groups[2] = BuildRoundColumn(columns, so);
             Refs(so, "columns", groups);
 
-            Image footRule = Img(Rect("Footer Rule", card), solid, A(Brass, 0.35f));
-            Fixed(footRule.gameObject, -1f, 1f);
             RectTransform footer = Rect("Footer", card);
             Fixed(footer.gameObject, -1f, 80f);
             HLayout(footer, 0f, TextAnchor.MiddleCenter, new RectOffset());
@@ -632,7 +647,7 @@ namespace TJ.Games.EditorTools
         static CanvasGroup BuildDiceColumn(RectTransform columns, SerializedObject so)
         {
             RectTransform column = Column(columns, "Dice Column", out CanvasGroup group);
-            ColumnHead(column, diceIcon, "gamesDiceTable", "gamesDiceFlavor");
+            ColumnHead(column, diceIcon, "gamesDiceTable");
             TMP_Text[] values = CardStrip(column, new[] { "gamesStake", "gamesBest", "gamesWin" });
             values[1].color = Double;
             Ref(so, "diceStakeValue", values[0]);
@@ -677,7 +692,7 @@ namespace TJ.Games.EditorTools
         static CanvasGroup BuildHigherLowerColumn(RectTransform columns, SerializedObject so)
         {
             RectTransform column = Column(columns, "Higher or Lower Column", out CanvasGroup group);
-            ColumnHead(column, hiloIcon, "HigherOrLower", "gamesHiLoFlavor");
+            ColumnHead(column, hiloIcon, "HigherOrLower");
             TMP_Text[] values = CardStrip(column, new[] { "gamesStake", "gamesBest", "gamesCalls" });
             Ref(so, "hiloStakeValue", values[0]);
             Ref(so, "hiloBestValue", values[1]);
@@ -699,7 +714,7 @@ namespace TJ.Games.EditorTools
         static CanvasGroup BuildRoundColumn(RectTransform columns, SerializedObject so)
         {
             RectTransform column = Column(columns, "Round Column", out CanvasGroup group);
-            ColumnHead(column, roundIcon, "BuyARound", "gamesRoundFlavor");
+            ColumnHead(column, roundIcon, "BuyARound");
             TMP_Text[] values = CardStrip(column, new[] { "Cost", "townHeal", "gamesRoll" });
             values[1].color = Positive;
             Localize(values[2], "gamesNone");
@@ -733,7 +748,6 @@ namespace TJ.Games.EditorTools
             RectTransform header = Rect("Header", strip);
             Fixed(header.gameObject, -1f, StripHeaderHeight);
             HLayout(header, 14f, TextAnchor.MiddleLeft, new RectOffset(20, 20, 0, 0));
-            HeaderRule(header);
             Ref(so, "stripIcon", Mount(header, "Mount", 48f, diceIcon, 22f));
             RectTransform names = Rect("Names", header);
             VLayout(names, 1f, new RectOffset());
@@ -746,10 +760,10 @@ namespace TJ.Games.EditorTools
             subtitle.fontSizeMax = 15.5f;
             Ref(so, "stripTitle", title);
             Ref(so, "stripSubtitle", subtitle);
-            TMP_Text value = CapValue(header, "Total", "gamesPot", 24f, out TMP_Text cap);
+            TMP_Text value = HeaderPlaque(header, "Total", out TMP_Text cap);
             value.text = "45";
-            // GamesPanel switches this caption between Pot, Stake and Gold, so a localizer must not reset it.
-            Object.DestroyImmediate(cap.GetComponent<LocalizeStringEvent>());
+            // GamesPanel switches this label between Pot, Stake and Gold, so it gets no localizer that would reset it.
+            cap.text = English("gamesPot");
             Ref(so, "stripCap", cap);
             Ref(so, "stripValue", value);
 
@@ -761,31 +775,40 @@ namespace TJ.Games.EditorTools
             BuildResultRow(body, so);
         }
 
+        // Two columns of two plaques: a rule and its payout share one line, so four across overflow the strip.
         static void BuildPayoutRow(RectTransform body, SerializedObject so)
         {
             string[] caps = { "HigherCall", "gamesSixes", "gamesTie", "LowerCall" };
             string[] values = { "gamesWinWager", "gamesWinDouble", "gamesWagerBack", "gamesLoseWager" };
-            Color[] colours = { Positive, Double, Cream, Negative };
-            RectTransform row = StripRow(body, "Payout", 58f);
+            RectTransform row = Rect("Payout", body);
+            HLayout(row, PlaqueGap, TextAnchor.UpperLeft, new RectOffset());
+            // Fixed-width columns keep both rows' plaques aligned whatever their text.
+            float columnWidth = (StripInner - PlaqueGap) / 2f;
+            var halves = new RectTransform[2];
+            for (int c = 0; c < 2; c++)
+            {
+                halves[c] = Rect("Column " + (c + 1), row);
+                VLayout(halves[c], PlaqueRowGap, new RectOffset());
+                Fixed(halves[c].gameObject, columnWidth, -1f);
+            }
             var cells = new Object[4];
             var lit = new Object[4];
             for (int i = 0; i < 4; i++)
             {
-                GameObject cell = Instance(statCellPart, row, "Rule " + (i + 1));
-                if (i == 0) cell.transform.Find("Divider").gameObject.SetActive(false);
-                Localize(Child<TMP_Text>(cell.transform, "Label"), caps[i]);
-                TMP_Text value = Child<TMP_Text>(cell.transform, "Value Row/Value");
+                GameObject cell = Plaque(halves[i % 2], "Rule " + (i + 1), caps[i]);
+                TMP_Text value = Child<TMP_Text>(cell.transform, "Value");
                 Localize(value, values[i]);
-                value.color = colours[i];
-                Child<Image>(cell.transform, "Value Row/Icon").gameObject.SetActive(false);
+                // One colour for every payout; only the lit rule's outline says win, tie or loss.
+                value.color = Cream;
                 cells[i] = cell.AddComponent<CanvasGroup>();
 
-                RectTransform glow = Stretch(Rect("Lit", cell.transform), 0f, 0f, 1f, 1f);
+                RectTransform glow = Stretch(Rect("Lit", cell.transform));
                 Ignore(glow.gameObject);
                 glow.SetAsFirstSibling();
                 Img(Stretch(Rect("Fill", glow)), null, A(Positive, 0.1f));
-                Image edge = Img(Stretch(Rect("Edge", glow)), squareSliced, A(Positive, 0.7f), Image.Type.Sliced);
+                Image edge = Img(Stretch(Rect("Edge", glow)), frameEdge, A(Positive, 0.7f), Image.Type.Sliced);
                 edge.fillCenter = false;
+                edge.pixelsPerUnitMultiplier = 4f;
                 glow.gameObject.SetActive(false);
                 lit[i] = glow.gameObject;
             }
@@ -834,8 +857,6 @@ namespace TJ.Games.EditorTools
                 TMP_Text label = Text("Label", step, display, 12f, Sub, keys[i]);
                 Anchor(label.rectTransform, new Vector2(0f, 1f), Vector2.one, new Vector2(2f, -32f), new Vector2(-2f, -15f));
                 label.alignment = TextAlignmentOptions.Center;
-                label.fontStyle = FontStyles.UpperCase;
-                label.characterSpacing = 3f;
                 label.enableAutoSizing = true;
                 label.fontSizeMin = 9f;
                 label.fontSizeMax = 12f;
@@ -964,7 +985,7 @@ namespace TJ.Games.EditorTools
             // The pips are cut out of the face sprite, so a dark die underneath fills them and hides the ring.
             Img(Stretch(Rect("Pips", tile)), dieBlank, Pip);
             face = Img(Stretch(Rect("Die", tile)), dieFaces[4], Ivory);
-            TMP_Text label = CapLabel(block, "Label");
+            TMP_Text label = SectionTitle(block, "Label");
             label.alignment = TextAlignmentOptions.Center;
             Localize(label, key);
         }
@@ -989,7 +1010,7 @@ namespace TJ.Games.EditorTools
             Img(Stretch(Rect("Line", divider), 0f, 0f, 16f, 16f), null, A(Brass, 0.45f));
         }
 
-        static void ColumnHead(RectTransform column, Sprite icon, string titleKey, string subtitleKey)
+        static void ColumnHead(RectTransform column, Sprite icon, string titleKey)
         {
             RectTransform head = Rect("Head", column);
             HLayout(head, 12f, TextAnchor.MiddleLeft, new RectOffset());
@@ -1002,41 +1023,25 @@ namespace TJ.Games.EditorTools
             title.fontSizeMin = 16f;
             title.fontSizeMax = 22f;
             Localize(title, titleKey);
-            TMP_Text subtitle = Text("Subtitle", titles, display, 14f, Flavour, subtitleKey);
-            subtitle.fontStyle = FontStyles.Italic;
-            Wrap(subtitle);
-            Localize(subtitle, subtitleKey);
         }
 
-        static RectTransform StripRow(RectTransform parent, string name, float height)
+        // One Stat Plaque without an icon; gold values carry the coin sprite in their text. A null key leaves the label to the caller.
+        static GameObject Plaque(RectTransform parent, string name, string labelKey)
         {
-            RectTransform strip = Rect(name, parent);
-            Fixed(strip.gameObject, -1f, height);
-            Image top = Img(Rect("Top", strip), solid, A(Brass, 0.4f));
-            Anchor(top.rectTransform, new Vector2(0f, 1f), Vector2.one, new Vector2(0f, -1f), Vector2.zero);
-            Ignore(top.gameObject);
-            Image bottom = Img(Rect("Bottom", strip), solid, A(Brass, 0.4f));
-            Anchor(bottom.rectTransform, Vector2.zero, new Vector2(1f, 0f), Vector2.zero, new Vector2(0f, 1f));
-            Ignore(bottom.gameObject);
-            HorizontalLayoutGroup row = HLayout(strip, 0f, TextAnchor.MiddleLeft, new RectOffset());
-            row.childForceExpandWidth = true;
-            row.childForceExpandHeight = true;
-            return strip;
+            GameObject plaque = Instance(statPlaque, parent, name);
+            Child<Image>(plaque.transform, "Icon").gameObject.SetActive(false);
+            if (labelKey != null) Localize(Child<TMP_Text>(plaque.transform, "Label"), labelKey);
+            return plaque;
         }
 
-        // A stat strip of Town Stat Cells without icons; gold values carry the coin sprite in their text.
+        // The column's stats, one plaque per row: three side by side overflow the 338 px column ("Best" beside "Win double").
         static TMP_Text[] CardStrip(RectTransform column, string[] keys)
         {
-            RectTransform strip = StripRow(column, "Strip", 60f);
+            RectTransform strip = Rect("Strip", column);
+            VLayout(strip, PlaqueRowGap, new RectOffset());
             var values = new TMP_Text[keys.Length];
             for (int i = 0; i < keys.Length; i++)
-            {
-                GameObject cell = Instance(statCellPart, strip, "Cell " + (i + 1));
-                if (i == 0) cell.transform.Find("Divider").gameObject.SetActive(false);
-                Localize(Child<TMP_Text>(cell.transform, "Label"), keys[i]);
-                Child<Image>(cell.transform, "Value Row/Icon").gameObject.SetActive(false);
-                values[i] = Child<TMP_Text>(cell.transform, "Value Row/Value");
-            }
+                values[i] = Child<TMP_Text>(Plaque(strip, "Plaque " + (i + 1), keys[i]).transform, "Value");
             return values;
         }
 
@@ -1082,38 +1087,24 @@ namespace TJ.Games.EditorTools
             return button.gameObject;
         }
 
-        // A caption over a right-aligned value, for the header's right edge.
-        static TMP_Text CapValue(RectTransform parent, string name, string capKey, float size, out TMP_Text cap)
+        // A Stat Plaque at the header's right edge; its holder fixes the width so the title keeps the rest of the row.
+        static TMP_Text HeaderPlaque(RectTransform header, string name, out TMP_Text label)
         {
-            RectTransform block = Rect(name, parent);
-            Fixed(block.gameObject, 150f, 50f);
-            VerticalLayoutGroup layout = VLayout(block, 3f, new RectOffset());
-            layout.childAlignment = TextAnchor.MiddleRight;
-            cap = CapLabel(block, "Label");
-            cap.alignment = TextAlignmentOptions.MidlineRight;
-            Localize(cap, capKey);
-            TMP_Text value = Text("Value", block, displayDrop, size, Cream, "Value");
-            value.alignment = TextAlignmentOptions.MidlineRight;
-            value.enableAutoSizing = true;
-            value.fontSizeMin = 12f;
-            value.fontSizeMax = size;
-            return value;
+            RectTransform holder = Rect(name, header);
+            Fixed(holder.gameObject, HeaderPlaqueWidth, -1f);
+            HLayout(holder, 0f, TextAnchor.MiddleCenter, new RectOffset());
+            GameObject plaque = Plaque(holder, "Plaque", null);
+            // The plaque's see-through fill turns grey over the header's warm band, so it gets the body's dark behind it.
+            Image backing = Img(Stretch(Rect("Backing", plaque.transform)), null, PlaqueBacking);
+            Ignore(backing.gameObject);
+            backing.raycastTarget = false;
+            backing.transform.SetAsFirstSibling();
+            label = Child<TMP_Text>(plaque.transform, "Label");
+            return Child<TMP_Text>(plaque.transform, "Value");
         }
 
-        static void HeaderRule(RectTransform header)
-        {
-            Image rule = Img(Rect("Band Rule", header), solid, A(Brass, 0.35f));
-            Anchor(rule.rectTransform, Vector2.zero, new Vector2(1f, 0f), Vector2.zero, new Vector2(0f, 1f));
-            Ignore(rule.gameObject);
-        }
-
-        static TMP_Text CapLabel(RectTransform parent, string name)
-        {
-            TMP_Text label = Text(name, parent, display, 12f, Cap, name);
-            label.fontStyle = FontStyles.UpperCase;
-            label.characterSpacing = 10f;
-            return label;
-        }
+        // Section labels are normal case with no letter spacing; spaced capitals read as a web dashboard.
+        static TMP_Text SectionTitle(RectTransform parent, string name) => Text(name, parent, displayDrop, 18f, Gold, name);
 
         static void Spacer(RectTransform parent, bool horizontal = false)
         {

@@ -1,4 +1,5 @@
 using System;
+using Memori.UI;
 using System.Threading.Tasks;
 using TMPro;
 using Memori.Input;
@@ -171,7 +172,7 @@ public class SpellCastButton : MonoBehaviour, IPointerEnterHandler, IPointerExit
         cachedAffordable = true;
         SetSelected(false);
         RenderCooldown(0f, false);
-        selectSpellButton.onClick.RemoveAllListeners();
+        selectSpellButton.ClearClickListeners();
 
         // An empty slot (hotbar longer than the loadout) shows no icon and cannot be clicked.
         spellIcon.enabled = hasSpell;

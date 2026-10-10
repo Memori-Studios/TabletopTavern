@@ -44,10 +44,10 @@ namespace TJ.MainMenu
         {
             base.SetUp(mainMenu);
 
-            moddingGuideButton.Button.onClick.RemoveAllListeners();
+            moddingGuideButton.Button.ClearClickListeners();
             moddingGuideButton.Button.onClick.AddListener(() => Application.OpenURL(moddingGuideLink.Url));
 
-            steamWorkshopButton.Button.onClick.RemoveAllListeners();
+            steamWorkshopButton.Button.ClearClickListeners();
             steamWorkshopButton.Button.onClick.AddListener(() => Application.OpenURL(steamWorkshopLink.Url));
         }
 

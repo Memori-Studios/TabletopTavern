@@ -21,7 +21,8 @@ public enum Team { Player, Enemy, Neutral }
 public enum FormationType { Triangle, Radial, Box}
 public enum GamePhase { SetUp, Deployment, Battle, PostGame }
 public enum BattleLayoutType { Normal, PlayerEncircled, EnemyEncircled, EnemyDeferred }
-public enum Race { IronLegion, Gruntkin, RavenHost, TaelindorForest, SanguineCourt, SakuraDynasty, DeepstoneHold, DrakosaurBrood, Special } //Olympian Phalanx
+// Append only. OlympianLeague exists in every build; TabletopTavernConstants.IsRaceInBuild hides it without FACTIONUPDATE.
+public enum Race { IronLegion, Gruntkin, RavenHost, TaelindorForest, SanguineCourt, SakuraDynasty, DeepstoneHold, DrakosaurBrood, Special, OlympianLeague }
 //Imperial Edict: First recruitment pack is free upon entering a town
 //Endless Hordes: Heal all units by 20% of their max health after winning a battle
 //Starlit Guidance: Grants the ability to spend 5<sprite name=GoldSprite> to reveal the outcome of the next dice roll during events
@@ -110,6 +111,15 @@ public enum UnitName
     GutrotShaman,
     // Deepstone Hold. Runeward, a friendly brace, borrowed from Raven Host's Shieldwall.
     Glyphwright,
+
+    // Olympian League, in every build; TabletopTavernConstants.IsRaceInBuild keeps it off rosters without FACTIONUPDATE.
+    Helots, Hoplites, Toxotai, Peltasts,
+    Phalangites, Sphendonetai, Hippeis, Hypaspists,
+    SonsOfAres, ShieldsOfAthena, MinotaursOfTheLabyrinth, FiresOfHephaestus,
+    AchillesMyrmidons, RidersOfTheDioscuri, Gorgon,
+    PriestessOfAthena,
+    // Summoned by Theron Lionshield's signature spell; never recruited (TabletopTavernConstants.IsSummonOnly).
+    NemeanLion,
 }
 [System.Serializable] public struct SquadSpawnData {
     public int squadId;
@@ -246,6 +256,11 @@ public static class BonusTagRegistry
         { "Goblin", (unitName, stats) => TabletopTavernConstants.IsAGoblinUnit(unitName) },
         // Hybrids count: they hold the melee line, so Hero 5's Melee Infantry bonus applies to them.
         { "MeleeInfantry", (unitName, stats) => TabletopTavernConstants.FightsInMelee(stats.unitType) && stats.unitSize == UnitSize.Infantry },
+#if FACTIONUPDATE
+        // Any unit carrying an Olympian League blessing (Hero 18).
+        { "Blessed", (unitName, stats) => stats.SquadAttributes.AresFury || stats.SquadAttributes.AthenasAegis || stats.SquadAttributes.ZeussBolt
+            || stats.SquadAttributes.PoseidonsTremor || stats.SquadAttributes.ApollosSun || stats.SquadAttributes.HadesShades || stats.SquadAttributes.GorgonsGaze },
+#endif
     };
 
     public static bool Evaluate(string tag, UnitName unitName, SquadStats stats)

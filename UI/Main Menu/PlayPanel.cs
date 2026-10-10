@@ -54,7 +54,7 @@ namespace TJ.MainMenu
         [Header("Hero Stage")]
         [SerializeField] private Transform heroParent;
         [SerializeField] private MemoriTooltipTrigger startingGoldTooltipTrigger;
-        // World-space FX at the hero's feet: a small one when a hero is picked, a big one for the campaign send-off.
+        // World-space FX on the hero: a small one when a hero is picked, a big one for the campaign send-off.
         [SerializeField] private GameObject heroPickFx;
         [SerializeField] private GameObject sendOffFx;
         [SerializeField] private float stageFxLifetime = 4f;
@@ -144,6 +144,8 @@ namespace TJ.MainMenu
 
         public override async void OpenPanel()
         {
+            // Real time, so the deal-in meets the door however long the hero load below holds the frame.
+            float openedAt = Time.realtimeSinceStartup;
             SceneHandler.Instance.TranstionCameras(_mainMenuCamera, heroCamera);
             await Task.Delay(500);
             cameraSceneParent.gameObject.SetActive(true);
@@ -177,11 +179,24 @@ namespace TJ.MainMenu
             LoadHeroes(openingHero);
             ShowCommanderScreen();
             silentSetUp = false;
-            // The roster and hero panel deal in as the camera door clears.
-            commanderView.PlayArrival(ArrivalDelay);
+            startingArmySection.WarmUnitInfo();
+            if (arrival != null) StopCoroutine(arrival);
+            arrival = StartCoroutine(ArriveWithDoor(openedAt));
         }
 
-        private const float ArrivalDelay = 0.25f;
+        // The camera door (MainTransition) starts to open two thirds of the way through.
+        private const float DoorOpensAt = 0.67f;
+        private const float DoorWaitLimit = 2.5f;
+        private Coroutine arrival;
+
+        // The roster and hero panel deal in as the camera door opens; a load hitch holds the door, so it is waited on, not timed.
+        private IEnumerator ArriveWithDoor(float openedAt)
+        {
+            while (SceneHandler.Instance.CameraDoorProgress < DoorOpensAt && Time.realtimeSinceStartup - openedAt < DoorWaitLimit)
+                yield return null;
+            commanderView.PlayArrival(0f);
+            arrival = null;
+        }
 
         private bool silentSetUp;
         private Coroutine screenSwap;
@@ -248,6 +263,7 @@ namespace TJ.MainMenu
             PlayScreenSwap(warbandScreen);
             warbandPanel.SetShown(true);
             warbandPanel.PlayArrival();
+            startingArmySection.PlayRecruitArrival();
         }
 
         /// <summary>
@@ -324,6 +340,8 @@ namespace TJ.MainMenu
         {
             // A pick the player made gets the full answer; the hero the panel opens on arrives with the door instead.
             bool announce = !silentSetUp;
+            // The burst lands on the click, sized from the hero still on stage, and covers the swap.
+            if (announce) SpawnStageFx(heroPickFx, PickFxScale);
             UnloadHeroes();
             SetActiveHero(_hero);
 #if DEMO
@@ -337,7 +355,7 @@ namespace TJ.MainMenu
             if(SaveDataHandler.IsDevToolUser()) heroIsUnlocked = true;
 #endif
 
-            LoadHeroPrefab(announce);
+            LoadHeroPrefab();
 
             if (announce) IAudioRequester.Instance.PlaySFX(SFXData.SelectHero);
 
@@ -397,7 +415,7 @@ namespace TJ.MainMenu
             warbandPanel.ResetLoadoutForHero(hero);
         }
 
-        public async void LoadHeroPrefab(bool announce = false)
+        public async void LoadHeroPrefab()
         {
             int version = ++_heroPrefabLoadVersion;
             string key = TabletopTavernData.Instance.GetHeroPrefabKey(hero.HeroID);
@@ -420,17 +438,38 @@ namespace TJ.MainMenu
                 animator.Play("HeroPopIn");
 
             heroPopInFeedback.PlayFeedbacks();
-            if (announce) SpawnStageFx(heroPickFx, 1f);
         }
 
-        // One-shot FX at the hero's feet in the 3D tavern; it removes itself, so nothing needs to track it.
+        // One-shot FX on the hero in the 3D tavern; it removes itself, so nothing needs to track it.
         private void SpawnStageFx(GameObject fxPrefab, float scale)
         {
             if (fxPrefab == null || heroParent == null) return;
-            GameObject fx = Instantiate(fxPrefab, heroParent.position, Quaternion.identity, heroParent);
-            fx.transform.localScale = Vector3.one * scale;
+            // The hero camera frames the hero from the knees up, so the FX sits at the body's centre, sized to the hero.
+            // Not parented to the stage: its pop-in scale would shrink the FX with it.
+            Bounds body = new Bounds(heroParent.position, Vector3.one * FxReferenceHeight);
+            bool measured = false;
+            int layer = heroParent.gameObject.layer;
+            if (heroObject != null)
+            {
+                foreach (Renderer part in heroObject.GetComponentsInChildren<Renderer>())
+                {
+                    if (!measured) { body = part.bounds; measured = true; layer = part.gameObject.layer; }
+                    else body.Encapsulate(part.bounds);
+                }
+            }
+            GameObject fx = Instantiate(fxPrefab, body.center, Quaternion.identity);
+            UnityEngine.SceneManagement.SceneManager.MoveGameObjectToScene(fx, heroParent.gameObject.scene);
+            // The hero camera renders only the tavern layers; the FX prefabs sit on Default and would never be drawn.
+            foreach (Transform part in fx.GetComponentsInChildren<Transform>(true)) part.gameObject.layer = layer;
+            // Clamped, so a stray prop in the hero prefab cannot blow the FX up or shrink it away.
+            fx.transform.localScale = Vector3.one * (scale * Mathf.Clamp(body.size.y / FxReferenceHeight, 0.25f, 3f));
             Destroy(fx, stageFxLifetime);
         }
+
+        // The Epic Toon FX are sized for a figure about this tall, in world units.
+        private const float FxReferenceHeight = 2f;
+        // A pick is a medium moment, so its FX plays at a third of the send-off's size.
+        private const float PickFxScale = 0.35f;
 
         // The hero answers the send-off; the tavern controllers hold a masculine and a feminine cheer.
         private void PlayHeroCheer()
@@ -574,15 +613,11 @@ namespace TJ.MainMenu
             decreaseDifficultyButton.gameObject.SetActive(DifficultyRules.Rank(_difficultySelected) > 0);
 
             //display difficulty crests
-            GameObject shownCrest = null;
             for (int i = 0; i < difficultyCrests.Length; i++)
-            {
                 difficultyCrests[i].SetActive(i == difficultyData.crestIndex);
-                if (i == difficultyData.crestIndex) shownCrest = difficultyCrests[i];
-            }
             crestSpawnFeedback.StopFeedbacks();
             crestSpawnFeedback.PlayFeedbacks();
-            ShowDifficultyFeel(shownCrest, levelModifierLines.Count, silent);
+            ShowDifficultyFeel(levelModifierLines.Count, silent);
 
             string additionalModifiersDesc = "";
 
@@ -602,8 +637,8 @@ namespace TJ.MainMenu
         private CanvasGroup crestGroup;
         private const float LockedCrestAlpha = 0.45f;
 
-        // A locked level dims its crest; a chosen level deals its modifier lines in, and Godking lands harder.
-        private void ShowDifficultyFeel(GameObject crest, int lineCount, bool silent)
+        // A locked level dims its crest; a chosen level deals its modifier lines in.
+        private void ShowDifficultyFeel(int lineCount, bool silent)
         {
             if (crestGroup == null)
             {
@@ -617,10 +652,10 @@ namespace TJ.MainMenu
             if (difficultyFeel != null) StopCoroutine(difficultyFeel);
             difficultyDescriptionText.maxVisibleLines = 99;
             if (silent || !isActiveAndEnabled) return;
-            difficultyFeel = StartCoroutine(DifficultyFeelRoutine(crest, lineCount));
+            difficultyFeel = StartCoroutine(DifficultyFeelRoutine(lineCount));
         }
 
-        private IEnumerator DifficultyFeelRoutine(GameObject crest, int lineCount)
+        private IEnumerator DifficultyFeelRoutine(int lineCount)
         {
             for (int line = 1; line <= lineCount; line++)
             {
@@ -628,12 +663,6 @@ namespace TJ.MainMenu
                 yield return new WaitForSecondsRealtime(0.04f);
             }
             difficultyDescriptionText.maxVisibleLines = 99;
-            // The crest's own spawn scale runs first; the Godking crest then lands with a heavier punch.
-            if (crest != null && DifficultyRules.IsHardest(_difficultySelected))
-            {
-                yield return new WaitForSecondsRealtime(0.1f);
-                yield return UIJuice.Punch(crest.transform, 1.15f, 0.06f, 0.2f);
-            }
             difficultyFeel = null;
         }
         #endregion
@@ -657,7 +686,10 @@ namespace TJ.MainMenu
         #endregion
 
         #region Start
-        private const float SendOffTime = 0.6f;
+        // The flare is seen on the button first, then the panels fade and leave the hero alone before the door closes.
+        private const float SendOffFlareTime = 0.2f;
+        private const float SendOffFadeTime = 0.35f;
+        private const float SendOffHoldTime = 0.25f;
         private Coroutine sendOff;
 
         public void OnStartButtonClicked()
@@ -684,16 +716,25 @@ namespace TJ.MainMenu
             sendOff = StartCoroutine(SendOff());
         }
 
-        // The run's one big moment: trumpet, gold flare, the hero cheers, then the door closes as before.
+        // The run's one big moment: the war horn and the hero's battle theme, gold flare, the hero cheers, the panels fade, then the door closes.
         private IEnumerator SendOff()
         {
-            IAudioRequester.Instance.PlaySFX(SFXData.Trumpet);
+            yield return SendOffFeel();
+            sendOff = null;
+            BeginCampaign();
+        }
+
+        private IEnumerator SendOffFeel()
+        {
+            IAudioRequester.Instance.PlaySFX(SFXData.BattleHorn);
+            IAudioRequester.Instance.PlayBattleTheme((int)hero.Race);
             warbandPanel.PlaySendOff();
             PlayHeroCheer();
             SpawnStageFx(sendOffFx, 1f);
-            yield return new WaitForSecondsRealtime(SendOffTime);
-            sendOff = null;
-            BeginCampaign();
+            yield return new WaitForSecondsRealtime(SendOffFlareTime);
+            // Raycasts stay on, so a second click on Start can still skip the rest.
+            yield return UIJuice.Close(warbandScreen.GetComponent<CanvasGroup>(), SendOffFadeTime);
+            yield return new WaitForSecondsRealtime(SendOffHoldTime);
         }
 
         private void BeginCampaign()

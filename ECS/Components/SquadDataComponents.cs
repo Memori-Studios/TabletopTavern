@@ -79,10 +79,19 @@ public struct SquadAttributes
     public bool ProjectileWard;
     public bool SpellWard;
     public bool BloodDrinker;
+    // Olympian League Blessings. Without FACTIONUPDATE nothing reads them and no shipped unit sets them.
+    public bool AresFury;
+    public bool AthenasAegis;
+    public bool ZeussBolt;
+    public bool PoseidonsTremor;
+    public bool ApollosSun;
+    public bool HadesShades;
+    public bool GorgonsGaze;
 }
 
 // Append only - ordinals are serialized into save data as SquadToLoad.PrestigeTrait.
-public enum UnitAttribute { None, ArmorPiercing, AntiInfantry, AntiLarge, Infantry, Large, StandardShields, Armored, Terrifying, Stalwart, Ethereal, SwampCreature, ForestDweller, Outrider, ChickenFlight, BloodFrenzy, Rage, Emblazing, Unstoppable, HeavyShields, ThrowingAxes, ArmorSundering, MonsterSlayer, ForgefuryTempering, TowerShields, FlamingAmmo, IsOnFire, DragonsHoard, BackStabbers, ThickScales, ShotDiscipline, Overdraw, SteadyAim, Demolisher, PowderReserves, DeepQuivers, PotentMagic, WideWeave, FarCast, Quickcast, SwiftStride, ProjectileWard, SpellWard, BloodDrinker }
+public enum UnitAttribute { None, ArmorPiercing, AntiInfantry, AntiLarge, Infantry, Large, StandardShields, Armored, Terrifying, Stalwart, Ethereal, SwampCreature, ForestDweller, Outrider, ChickenFlight, BloodFrenzy, Rage, Emblazing, Unstoppable, HeavyShields, ThrowingAxes, ArmorSundering, MonsterSlayer, ForgefuryTempering, TowerShields, FlamingAmmo, IsOnFire, DragonsHoard, BackStabbers, ThickScales, ShotDiscipline, Overdraw, SteadyAim, Demolisher, PowderReserves, DeepQuivers, PotentMagic, WideWeave, FarCast, Quickcast, SwiftStride, ProjectileWard, SpellWard, BloodDrinker,
+    AresFury, AthenasAegis, ZeussBolt, PoseidonsTremor, ApollosSun, HadesShades, GorgonsGaze }
 [System.Serializable]
 public struct UnitAttributeSerialized
 {

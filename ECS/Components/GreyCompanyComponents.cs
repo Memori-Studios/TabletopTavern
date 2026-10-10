@@ -364,6 +364,8 @@ public struct SpellEntity : IComponentData {
     public int StatusSpellId;
     // Knockback-only blast (a Bombardment shell): throws the units in its radius but adds no damage.
     public bool SkipsDamage;
+    // Judgement of Zeus: every model of TargetSquadEntity is hit, wherever it stands. Read only under FACTIONUPDATE.
+    public bool HitsWholeSquad;
 }
 // public struct UnitHitBySpell : IComponentData { public float3 SpellPosition; public float SpellForce; public float3 InitHitLocation;}
 public struct BattleOver : IComponentData {public bool PlayerWon; }

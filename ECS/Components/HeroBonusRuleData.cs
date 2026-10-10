@@ -19,6 +19,11 @@ public static class HeroBonusRuleData
     private static BonusCondition Types(params UnitType[] types) => new() { FilterKind = BonusFilterKind.UnitType, UnitTypes = types };
     private static BonusCondition Sizes(params UnitSize[] sizes) => new() { FilterKind = BonusFilterKind.UnitSize, UnitSizes = sizes };
     private static BonusCondition EnemyRaceIs(Race race) => new() { FilterKind = BonusFilterKind.EnemyRace, RequiredEnemyRace = race };
+#if FACTIONUPDATE
+    // heroBonusDescription33's "Olympian heavy infantry".
+    private static BonusCondition OlympianHeavyInfantry() => Units(UnitName.Hoplites, UnitName.Hypaspists, UnitName.Phalangites,
+        UnitName.SonsOfAres, UnitName.ShieldsOfAthena, UnitName.AchillesMyrmidons);
+#endif
 
     public static readonly List<HeroStatBonusRule> BaseStatRules = new()
     {
@@ -92,6 +97,16 @@ public static class HeroBonusRuleData
         new() { HeroID = 16, LocalizationKey = "heroBonusTitle31", Stat = UnitStat.MeleeDefense, Condition = Sizes(UnitSize.Cavalry, UnitSize.Monstrous, UnitSize.SingleUnit, UnitSize.Artillery), MagnitudeKind = BonusMagnitudeKind.Flat, Value = 4 },
         new() { HeroID = 16, LocalizationKey = "heroBonusTitle32", Stat = UnitStat.Armor, Condition = Units(UnitName.StegoplateGuard), MagnitudeKind = BonusMagnitudeKind.Flat, Value = 15 },
         new() { HeroID = 16, LocalizationKey = "heroBonusTitle32", Stat = UnitStat.WeaponStrength, Condition = Units(UnitName.StegoplateGuard), MagnitudeKind = BonusMagnitudeKind.Flat, Value = 4 },
+#if FACTIONUPDATE
+
+        // Hero 17 - Theron Lionshield
+        new() { HeroID = 17, LocalizationKey = "heroBonusTitle33", Stat = UnitStat.MeleeDefense, Condition = OlympianHeavyInfantry(), MagnitudeKind = BonusMagnitudeKind.Flat, Value = 4 },
+        new() { HeroID = 17, LocalizationKey = "heroBonusTitle33", Stat = UnitStat.Leadership, Condition = OlympianHeavyInfantry(), MagnitudeKind = BonusMagnitudeKind.Flat, Value = 10 },
+        new() { HeroID = 17, LocalizationKey = "heroBonusTitle34", Stat = UnitStat.BaseUnitCount, Condition = Units(UnitName.Helots, UnitName.Hoplites, UnitName.Toxotai, UnitName.Peltasts), MagnitudeKind = BonusMagnitudeKind.Flat, Value = 8 },
+
+        // Hero 18 - Kassandra of Delphi. heroBonusTitle36 (Answered Prayers twice) is SquadManager's ORACLE_HERO_ID check, not a rule.
+        new() { HeroID = 18, LocalizationKey = "heroBonusTitle35", Stat = UnitStat.Leadership, Condition = Tag("Blessed"), MagnitudeKind = BonusMagnitudeKind.Flat, Value = 10 },
+#endif
     };
 
     public static readonly List<HeroAttributeBonusRule> BaseAttributeRules = new()

@@ -1,9 +1,41 @@
+using System.Collections;
 using UnityEngine;
 using TMPro;
 using QuickOutline;
+using Memori.UI;
 
 namespace TJ.Shop
 {
+    // A refused purchase shakes the shelf item's model too; the hover feedbacks own the item's root, so the model moves.
+    public static class ShopRefusal
+    {
+        const float AmplitudeOfWidth = 0.08f, Duration = 0.25f;
+
+        // Sideways on screen: the shelf models face the shop camera, so their own axes can point at it.
+        public static IEnumerator ShakeModel(Transform model)
+        {
+            if (model == null) yield break;
+            Camera camera = CampaignManager.Instance.MapCamera.ShopCamera;
+            Vector3 right = camera != null ? camera.transform.right : Vector3.right;
+            Bounds body = default;
+            bool measured = false;
+            foreach (Renderer part in model.GetComponentsInChildren<Renderer>())
+            {
+                if (!measured) { body = part.bounds; measured = true; }
+                else body.Encapsulate(part.bounds);
+            }
+            float width = measured ? Mathf.Max(body.size.x, body.size.z) : 0.3f;
+            float amplitude = AmplitudeOfWidth * width;
+            Vector3 rest = model.position;
+            for (float t = 0f; t < Duration; t += Time.unscaledDeltaTime)
+            {
+                model.position = rest + right * (amplitude * Mathf.Sin(t * 40f) * (1f - t / Duration));
+                yield return null;
+            }
+            model.position = rest;
+        }
+    }
+
     [RequireComponent(typeof(Canvas))]
     public class ShopPriceCanvas : MonoBehaviour
     {
@@ -30,6 +62,11 @@ namespace TJ.Shop
             priceText.text = $"<s>{priceText.text}</s>";
             priceText.color = Color.gray;
             outline.OutlineColor = Color.gray;
+        }
+        public void Refuse()
+        {
+            // World-space canvas: the shake is sized to the label, not in screen pixels.
+            StartCoroutine(UIJuice.Shake(priceText.rectTransform, priceText.rectTransform.rect.width * 0.15f));
         }
         public void SetUp(string price)
         {

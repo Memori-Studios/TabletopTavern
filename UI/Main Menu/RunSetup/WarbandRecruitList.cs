@@ -132,6 +132,24 @@ namespace TJ.MainMenu
         // A rebuilt list shows its numbers as they are; only later changes count.
         private void OnDisable() => shownGold = int.MinValue;
 
+        private Coroutine arrival;
+
+        // The rarity groups deal in top to bottom with the build column beside them.
+        public void PlayArrival()
+        {
+            if (!isActiveAndEnabled) return;
+            var items = new List<RectTransform>();
+            var delays = new List<float>();
+            foreach (TierGroup group in groups)
+            {
+                if (group.root == null || !group.root.activeSelf) continue;
+                delays.Add(0.05f + items.Count * WarbandBuildView.ArrivalStep);
+                items.Add((RectTransform)group.root.transform);
+            }
+            if (arrival != null) StopCoroutine(arrival);
+            arrival = StartCoroutine(Memori.UI.UIJuice.Reveal(items, delays, WarbandBuildView.ArrivalTime));
+        }
+
         /// <summary>The top row's + that can take a squad, for the first key press on the warband screen.</summary>
         public UnityEngine.UI.Selectable FirstAddButton()
         {

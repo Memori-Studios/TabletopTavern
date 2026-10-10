@@ -226,6 +226,14 @@ namespace TJ.MainMenu
         {
             ShowWarbandUnitInfo(_squadToLoad);
         }
+        // The warband's unit panel is saved inactive and its first Start reads the save; warmed behind the door, not on the first hover.
+        public void WarmUnitInfo()
+        {
+            if (squadBattleInfo.gameObject.activeSelf) return;
+            squadBattleInfo.gameObject.SetActive(true);
+            squadBattleInfo.Unhover();
+        }
+
         private void ShowWarbandUnitInfo(SquadToLoad _squad)
         {
             // Saved inactive in the scene, and its fade cannot run until it is active.
@@ -314,6 +322,11 @@ namespace TJ.MainMenu
 
         // The first + a key press should land on: the top recruit row that can take a squad.
         public UnityEngine.UI.Selectable FirstRecruitControl() => recruitList != null ? recruitList.FirstAddButton() : null;
+
+        public void PlayRecruitArrival()
+        {
+            if (recruitList != null) recruitList.PlayArrival();
+        }
         #endregion
         public void AddTroop(SquadToLoad _squadToAdd)
         {

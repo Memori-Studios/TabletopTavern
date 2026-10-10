@@ -1,6 +1,7 @@
 using Memori.Input;
 using Memori.Scenes;
 using Memori.Utilities;
+using System.Collections;
 using System.Collections.Generic;
 using System.Linq;
 using TMPro;
@@ -77,6 +78,12 @@ namespace TJ.MainMenu
         [Header("Steam Deck Feedback")]
         [SerializeField] private SteamDeckFeedbackPopup steamDeckFeedbackPopup;
 
+        [Header("Juice")]
+        [SerializeField] private RectTransform menuColumn;
+        [SerializeField] private RectTransform menuFooter;
+        [SerializeField] private RectTransform modsBody;
+        [SerializeField] private RectTransform roadmapBody;
+
         [Header("Localization")]
         [SerializeField] private Button openLocalizationPanelButton;
         [SerializeField] private AssetReferenceGameObject localizationPanelRef;
@@ -92,6 +99,11 @@ namespace TJ.MainMenu
             abandonRunButton.onClick.AddListener(AbandonRunConfirmationPopUp);
             abandonRunYesButton.onClick.AddListener(AbandonRun);
             abandonRunNoButton.onClick.AddListener(CancelAbandonRun);
+            // The pop-up's two buttons are plain Buttons without the Button Base sounds and hover motion.
+            abandonRunYesButton.onClick.AddListener(PlayButtonClick);
+            abandonRunNoButton.onClick.AddListener(PlayButtonClick);
+            UIHoverBloom.Attach(abandonRunYesButton.gameObject);
+            UIHoverBloom.Attach(abandonRunNoButton.gameObject);
             customBattleButton.onClick.AddListener(() => HandleCustomBattle());
             upgradesPanelButton.onClick.AddListener(() => OpenPanel(PanelType.Upgrades));
             collectionPanelButton.onClick.AddListener(() => OpenPanel(PanelType.Collection));
@@ -181,6 +193,7 @@ namespace TJ.MainMenu
             bool isNewPlayer = !SaveDataHandler.PlayerSaveDataExists();
             mainMenuCanvas.enabled = true;
             mainMenuPanel.OpenPanel();
+            HideMenuForDeal();
             currentPanel = mainMenuPanel;
 
             if (!_hasCheckedModCountThisSession)
@@ -194,6 +207,7 @@ namespace TJ.MainMenu
                 await WaitForTavernTheme();
 
             SceneHandler.Instance.AlertOfSceneSetUpComlete();
+            DealInMenu(() => SceneHandler.Instance.DoorOpenProgress, SceneDoorDealAt, SceneDoorWaitLimit);
 
             if (isNewPlayer)
             {
@@ -202,6 +216,10 @@ namespace TJ.MainMenu
             }
             else
             {
+                // The first-time close is for the welcome pop-up; a returning player's Roadmap closes like any pop-up.
+                closeRoadmapCanvasButton.onClick.RemoveListener(CloseRoadmapFirstTime);
+                closeRoadmapCanvasButton.onClick.RemoveListener(CloseRoadmapCanvas);
+                closeRoadmapCanvasButton.onClick.AddListener(CloseRoadmapCanvas);
                 FadeInTitle();
                 // A new player's first boot already has the roadmap pop-up.
                 steamDeckFeedbackPopup.TryShow();
@@ -273,6 +291,8 @@ namespace TJ.MainMenu
                     currentPanel.ClosePanel();
                     playPanel.gameObject.SetActive(false);
                     modsPanel.OpenPanel();
+                    // The menu is hidden at once and Mods fades in, the run setup swap rule.
+                    StartPanelOpen(modsPanel.GetComponent<CanvasGroup>(), modsBody);
                     depthField.focusDistance.value = 3f;
                     UpdateCurrentPanel(PanelType.Mods);
                     break;
@@ -309,6 +329,7 @@ namespace TJ.MainMenu
             try
             {
                 MainMenuPanel panelToClose = currentPanel;
+                StopPanelOpen();
                 if (panelToClose != mainMenuPanel)
                     panelToClose.ClosePanel();
 
@@ -316,8 +337,16 @@ namespace TJ.MainMenu
                 if (panelToClose != modsPanel && panelToClose != mainMenuPanel)
                     await Task.Delay(500);
 
+                // Settings toggles land here with the menu still showing; only a hidden menu deals back in.
+                bool menuWasHidden = MenuGroup.alpha < 0.99f;
                 mainMenuPanel.gameObject.SetActive(true);
                 mainMenuPanel.OpenPanel();
+                if (menuWasHidden)
+                {
+                    // The logo and news card fade back with the panel while the column deals in.
+                    StartPanelOpen(MenuGroup, null);
+                    DealInMenu(() => SceneHandler.Instance.CameraDoorProgress, CameraDoorDealAt, CameraDoorWaitLimit);
+                }
                 depthField.focusDistance.value = 9f;
 
                 UpdateCurrentPanel(PanelType.Main);
@@ -331,6 +360,7 @@ namespace TJ.MainMenu
             try
             {
                 MainMenuPanel panelToClose = currentPanel;
+                StopPanelOpen();
                 playPanel.OpenPanel();
                 await Task.Delay(500);
                 depthField.focusDistance.value = 3.82f;
@@ -346,6 +376,7 @@ namespace TJ.MainMenu
             try
             {
                 MainMenuPanel panelToClose = currentPanel;
+                StopPanelOpen();
                 upgradesPanel.OpenPanel();
                 await Task.Delay(500);
                 depthField.focusDistance.value = 3f;
@@ -378,7 +409,10 @@ namespace TJ.MainMenu
         {
             if (_isPanelTransitioning) return;
             _isPanelTransitioning = true;
-
+            EnterMap();
+        }
+        private void EnterMap()
+        {
             PlayerSaveData saveData = SaveDataHandler.LoadPlayerSaveData();
             saveData.customBattle = false;
             SaveDataHandler.SavePlayerSaveData(saveData);
@@ -457,13 +491,13 @@ namespace TJ.MainMenu
 
             if (campaignSaveDataExists)
             {
-                playPanelButton.onClick.RemoveAllListeners();
-                playPanelButton.onClick.AddListener(() => LoadMapScene());
+                playPanelButton.ClearClickListeners();
+                playPanelButton.onClick.AddListener(ContinueRun);
                 abandonRunButton.gameObject.SetActive(true);
             }
             else
             {
-                playPanelButton.onClick.RemoveAllListeners();
+                playPanelButton.ClearClickListeners();
                 playPanelButton.onClick.AddListener(() => OpenPanel(PanelType.Play));
                 abandonRunButton.gameObject.SetActive(false);
             }
@@ -502,8 +536,9 @@ namespace TJ.MainMenu
         private void AbandonRunConfirmationPopUp()
         {
             TooltipManager.Instance.HideTooltip();
+            StopPanelOpen();
             currentPanel.ClosePanel();
-            abandonRunConfirmationCanvasGroup.CGEnable();
+            OpenPopup(abandonRunConfirmationCanvasGroup, (RectTransform)abandonRunConfirmationCanvasGroup.transform);
         }
         public void AbandonRun()
         {
@@ -515,13 +550,13 @@ namespace TJ.MainMenu
             }
             SaveDataHandler.DeleteCampaignSave();
             CheckForCampaignSaveData();
-            abandonRunConfirmationCanvasGroup.CGDisable();
+            ClosePopup(abandonRunConfirmationCanvasGroup);
             ReturnToMainMenu();
         }
         public void CancelAbandonRun()
         {
             CheckForCampaignSaveData();
-            abandonRunConfirmationCanvasGroup.CGDisable();
+            ClosePopup(abandonRunConfirmationCanvasGroup);
             ReturnToMainMenu();
         }
         [ContextMenu("Check Files")]
@@ -539,11 +574,11 @@ namespace TJ.MainMenu
         }
         public void OpenRoadmapCanvas()
         {
-            roadmapCanvasGroup.CGEnable();
+            OpenPopup(roadmapCanvasGroup, roadmapBody);
         }
         public void CloseRoadmapCanvas()
         {
-            roadmapCanvasGroup.CGDisable();
+            ClosePopup(roadmapCanvasGroup);
             OpenMainMenuPanel();
         }
         private void HandleCustomBattle()
@@ -586,7 +621,10 @@ namespace TJ.MainMenu
             Race[] collectableRaces =
             {
                 Race.IronLegion, Race.Gruntkin, Race.RavenHost, Race.TaelindorForest,
-                Race.SanguineCourt, Race.SakuraDynasty, Race.DeepstoneHold, Race.DrakosaurBrood
+                Race.SanguineCourt, Race.SakuraDynasty, Race.DeepstoneHold, Race.DrakosaurBrood,
+#if FACTIONUPDATE
+                Race.OlympianLeague,
+#endif
             };
 
             GearID[] allGear = GearData.GetGearIDs();
@@ -648,16 +686,39 @@ namespace TJ.MainMenu
                 localizationPanelInstance = Instantiate(prefab, mainMenuCanvas.transform);
             }
             localizationPanelInstance.SetActive(true);
+
+            CanvasGroup group = localizationPanelInstance.GetComponent<CanvasGroup>();
+            if (group == null) group = localizationPanelInstance.AddComponent<CanvasGroup>();
+            // The flag grid rises; the dim behind it only fades, so it never shows an undimmed strip.
+            StartCoroutine(UIJuice.Open(group, localizationPanelInstance.transform.Find("Grid") as RectTransform));
+            IAudioRequester.Instance.PlaySFX(SFXData.OpenUI);
         }
         public void CloseLocalizationPanel()
         {
-            if (localizationPanelInstance != null)
+            if (localizationPanelInstance == null)
             {
-                Destroy(localizationPanelInstance);
-                localizationPanelInstance = null;
-                Resources.UnloadUnusedAssets();
+                AddressablesManager.Instance.Release(localizationPanelRef.AssetGUID);
+                return;
             }
-            AddressablesManager.Instance.Release(localizationPanelRef.AssetGUID);
+            GameObject panel = localizationPanelInstance;
+            localizationPanelInstance = null;
+            IAudioRequester.Instance.PlaySFX(SFXData.ClosePopUp);
+            StartCoroutine(FadeOutLocalizationPanel(panel));
+        }
+        private IEnumerator FadeOutLocalizationPanel(GameObject panel)
+        {
+            CanvasGroup group = panel.GetComponent<CanvasGroup>();
+            if (group != null)
+            {
+                group.interactable = false;
+                group.blocksRaycasts = false;
+                yield return UIJuice.Close(group);
+            }
+            Destroy(panel);
+            Resources.UnloadUnusedAssets();
+            // Reopened during the fade: the new panel still needs the asset.
+            if (localizationPanelInstance == null)
+                AddressablesManager.Instance.Release(localizationPanelRef.AssetGUID);
         }
         private void OpenMainMenuPanel()
         {
@@ -681,6 +742,170 @@ namespace TJ.MainMenu
             SaveDataHandler.DeletePlayerSaveData();
             SceneHandler.Instance.SwitchGameState(GameStateEnum.MainMenu);
         }
+        #region Menu deal-in
+        // TJ's block deal from run setup: one block every 0.1 s, each over 0.3 s.
+        private const float DealStep = 0.1f;
+        private const float DealTime = 0.3f;
+        // The battle HUD's door reading; the camera door opens over its last third, as PlayPanel reads it.
+        private const float SceneDoorDealAt = 0.4f;
+        private const float SceneDoorWaitLimit = 1.5f;
+        private const float CameraDoorDealAt = 0.67f;
+        private const float CameraDoorWaitLimit = 2.5f;
+        private Coroutine _deal;
+        private Coroutine _panelOpen;
+        private CanvasGroup _menuGroup;
+        private CanvasGroup MenuGroup
+        {
+            get
+            {
+                if (_menuGroup == null) _menuGroup = mainMenuPanel.GetComponent<CanvasGroup>();
+                return _menuGroup;
+            }
+        }
+
+        // One panel fade at a time: a fade left running would bring back a panel that has since been hidden.
+        private void StartPanelOpen(CanvasGroup group, RectTransform body)
+        {
+            StopPanelOpen();
+            _panelOpen = StartCoroutine(UIJuice.Open(group, body));
+        }
+
+        private void StopPanelOpen()
+        {
+            if (_panelOpen == null) return;
+            StopCoroutine(_panelOpen);
+            _panelOpen = null;
+        }
+
+        // The column's buttons in order, then the footer, which arrives with the first button.
+        private void CollectDealItems(List<RectTransform> items, List<float> delays)
+        {
+            if (menuColumn == null || menuFooter == null)
+            {
+                Debug.LogError("[MainMenu] menuColumn or menuFooter is not set; the menu shows without its deal-in.");
+                return;
+            }
+            foreach (Transform child in menuColumn)
+            {
+                // Spacers such as Group Gap have no children and take no part.
+                if (!child.gameObject.activeSelf || child.childCount == 0) continue;
+                delays.Add(items.Count * DealStep);
+                items.Add((RectTransform)child);
+            }
+            items.Add(menuFooter);
+            delays.Add(0f);
+        }
+
+        // Hidden as the panel opens, so nothing shows before the door lets the deal start.
+        private void HideMenuForDeal()
+        {
+            var items = new List<RectTransform>();
+            CollectDealItems(items, new List<float>());
+            foreach (RectTransform item in items)
+            {
+                CanvasGroup group = item.GetComponent<CanvasGroup>();
+                if (group == null) group = item.gameObject.AddComponent<CanvasGroup>();
+                group.alpha = 0f;
+            }
+        }
+
+        private void DealInMenu(System.Func<float> doorProgress, float dealAt, float waitLimit)
+        {
+            var items = new List<RectTransform>();
+            var delays = new List<float>();
+            CollectDealItems(items, delays);
+            HideMenuForDeal();
+            if (_deal != null) StopCoroutine(_deal);
+            _deal = StartCoroutine(DealWhenDoorOpens(items, delays, doorProgress, dealAt, waitLimit));
+        }
+
+        private IEnumerator DealWhenDoorOpens(List<RectTransform> items, List<float> delays, System.Func<float> doorProgress, float dealAt, float waitLimit)
+        {
+            // The door is told to open after this starts, so its progress is read from the next frame.
+            yield return null;
+            float waited = 0f;
+            while (doorProgress() < dealAt && waited < waitLimit)
+            {
+                waited += Time.unscaledDeltaTime;
+                yield return null;
+            }
+            yield return UIJuice.Reveal(items, delays, DealTime);
+            _deal = null;
+        }
+        #endregion
+
+        #region Pop-ups
+        private readonly Dictionary<MemoriCanvasGroup, Coroutine> _popupMotion = new();
+
+        private void OpenPopup(MemoriCanvasGroup popup, RectTransform body)
+        {
+            StopPopupMotion(popup);
+            popup.CGEnable();
+            _popupMotion[popup] = StartCoroutine(UIJuice.Open(popup.GetComponent<CanvasGroup>(), body));
+            IAudioRequester.Instance.PlaySFX(SFXData.OpenUI);
+        }
+
+        private void ClosePopup(MemoriCanvasGroup popup)
+        {
+            StopPopupMotion(popup);
+            if (popup.alpha <= 0f)
+            {
+                popup.CGDisable();
+                return;
+            }
+            popup.interactable = false;
+            popup.blocksRaycasts = false;
+            IAudioRequester.Instance.PlaySFX(SFXData.ClosePopUp);
+            _popupMotion[popup] = StartCoroutine(FadeOutPopup(popup));
+        }
+
+        private IEnumerator FadeOutPopup(MemoriCanvasGroup popup)
+        {
+            yield return UIJuice.Close(popup.GetComponent<CanvasGroup>());
+            popup.CGDisable();
+            _popupMotion.Remove(popup);
+        }
+
+        private void StopPopupMotion(MemoriCanvasGroup popup)
+        {
+            if (!_popupMotion.TryGetValue(popup, out Coroutine motion)) return;
+            if (motion != null) StopCoroutine(motion);
+            _popupMotion.Remove(popup);
+        }
+
+        private static void PlayButtonClick() => IAudioRequester.Instance.PlaySFX(SFXData.ButtonClick);
+        #endregion
+
+        #region Continue send-off
+        // The send-off's shape from run setup: the menu holds 0.2 s on the flare, then fades before the door closes.
+        private const float SendOffHold = 0.2f;
+        private const float SendOffFadeTime = 0.35f;
+
+        private void ContinueRun()
+        {
+            if (_isPanelTransitioning) return;
+            _isPanelTransitioning = true;
+            StartCoroutine(ContinueSendOff());
+        }
+
+        private IEnumerator ContinueSendOff()
+        {
+            StopPanelOpen();
+            CanvasGroup menu = MenuGroup;
+            menu.interactable = false;
+            menu.blocksRaycasts = false;
+            TooltipManager.Instance.HideTooltip();
+
+            Hero hero = HeroData.GetHeroByID(SaveDataHandler.LoadPlayerSaveData().lastHeroID);
+            IAudioRequester.Instance.PlayBattleTheme((int)hero.Race);
+            StartCoroutine(UIJuice.Punch(playPanelButton.transform));
+
+            yield return new WaitForSecondsRealtime(SendOffHold);
+            yield return UIJuice.Close(menu, SendOffFadeTime);
+            EnterMap();
+        }
+        #endregion
+
         private void OnDestroy()
         {
             if (SceneHandler.HasInstance)

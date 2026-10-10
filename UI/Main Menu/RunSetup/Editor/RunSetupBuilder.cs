@@ -36,6 +36,7 @@ namespace TJ.RunSetup.EditorTools
         // Shared art: the sheen on a screen's main action and the flare a commit lands with.
         const string ButtonSheenPath = "Assets/Data/Prefabs/UI/Reuseable/Ornaments/Button Sheen.prefab";
         const string LandFlarePath = "Assets/Data/Prefabs/UI/Reuseable/Ornaments/Land Flare.prefab";
+        const string HaloFlarePath = "Assets/Data/Prefabs/UI/Reuseable/Ornaments/Halo Flare.prefab";
         const string SheetPath = "Assets/Scripts/Memori.Tooltip/Art/TooltipSheet.png";
         const string TableName = "MainLocalizationTable";
 
@@ -52,10 +53,13 @@ namespace TJ.RunSetup.EditorTools
         const float SlotSquare = 80f;
         // Every hero panel block has a fixed height so switching heroes never moves the blocks below.
         const float EffectHeight = 76f;
+        // Section titles: the Drop font in Gold at normal case, on a row tall enough for the 18 unit line.
+        const float SectionTitleSize = 18f;
+        const float HeadingHeight = 22f;
         // Text boxes sized for the 13 unit floor: a unit name or a gear hint on two lines, a gear title on one.
         const float ArmyNameHeight = 40f;
         const float SlotTitleHeight = 20f;
-        const float SlotHintHeight = 36f;
+        const float SlotHintHeight = 42f;
 
         #region Style
         static readonly Color Brass = Hex("B08A3E");
@@ -64,14 +68,13 @@ namespace TJ.RunSetup.EditorTools
         static readonly Color Body = Hex("D9D3C5");
         static readonly Color Flavour = Hex("A99F8A");
         static readonly Color Cap = Hex("8C9AA2");
-        static readonly Color Hair = Hex("8C9AA2", 0.3f);
         static readonly Color TileFill = Hex("1C2A30");
         static readonly Color Dim = Hex("4A5C66");
         static readonly Color Error = Hex("E8A15F");
 
         static TMP_FontAsset displayDrop, display;
-        static Sprite mount, solid, squareSliced, edgeFade, circle, lockIcon, heroIcon, campaignIcon, battleIcon, shade, arrowIcon;
-        static GameObject standardButton, backButton, primaryButton, basicBackground, gearTilePrefab, buttonSheen, landFlare;
+        static Sprite mount, solid, flatShadow, frameSmall, heroFrame, edgeFade, circle, lockIcon, heroIcon, campaignIcon, battleIcon, shade, arrowIcon;
+        static GameObject standardButton, backButton, primaryButton, basicBackground, gearTilePrefab, buttonSheen, landFlare, haloFlare;
 
         static void LoadAssets()
         {
@@ -83,7 +86,9 @@ namespace TJ.RunSetup.EditorTools
             sheet.TryGetValue("TooltipMount", out mount);
             sheet.TryGetValue("TooltipSolid", out solid);
             if (mount == null || solid == null) Debug.LogError("RunSetupBuilder: tooltip sheet sprites missing.");
-            squareSliced = Load<Sprite>("Assets/Art/Icons/UI/SquareSliced.png");
+            flatShadow = Load<Sprite>("Assets/ImportedPackages/ModernUIPack/Textures/Shadow/Flat Shadow.png");
+            frameSmall = Load<Sprite>("Assets/ImportedPackages/InterfaceFantasyWarriorHUD/Sprites/HUD/SPR_HUD_FantasyWarrior_Frame_Box_Small01.png");
+            heroFrame = Load<Sprite>("Assets/Art/UI/Difficulty Frames/SPR_FantasyWarrior_Frame_Box_Small01_Bronze.png");
             edgeFade = Load<Sprite>("Assets/ImportedPackages/ModernUIPack/Textures/Shadow/Vertical Shadow.png");
             circle = Load<Sprite>("Assets/Art/Icons/UI/Circle.png");
             lockIcon = Load<Sprite>("Assets/Art/Icons/UI/LockClosedGold.png");
@@ -99,6 +104,7 @@ namespace TJ.RunSetup.EditorTools
             gearTilePrefab = Load<GameObject>(GearTilePath);
             buttonSheen = Load<GameObject>(ButtonSheenPath);
             landFlare = Load<GameObject>(LandFlarePath);
+            haloFlare = Load<GameObject>(HaloFlarePath);
         }
 
         // The sheen fills its button; it ignores the button's layout.
@@ -113,6 +119,19 @@ namespace TJ.RunSetup.EditorTools
         static Memori.UI.UIFlare AddFlare(Transform parent, Vector2 anchor, Vector2 position)
         {
             GameObject flare = Instance(landFlare, parent, "Land Flare");
+            return PlaceFlare(flare, anchor, position);
+        }
+
+        // A round glow drawn under everything else in its parent, so it rings the icon instead of covering it.
+        static Memori.UI.UIFlare AddHalo(Transform parent, Vector2 anchor, Vector2 position)
+        {
+            GameObject flare = Instance(haloFlare, parent, "Halo Flare");
+            flare.transform.SetAsFirstSibling();
+            return PlaceFlare(flare, anchor, position);
+        }
+
+        static Memori.UI.UIFlare PlaceFlare(GameObject flare, Vector2 anchor, Vector2 position)
+        {
             var rect = (RectTransform)flare.transform;
             rect.anchorMin = rect.anchorMax = anchor;
             rect.anchoredPosition = position;
@@ -764,14 +783,14 @@ namespace TJ.RunSetup.EditorTools
                 gemImages[i] = gem;
             }
 
-            Image frame = Img(Stretch(Rect("Frame", tile)), squareSliced, DifficultyMetal.PlainFrame, Image.Type.Sliced);
+            Image frame = Img(Stretch(Rect("Frame", tile)), heroFrame, DifficultyMetal.PlainFrame, Image.Type.Sliced);
             frame.fillCenter = false;
-            frame.pixelsPerUnitMultiplier = 0.3f;
+            frame.pixelsPerUnitMultiplier = 3f;
 
-            RectTransform selected = Stretch(Rect("Selected", tile), -4f, -4f, -4f, -4f);
-            Image ring = Img(selected, squareSliced, Color.white, Image.Type.Sliced);
+            RectTransform selected = Stretch(Rect("Selected", tile), -10f, -10f, -10f, -10f);
+            Image ring = Img(selected, flatShadow, Color.white, Image.Type.Sliced);
             ring.fillCenter = false;
-            ring.pixelsPerUnitMultiplier = 0.5f;
+            ring.pixelsPerUnitMultiplier = 2f;
             selected.gameObject.SetActive(false);
 
             RectTransform locked = Rect("Locked", tile);
@@ -808,9 +827,9 @@ namespace TJ.RunSetup.EditorTools
             float width = ArmySquare - 4f;
             Image portrait = Img(Rect("Portrait", mask), null, Color.white);
             TopCentre(portrait.rectTransform, width, width * 1.5f, 6f);
-            Image frame = Img(Stretch(Rect("Frame", square)), squareSliced, Hex("BDC3C7"), Image.Type.Sliced);
+            Image frame = Img(Stretch(Rect("Frame", square)), frameSmall, Hex("BDC3C7"), Image.Type.Sliced);
             frame.fillCenter = false;
-            frame.pixelsPerUnitMultiplier = 0.5f;
+            frame.pixelsPerUnitMultiplier = 4f;
 
             TMP_Text name = Text("Name", tile, displayDrop, 13f, Cream, "Unit Name");
             name.alignment = TextAlignmentOptions.Top;
@@ -821,8 +840,7 @@ namespace TJ.RunSetup.EditorTools
             name.lineSpacing = -12f;
             Anchor(name.rectTransform, Vector2.zero, new Vector2(1f, 0f), new Vector2(-4f, 0f), new Vector2(4f, ArmyNameHeight));
 
-            // Over the portrait, so the squad flashes as it lands.
-            Memori.UI.UIFlare flare = AddFlare(tile, new Vector2(0.5f, 1f), new Vector2(0f, -ArmySquare / 2f));
+            Memori.UI.UIFlare flare = AddHalo(tile, new Vector2(0.5f, 1f), new Vector2(0f, -ArmySquare / 2f));
 
             WarbandArmyTile component = go.AddComponent<WarbandArmyTile>();
             var so = new SerializedObject(component);
@@ -849,13 +867,11 @@ namespace TJ.RunSetup.EditorTools
             Fixed(back, 160f, 46f);
             Localize(Child<TMP_Text>(back.transform, "Button Label"), "returnButton");
             Spacer(left, true);
-            Steps(left, 1);
             Ref(so, "returnButton", back.GetComponent<Button>());
 
             RectTransform right = Bar(root, "Right Bar", false);
-            TMP_Text treasury = Text("Treasury", right, display, 19f, Cream, "TREASURY 18\n15 base +3 renown");
+            TMP_Text treasury = Text("Treasury", right, display, 19f, Cream, "Treasury 18");
             treasury.alignment = TextAlignmentOptions.MidlineLeft;
-            treasury.lineSpacing = -10f;
             Flexible(treasury.gameObject, 1f).preferredWidth = 0f;
             GameObject build = Instance(primaryButton, right, "Build Army");
             Fixed(build, 250f, 46f);
@@ -875,12 +891,12 @@ namespace TJ.RunSetup.EditorTools
             TMP_Text title = Text("Title", head, displayDrop, 30f, Gold, "Select Hero");
             Localize(title, "Select Hero");
             Flexible(title.gameObject, 1f).preferredWidth = 0f;
-            BrassRule(panel, 12f, 14f);
+            Gap(panel, 10f);
 
             RectTransform grid = Rect("Factions", panel);
             GridLayoutGroup layout = grid.gameObject.AddComponent<GridLayoutGroup>();
             // The extra 21 px is room for the gem row that hangs under each tile.
-            layout.cellSize = new Vector2(266f, 16f + 8f + TileHeight + 21f);
+            layout.cellSize = new Vector2(266f, HeadingHeight + 8f + TileHeight + 21f);
             layout.spacing = new Vector2(20f, 16f);
             layout.constraint = GridLayoutGroup.Constraint.FixedColumnCount;
             layout.constraintCount = 2;
@@ -891,11 +907,12 @@ namespace TJ.RunSetup.EditorTools
             {
                 RectTransform box = Rect("Faction " + (card + 1), grid);
                 VLayout(box, 8f, new RectOffset());
+                // CommanderScreenView colours each faction's pip with its display colour; the name stays grey (TJ, 2026-10-09).
                 TMP_Text factionName = Heading(box, "Faction", out Image pip);
-                Unlocalize(factionName, "Faction");
                 factionName.color = Hex("C9D2D8");
-                names[card] = factionName;
                 pips[card] = pip;
+                Unlocalize(factionName, "Faction");
+                names[card] = factionName;
                 RectTransform row = Rect("Heroes", box);
                 HLayout(row, 12f, TextAnchor.UpperLeft, new RectOffset());
                 for (int i = 0; i < 2; i++)
@@ -911,10 +928,9 @@ namespace TJ.RunSetup.EditorTools
             Spacer(panel, false);
             RectTransform soon = Rect("Coming Soon", panel);
             HLayout(soon, 10f, TextAnchor.MiddleLeft, new RectOffset(2, 0, 0, 0));
-            Image mark = Img(Rect("Mark", soon), squareSliced, Hex("6F7E86"), Image.Type.Sliced);
-            mark.fillCenter = false;
-            Fixed(mark.gameObject, 8f, 8f);
-            mark.rectTransform.localEulerAngles = new Vector3(0f, 0f, 45f);
+            Image mark = Img(Rect("Mark", soon), mount, Color.white);
+            mark.preserveAspect = true;
+            Fixed(mark.gameObject, 16f, 16f);
             TMP_Text soonText = Text("Text", soon, display, 14f, Cap, "Olympian Phalanx and one more faction are on the way.");
             soonText.fontStyle = FontStyles.Italic;
             Unlocalize(soonText, "Olympian Phalanx and one more faction are on the way.");
@@ -951,9 +967,9 @@ namespace TJ.RunSetup.EditorTools
             Fixed(factionRow.gameObject, -1f, 28f);
             Image pip = Img(Rect("Pip", factionRow), solid, Hex("6DC47C"));
             Fixed(pip.gameObject, 10f, 10f);
-            TMP_Text faction = CapText(factionRow, "Faction", 13.5f, Hex("6DC47C"));
+            TMP_Text faction = Text("Faction", factionRow, displayDrop, 15f, Hex("6DC47C"), "Gruntkin");
             Unlocalize(faction, "Gruntkin");
-            TMP_Text region = Text("Region", factionRow, display, 14f, Cap, "· The Mudfen Wastes");
+            TMP_Text region = Text("Region", factionRow, display, 14f, Cap, "The Mudfen Wastes");
             region.fontStyle = FontStyles.Italic;
             Ref(so, "heroFactionPip", pip);
             Ref(so, "heroFactionText", faction);
@@ -967,7 +983,7 @@ namespace TJ.RunSetup.EditorTools
             lore.alignment = TextAlignmentOptions.TopLeft;
             Ref(so, "loreText", lore);
             Ref(so, "loreScroll", loreScroll);
-            BrassRule(panel, 18f, 18f);
+            Gap(panel, 24f);
 
             Heading(panel, "Hero Effects", out _);
             Gap(panel, 14f);
@@ -1013,9 +1029,9 @@ namespace TJ.RunSetup.EditorTools
             unitMask.gameObject.AddComponent<RectMask2D>();
             Image unitPortrait = Img(Rect("Portrait", unitMask), null, Color.white);
             Centre(unitPortrait.rectTransform, 44f, 66f);
-            Image unitFrame = Img(Stretch(Rect("Frame", unitSquare)), squareSliced, Hex("F1C40F"), Image.Type.Sliced);
+            Image unitFrame = Img(Stretch(Rect("Frame", unitSquare)), frameSmall, Hex("F1C40F"), Image.Type.Sliced);
             unitFrame.fillCenter = false;
-            unitFrame.pixelsPerUnitMultiplier = 0.5f;
+            unitFrame.pixelsPerUnitMultiplier = 4f;
             Ref(so, "unitPortrait", unitPortrait);
             Ref(so, "unitFrame", unitFrame);
             Ref(so, "unitNameText", unitName);
@@ -1026,9 +1042,9 @@ namespace TJ.RunSetup.EditorTools
             Image spellIcon = Img(Rect("Icon", spellSquare), null, Hex("6DC47C"));
             spellIcon.preserveAspect = true;
             Centre(spellIcon.rectTransform, 28f, 28f);
-            Image spellFrame = Img(Stretch(Rect("Frame", spellSquare)), squareSliced, Hex("6DC47C"), Image.Type.Sliced);
+            Image spellFrame = Img(Stretch(Rect("Frame", spellSquare)), frameSmall, Hex("6DC47C"), Image.Type.Sliced);
             spellFrame.fillCenter = false;
-            spellFrame.pixelsPerUnitMultiplier = 0.5f;
+            spellFrame.pixelsPerUnitMultiplier = 4f;
             Ref(so, "spellCard", spellCard.gameObject);
             Ref(so, "spellWash", wash);
             Ref(so, "spellIcon", spellIcon);
@@ -1090,7 +1106,7 @@ namespace TJ.RunSetup.EditorTools
             TMP_Text title = Text("Title", head, displayDrop, 30f, Gold, "Your starting build");
             Localize(title, "warbandBuildTitle");
             Fixed(title.gameObject, -1f, 40f);
-            BrassRule(head, 12f, 6f);
+            Gap(head, 8f);
 
             RectTransform army = Section(panel, "Army", WarbandSection.Army, "startingArmy", out TMP_Text armyCount, out GameObject armyHighlight);
             RectTransform slots = Rect("Slots", army);
@@ -1105,8 +1121,9 @@ namespace TJ.RunSetup.EditorTools
                 RectTransform box = Rect("Box", cell);
                 TopCentre(box, ArmySquare, ArmySquare, 0f);
                 Img(box, solid, A(Hex("08100F"), 0.3f));
-                Image edge = Img(Stretch(Rect("Edge", box)), squareSliced, A(Dim, 0.8f), Image.Type.Sliced);
+                Image edge = Img(Stretch(Rect("Edge", box)), frameSmall, A(Dim, 0.8f), Image.Type.Sliced);
                 edge.fillCenter = false;
+                edge.pixelsPerUnitMultiplier = 4f;
                 PlusMark(box);
             }
             RectTransform units = Stretch(Rect("Starting Units Parent", slots));
@@ -1128,8 +1145,8 @@ namespace TJ.RunSetup.EditorTools
             HorizontalLayoutGroup spellRow = HLayout(spellSlots, 16f, TextAnchor.UpperLeft, new RectOffset(4, 0, 0, 0));
             spellRow.childControlWidth = false;
             spellRow.childControlHeight = false;
-            // Room for a spell name on two lines under each slot.
-            Fixed(spellSlots.gameObject, -1f, SlotSquare + 48f);
+            // Room for a spell name on three lines under each slot (German "Kleiner Schadenszauber").
+            Fixed(spellSlots.gameObject, -1f, SlotSquare + 64f);
 
             FlexibleGap(panel, 8f);
             RectTransform difficulty = Section(panel, "Difficulty", null, "Difficulty", out TMP_Text _, out GameObject _, rightLabel: "heroRecordWon", gems: true, gemImages: out Image[] gems);
@@ -1187,7 +1204,6 @@ namespace TJ.RunSetup.EditorTools
             Fixed(back, 160f, 46f);
             Localize(Child<TMP_Text>(back.transform, "Button Label"), "returnButton");
             Spacer(leftBar, true);
-            Steps(leftBar, 2);
 
             RectTransform rightBar = Bar(root, "Right Bar", false);
             RectTransform purse = Rect("Purse", rightBar);
@@ -1196,8 +1212,7 @@ namespace TJ.RunSetup.EditorTools
             Image purseHit = Img(purse, null, Color.clear);
             purseHit.raycastTarget = true;
             RectTransform ready = Stretch(Rect("Ready", purse));
-            TMP_Text purseText = Text("Gold", ready, display, 19f, Cream, "GOLD LEFT 4\n18 start · 14 army · 0 gear");
-            purseText.lineSpacing = -10f;
+            TMP_Text purseText = Text("Gold", ready, display, 19f, Cream, "Gold left 4");
             Stretch(purseText.rectTransform);
             RectTransform blocked = Stretch(Rect("Blocked", purse));
             TMP_Text blockedText = Text("Text", blocked, display, 15f, Error, "Blocked");
@@ -1253,20 +1268,22 @@ namespace TJ.RunSetup.EditorTools
             Ignore(description.gameObject);
 
             RectTransform empty = SlotState(slot, "Empty", out RectTransform emptySquare, out TMP_Text emptyTitle, out TMP_Text emptyHint);
-            Image emptyEdge = Img(Stretch(Rect("Edge", emptySquare)), squareSliced, Dim, Image.Type.Sliced);
+            Image emptyEdge = Img(Stretch(Rect("Edge", emptySquare)), frameSmall, Dim, Image.Type.Sliced);
             emptyEdge.fillCenter = false;
+            emptyEdge.pixelsPerUnitMultiplier = 4f;
             PlusMark(emptySquare);
 
             RectTransform locked = SlotState(slot, "Locked", out RectTransform lockedSquare, out TMP_Text lockedTitle, out TMP_Text lockedHint);
-            Image lockedEdge = Img(Stretch(Rect("Edge", lockedSquare)), squareSliced, Dim, Image.Type.Sliced);
+            Image lockedEdge = Img(Stretch(Rect("Edge", lockedSquare)), frameSmall, Dim, Image.Type.Sliced);
             lockedEdge.fillCenter = false;
+            lockedEdge.pixelsPerUnitMultiplier = 4f;
             Image lockImage = Img(Rect("Lock", lockedSquare), lockIcon, Hex("8C9AA2"));
             lockImage.preserveAspect = true;
             Centre(lockImage.rectTransform, 30f, 30f);
             equipped.gameObject.SetActive(false);
             locked.gameObject.SetActive(false);
 
-            Memori.UI.UIFlare equipFlare = AddFlare(slot, new Vector2(0f, 1f), new Vector2(SlotSquare / 2f, -SlotSquare / 2f));
+            Memori.UI.UIFlare equipFlare = AddHalo(slot, new Vector2(0f, 1f), new Vector2(SlotSquare / 2f, -SlotSquare / 2f));
 
             WarbandGearSlot component = slot.gameObject.AddComponent<WarbandGearSlot>();
             var so = new SerializedObject(component);
@@ -1388,22 +1405,16 @@ namespace TJ.RunSetup.EditorTools
 
             RectTransform head = Rect("Heading", block);
             HLayout(head, 10f, TextAnchor.MiddleLeft, new RectOffset());
-            TMP_Text label = CapText(head, "Label", 13f, Cap);
+            TMP_Text label = Text("Label", head, displayDrop, SectionTitleSize, Gold, headingKey);
             Localize(label, headingKey);
-            // At the 13 unit floor, so the layout measures the label at the size it is drawn; columns are sized to fit it.
-            label.enableAutoSizing = true;
-            label.fontSizeMin = 13f;
-            label.fontSizeMax = 13f;
             GetOrAdd<LayoutElement>(label.gameObject).minWidth = 40f;
-            Image line = Img(Rect("Line", head), solid, Hair);
-            Flexible(line.gameObject, 1f).preferredHeight = 1f;
-            GetOrAdd<LayoutElement>(line.gameObject).minHeight = 1f;
-            GetOrAdd<LayoutElement>(line.gameObject).minWidth = 8f;
+            // Holds the count or the won gems at the block's right edge.
+            Spacer(head, true);
             count = null;
             gemImages = null;
             if (gems)
             {
-                TMP_Text won = CapText(head, "Won", 11f, Cap);
+                TMP_Text won = Text("Won", head, displayDrop, 15f, Cap, rightLabel);
                 Localize(won, rightLabel);
                 RectTransform gemRow = Rect("Gems", head);
                 HLayout(gemRow, 9f, TextAnchor.MiddleCenter, new RectOffset(2, 2, 0, 0)).childControlWidth = false;
@@ -1436,22 +1447,23 @@ namespace TJ.RunSetup.EditorTools
             return block;
         }
 
+        // A section title. CommanderScreenView deals the hero panel in by blocks that start at each "Heading " child.
+        // Grey caps with a coloured pip, as before Phase 1 (TJ kept this look, 2026-10-09); no trailing line.
         static TMP_Text Heading(RectTransform parent, string key, out Image pip, Color? pipColour = null)
         {
             RectTransform head = Rect("Heading " + key, parent);
             HLayout(head, 8f, TextAnchor.MiddleLeft, new RectOffset());
-            Fixed(head.gameObject, -1f, 16f);
+            Fixed(head.gameObject, -1f, HeadingHeight);
             pip = null;
             if (pipColour.HasValue || key == "Faction")
             {
                 pip = Img(Rect("Pip", head), solid, pipColour ?? Hex("6DC47C"));
                 Fixed(pip.gameObject, 9f, 9f);
             }
-            TMP_Text label = CapText(head, "Label", 12.5f, Cap);
+            TMP_Text label = Text("Label", head, displayDrop, 13f, Cap, key);
+            label.fontStyle = FontStyles.UpperCase;
+            label.characterSpacing = 12f;
             if (key != "Faction") Localize(label, key);
-            Image line = Img(Rect("Line", head), solid, Hair);
-            Flexible(line.gameObject, 1f).preferredHeight = 1f;
-            GetOrAdd<LayoutElement>(line.gameObject).minHeight = 1f;
             return label;
         }
 
@@ -1473,11 +1485,7 @@ namespace TJ.RunSetup.EditorTools
             Unlocalize(title, "Effect");
             if (tagKey != null)
             {
-                RectTransform chip = Rect("Tag", titleRow);
-                HLayout(chip, 0f, TextAnchor.MiddleCenter, new RectOffset(6, 6, 1, 1));
-                Image outline = Img(chip, squareSliced, Dim, Image.Type.Sliced);
-                outline.fillCenter = false;
-                TMP_Text tag = CapText(chip, "Text", 10.5f, Cap);
+                TMP_Text tag = Text("Tag", titleRow, displayDrop, 15f, Cap, tagKey);
                 Localize(tag, tagKey);
             }
             body = Text("Body", texts, display, 15f, Body, "Body");
@@ -1515,69 +1523,14 @@ namespace TJ.RunSetup.EditorTools
             Flexible(texts.gameObject, 1f).preferredWidth = 0f;
             RectTransform labelRow = Rect("Label Row", texts);
             HLayout(labelRow, 8f, TextAnchor.MiddleLeft, new RectOffset());
-            TMP_Text label = CapText(labelRow, "Label", 11f, Cap);
+            TMP_Text label = Text("Label", labelRow, displayDrop, 14f, Cap, labelKey);
             Localize(label, labelKey);
-            Image line = Img(Rect("Line", labelRow), solid, Hair);
-            Flexible(line.gameObject, 1f).preferredHeight = 1f;
-            GetOrAdd<LayoutElement>(line.gameObject).minHeight = 1f;
             nameText = Text("Name", texts, displayDrop, 19f, Cream, name);
             nameText.enableAutoSizing = true;
             nameText.fontSizeMin = 13f;
             nameText.fontSizeMax = 19f;
             Unlocalize(nameText, name);
             return card;
-        }
-
-        static void Steps(RectTransform parent, int active)
-        {
-            RectTransform steps = Rect("Steps", parent);
-            HLayout(steps, 10f, TextAnchor.MiddleCenter, new RectOffset());
-            Step(steps, "1", "Leader", active == 1);
-            Image line = Img(Rect("Line", steps), solid, Hex("5A6A72"));
-            Fixed(line.gameObject, 26f, 1f);
-            Step(steps, "2", "RunHistoryArmy", active == 2);
-        }
-
-        static void Step(RectTransform parent, string number, string key, bool on)
-        {
-            Color colour = on ? Gold : Cap;
-            RectTransform step = Rect("Step " + number, parent);
-            HLayout(step, 7f, TextAnchor.MiddleLeft, new RectOffset());
-            RectTransform dot = Rect("Dot", step);
-            Fixed(dot.gameObject, 22f, 22f);
-            Img(dot, circle, colour);
-            if (!on)
-            {
-                Image hole = Img(Stretch(Rect("Hole", dot), 2f, 2f, 2f, 2f), circle, Hex("1F2B2E"));
-                hole.raycastTarget = false;
-            }
-            TMP_Text digit = Text("Number", dot, displayDrop, 12f, on ? Hex("1A2427") : colour, number);
-            digit.alignment = TextAlignmentOptions.Center;
-            Stretch(digit.rectTransform);
-            CentreInk(digit);
-            TMP_Text label = Text("Label", step, displayDrop, 15f, colour, key);
-            Localize(label, key);
-        }
-
-        static void BrassRule(RectTransform parent, float above, float below)
-        {
-            Gap(parent, above);
-            RectTransform rule = Rect("Rule", parent);
-            Fixed(rule.gameObject, -1f, 9f);
-            Image line = Img(Rect("Line", rule), solid, A(Brass, 0.55f));
-            Anchor(line.rectTransform, new Vector2(0f, 0.5f), new Vector2(1f, 0.5f), new Vector2(4f, -0.5f), new Vector2(-4f, 0.5f));
-            for (int side = 0; side < 2; side++)
-            {
-                RectTransform mountRect = Rect(side == 0 ? "Left Mount" : "Right Mount", rule);
-                mountRect.anchorMin = mountRect.anchorMax = new Vector2(side, 0.5f);
-                mountRect.sizeDelta = new Vector2(8f, 8f);
-                mountRect.anchoredPosition = new Vector2(side == 0 ? 4f : -4f, 0f);
-                mountRect.localEulerAngles = new Vector3(0f, 0f, 45f);
-                Img(mountRect, solid, Hex("1F2B2E"));
-                Image outline = Img(Stretch(Rect("Edge", mountRect)), squareSliced, Brass, Image.Type.Sliced);
-                outline.fillCenter = false;
-            }
-            Gap(parent, below);
         }
 
         // Fixed-height story box; the full lore scrolls inside it with the codex's slim brass bar.
@@ -1685,14 +1638,6 @@ namespace TJ.RunSetup.EditorTools
             rect.anchoredPosition = new Vector2(0f, (godking ? -150f : -13f) * scale);
         }
         #endregion
-
-        static TMP_Text CapText(RectTransform parent, string name, float size, Color colour)
-        {
-            TMP_Text label = Text(name, parent, displayDrop, size, colour, name);
-            label.fontStyle = FontStyles.UpperCase;
-            label.characterSpacing = 12f;
-            return label;
-        }
 
         static void HideButtonText(GameObject button, bool keepLabel)
         {

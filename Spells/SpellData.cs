@@ -27,7 +27,11 @@ namespace TJ.Spells
         // Edric's signature.
         IronRain,
         // Bertha's signature, replacing ArtilleryBombardment.
-        Barricade }
+        Barricade,
+        // Olympian League. The Priestess of Athena's cast, a friendly defence buff borrowed from Gruntkin's Rampage.
+        AegisPrayer,
+        // Olympian League. Theron Lionshield's signature: summons one Nemean Lion. LightningStrike (5) is Kassandra's.
+        NemeanLion }
     // World: raycast ground point, stays fixed. Squad: follows the target squad's live
     // position through warmup and damage resolution.
     public enum SpellTargetingType { World, Squad }
@@ -155,6 +159,16 @@ namespace TJ.Spells
         // Spawns a friendly squad at the cast point that lasts until killed and is never written
         // back to the campaign save. Author these as SpellTargetingType.World.
         public UnitName SummonedUnitName;
+
+        [Header("Chain strike")]
+        // Hits every model of the target squad, then leaps to the nearest enemy squad within ChainRange not yet struck.
+        // Data only: the leap runs under FACTIONUPDATE (Judgement of Zeus).
+        public bool ChainsToSquads;
+        public int ChainCount;
+        public float ChainRange;
+        // Each leap deals this share of the first strike's damage.
+        public float ChainFalloff;
+        public float ChainInterval;
 
         // Aim circles only; single-target squad spells share one marker size so it never reads as an area.
         public const float SINGLE_TARGET_MARKER_RADIUS = 5f;

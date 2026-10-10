@@ -68,8 +68,8 @@ namespace TJ.MainMenu
         }
         private void OnDestroy()
         {
-            enterButton.Button.onClick.RemoveAllListeners();
-            cancelButton.Button.onClick.RemoveAllListeners();
+            enterButton.Button.ClearClickListeners();
+            cancelButton.Button.ClearClickListeners();
         }
     }
 }

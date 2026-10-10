@@ -119,7 +119,7 @@ namespace TJ.Games
         // SetUp can run twice, so each button drops its old listener first.
         private static void Bind(Button button, UnityAction action)
         {
-            button.onClick.RemoveAllListeners();
+            button.ClearClickListeners();
             button.onClick.AddListener(action);
         }
 

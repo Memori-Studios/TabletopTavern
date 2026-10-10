@@ -1,7 +1,6 @@
 using System;
 using System.Collections.Generic;
 using Memori.Tooltip;
-using TJ.MainMenu;
 using TMPro;
 using UnityEditor;
 using UnityEditor.Events;
@@ -29,7 +28,8 @@ namespace TJ.Town.EditorTools
         const string SpoilRowPath = PartFolder + "/Town Spoil Row.prefab";
         const string ScenePath = "Assets/Scenes/Map.unity";
         const string ButtonFolder = "Assets/Data/Prefabs/UI/Reuseable/Buttons";
-        const string ChipPath = "Assets/Data/Prefabs/UI/Collection/Chip.prefab";
+        const string StatPlaquePath = "Assets/Data/Prefabs/UI/Reuseable/Ornaments/Stat Plaque.prefab";
+        const string BandGradientPath = "Assets/ImportedPackages/InterfaceFantasyWarriorHUD/Sprites/HUD/SPR_HUD_FantasyWarrior_Gradient_Vertical_Smooth01.png";
         const string BasicBackgroundPath = "Assets/Data/Prefabs/UI/Reuseable/Basic Background.prefab";
         const string SheetPath = "Assets/Scripts/Memori.Tooltip/Art/TooltipSheet.png";
         const string TableName = "MainLocalizationTable";
@@ -45,14 +45,12 @@ namespace TJ.Town.EditorTools
         // The background's tracery starts below the header (TJ, 2026-09-25).
         const float TextureTop = 115f;
         const float TexturePixelsPerUnit = 12f;
-        // Wide enough for Texturina capitals in the longer locales (CASTILLO, CHATEAU).
-        const float LadderStep = 84f;
         // Two equal whole-pixel columns and the 1 px divider fill the panel inside its 5 px frame edge.
         const float ColumnWidth = 574f;
 
         #region Style
-        static readonly Color Slate = Hex("1F2B2E");
         static readonly Color Well = Hex("162023");
+        static readonly Color WellEdge = Hex("605635", 0.9f);
         static readonly Color Brass = Hex("B08A3E");
         static readonly Color Gold = Hex("E9C06A");
         static readonly Color Cream = Hex("ECE6D8");
@@ -75,13 +73,12 @@ namespace TJ.Town.EditorTools
         static readonly Color FightPointer = new(1f, 0.3625707f, 0.3625707f);
         static readonly Color FightIcon = new(0.8f, 0.54368484f, 0.5411765f);
         static readonly Color Sun = Hex("F2C866");
-        static readonly Color WellEdge = Hex("605635", 0.9f);
 
         static TMP_FontAsset displayDrop, display;
-        static Sprite mount, solid, squareSliced, edgeFade;
+        static Sprite mount, solid, frameEdge, bandGradient;
         static Sprite townIcon, swordIcon, healIcon, helmIcon, gateIcon, goldIcon, chestIcon, heartIcon;
         static Sprite clearIcon, rainIcon, fogIcon, snowIcon;
-        static GameObject primaryButton, standardButton, chip, basicBackground;
+        static GameObject primaryButton, standardButton, statPlaque, basicBackground;
 
         static void LoadAssets()
         {
@@ -92,9 +89,9 @@ namespace TJ.Town.EditorTools
                 if (asset is Sprite sprite) sheet[sprite.name] = sprite;
             sheet.TryGetValue("TooltipMount", out mount);
             sheet.TryGetValue("TooltipSolid", out solid);
+            frameEdge = Load<Sprite>("Assets/ImportedPackages/InterfaceFantasyWarriorHUD/Sprites/HUD/SPR_HUD_FantasyWarrior_Frame_Box_Medium04.png");
             if (mount == null || solid == null) Debug.LogError("TownPanelBuilder: tooltip sheet sprites missing.");
-            squareSliced = Load<Sprite>("Assets/Art/Icons/UI/SquareSliced.png");
-            edgeFade = Load<Sprite>("Assets/ImportedPackages/ModernUIPack/Textures/Shadow/Vertical Shadow.png");
+            bandGradient = Load<Sprite>(BandGradientPath);
             townIcon = Load<Sprite>("Assets/Art/Icons/Map/Town.png");
             swordIcon = Load<Sprite>("Assets/Art/Icons/Map/Engagement.png");
             healIcon = Load<Sprite>("Assets/ImportedPackages/InterfaceFantasyWarriorHUD/Sprites/Icons_Map/ICON_FantasyWarrior_Map_Healing01_Clean.png");
@@ -109,7 +106,7 @@ namespace TJ.Town.EditorTools
             snowIcon = Load<Sprite>("Assets/Art/Icons/Map/BattlefieldConditions/Snow.png");
             primaryButton = Load<GameObject>(ButtonFolder + "/Button - Primary.prefab");
             standardButton = Load<GameObject>(ButtonFolder + "/Button - Standard.prefab");
-            chip = Load<GameObject>(ChipPath);
+            statPlaque = Load<GameObject>(StatPlaquePath);
             basicBackground = Load<GameObject>(BasicBackgroundPath);
         }
 
@@ -360,13 +357,14 @@ namespace TJ.Town.EditorTools
         #endregion
 
         #region Part prefabs
-        static GameObject statCellPart, spoilRowPart;
+        static GameObject spoilRowPart;
 
         static void EnsureParts(bool overwrite)
         {
             if (!AssetDatabase.IsValidFolder(PartFolder)) AssetDatabase.CreateFolder("Assets/Data/Prefabs/UI/Map", "Town");
-            statCellPart = overwrite ? null : AssetDatabase.LoadAssetAtPath<GameObject>(StatCellPath);
-            if (statCellPart == null) statCellPart = SavePart(StatCellPath, "Town Stat Cell", null, StatCellPart);
+            // The town panel uses Stat Plaques now; other panel builders still load this part from here.
+            if (overwrite || AssetDatabase.LoadAssetAtPath<GameObject>(StatCellPath) == null)
+                SavePart(StatCellPath, "Town Stat Cell", null, StatCellPart);
             spoilRowPart = overwrite ? null : AssetDatabase.LoadAssetAtPath<GameObject>(SpoilRowPath);
             if (spoilRowPart == null) spoilRowPart = SavePart(SpoilRowPath, "Town Spoil Row", null, SpoilRowPart);
         }
@@ -542,9 +540,9 @@ namespace TJ.Town.EditorTools
                 if (textureImage != null) textureImage.pixelsPerUnitMultiplier = TexturePixelsPerUnit;
             }
 
-            // The faction wash sits inside the background, under its frame and corner ornaments, and fills the header
-            // from the panel's top edge down to the header rule.
-            Image band = Img(Rect("Band", background.transform), edgeFade, A(Hex("E27B58"), BandAlpha));
+            // The faction wash sits inside the background, under its frame and corner ornaments, and fades from the
+            // panel's top edge down to the header's bottom, like light falling from above.
+            Image band = Img(Rect("Band", background.transform), bandGradient, A(Hex("E27B58"), BandAlpha));
             RectTransform bandRect = band.rectTransform;
             bandRect.anchorMin = new Vector2(0f, 1f);
             bandRect.anchorMax = Vector2.one;
@@ -622,10 +620,6 @@ namespace TJ.Town.EditorTools
             Fixed(header.gameObject, -1f, HeaderHeight);
             HLayout(header, 18f, TextAnchor.MiddleLeft, new RectOffset(22, 22, 0, 0));
 
-            Image bandRule = Img(Rect("Band Rule", header), solid, A(Brass, 0.35f));
-            Anchor(bandRule.rectTransform, Vector2.zero, new Vector2(1f, 0f), Vector2.zero, new Vector2(0f, 1f));
-            Ignore(bandRule.gameObject);
-
             Mount(header, "Mount", 64f, townIcon, 28f);
 
             RectTransform names = Rect("Names", header);
@@ -635,50 +629,6 @@ namespace TJ.Town.EditorTools
             TMP_Text subtitle = Text("Subtitle", names, display, 17f, Sub, "The Iron Legion Castle");
             Ref(so, "townName", townName);
             Ref(so, "townSubtitle", subtitle);
-
-            RectTransform ladder = Rect("Size Ladder", header);
-            Fixed(ladder.gameObject, LadderStep * 3f, 42f);
-            string[] sizes = { "Village", "Castle", "City" };
-            var links = new Object[2];
-            for (int i = 0; i < 2; i++)
-            {
-                Image link = Img(Rect("Link " + (i + 1), ladder), null, Brass);
-                link.rectTransform.anchorMin = link.rectTransform.anchorMax = new Vector2(0f, 1f);
-                link.rectTransform.pivot = new Vector2(0f, 0.5f);
-                link.rectTransform.sizeDelta = new Vector2(LadderStep, 1f);
-                link.rectTransform.anchoredPosition = new Vector2(LadderStep * (i + 0.5f), -6f);
-                links[i] = link;
-            }
-            var fills = new Object[3];
-            var borders = new Object[3];
-            var glows = new Object[3];
-            var labels = new Object[3];
-            for (int i = 0; i < 3; i++)
-            {
-                RectTransform step = Rect(sizes[i], ladder);
-                step.anchorMin = step.anchorMax = new Vector2(0f, 1f);
-                step.pivot = new Vector2(0.5f, 1f);
-                step.sizeDelta = new Vector2(LadderStep, 42f);
-                step.anchoredPosition = new Vector2(LadderStep * (i + 0.5f), 0f);
-                glows[i] = Diamond(step, "Glow", 17f, A(Gold, 0.2f));
-                borders[i] = Diamond(step, "Border", 12f, Brass);
-                fills[i] = Diamond(step, "Fill", 8.5f, Gold);
-                TMP_Text label = Text("Label", step, display, 12f, Sub, sizes[i]);
-                Anchor(label.rectTransform, Vector2.zero, new Vector2(1f, 0f), new Vector2(2f, 0f), new Vector2(-2f, 18f));
-                label.alignment = TextAlignmentOptions.Bottom;
-                label.fontStyle = FontStyles.UpperCase;
-                label.characterSpacing = 3f;
-                label.enableAutoSizing = true;
-                label.fontSizeMin = 9f;
-                label.fontSizeMax = 12f;
-                Localize(label, sizes[i]);
-                labels[i] = label;
-            }
-            Refs(so, "sizeFills", fills);
-            Refs(so, "sizeBorders", borders);
-            Refs(so, "sizeGlows", glows);
-            Refs(so, "sizeLabels", labels);
-            Refs(so, "sizeLinks", links);
 
             RectTransform status = Rect("Status", header);
             Fixed(status.gameObject, 110f, 44f);
@@ -696,8 +646,8 @@ namespace TJ.Town.EditorTools
             Ref(so, "townInfoButton", info);
             Ref(so, "townInfoTooltip", info.AddComponent<MemoriTooltipTrigger>());
 
-            Ref(so, "enteredPill", Pill(status, "Entered", "townEntered", Positive));
-            Ref(so, "sackedPill", Pill(status, "Sacked", "townSacked", Negative));
+            Ref(so, "enteredMark", RoadMark(status, "Entered", "townEntered", Positive));
+            Ref(so, "sackedMark", RoadMark(status, "Sacked", "townSacked", Negative));
         }
 
         static void BuildColumns(RectTransform root, SerializedObject so)
@@ -713,45 +663,24 @@ namespace TJ.Town.EditorTools
             Img(Stretch(Rect("Line", divider), 0f, 0f, 16f, 16f), null, A(Brass, 0.45f));
 
             BuildFightColumn(columns, so);
-
-            RectTransform or = Rect("Or", columns);
-            Centre(or, 34f, 34f);
-            Ignore(or.gameObject);
-            Image orFill = Img(Rect("Fill", or), solid, Slate);
-            Centre(orFill.rectTransform, 24f, 24f);
-            orFill.rectTransform.localEulerAngles = new Vector3(0f, 0f, 45f);
-            Image orEdge = Img(Rect("Edge", or), squareSliced, Brass, Image.Type.Sliced);
-            orEdge.fillCenter = false;
-            Centre(orEdge.rectTransform, 24f, 24f);
-            orEdge.rectTransform.localEulerAngles = new Vector3(0f, 0f, 45f);
-            TMP_Text orLabel = Text("Label", or, display, 14f, Sub, "or");
-            Stretch(orLabel.rectTransform);
-            orLabel.alignment = TextAlignmentOptions.Center;
-            orLabel.fontStyle = FontStyles.Italic;
-            // Longer translations of "or" shrink to stay inside the diamond.
-            orLabel.enableAutoSizing = true;
-            orLabel.fontSizeMin = 8f;
-            orLabel.fontSizeMax = 14f;
-            orLabel.margin = new Vector4(5f, 0f, 5f, 0f);
-            Localize(orLabel, "townOr");
-            Ref(so, "orMark", or.gameObject);
         }
 
         static void BuildEnterColumn(RectTransform columns, SerializedObject so)
         {
             RectTransform column = Column(columns, "Enter Column", new RectOffset(29, 24, 20, 29), out CanvasGroup group);
             Ref(so, "enterColumn", group);
-            ColumnHead(column, townIcon, "EnterTown", out TMP_Text subtitle);
-            Localize(subtitle, "enterTownFlavor");
+            ColumnHead(column, townIcon, "EnterTown");
 
-            Strip(column, out TMP_Text[] labels, out TMP_Text[] values, out Image[] icons,
-                new[] { "townHeal", "townRecruits", "Cost" }, new[] { healIcon, helmIcon, goldIcon }, new[] { Positive, Sub, Coin });
-            // TownPanel switches this label between Heal and Healed, so a localizer must not reset it.
-            Object.DestroyImmediate(labels[0].GetComponent<LocalizeStringEvent>());
-            Ref(so, "healLabel", labels[0]);
-            Ref(so, "healValue", values[0]);
-            Ref(so, "recruitsValue", values[1]);
-            Ref(so, "costValue", values[2]);
+            if (Strip(column, out TMP_Text[] labels, out TMP_Text[] values, out _,
+                    new[] { "townHeal", "townRecruits", "Cost" }, new[] { healIcon, helmIcon, goldIcon }, new[] { Positive, Sub, Coin }))
+            {
+                // TownPanel switches this label between Heal and Healed, so a localizer must not reset it.
+                Object.DestroyImmediate(labels[0].GetComponent<LocalizeStringEvent>());
+                Ref(so, "healLabel", labels[0]);
+                Ref(so, "healValue", values[0]);
+                Ref(so, "recruitsValue", values[1]);
+                Ref(so, "costValue", values[2]);
+            }
 
             RectTransform lines = Rect("Body", column);
             VLayout(lines, 12f, new RectOffset());
@@ -796,19 +725,32 @@ namespace TJ.Town.EditorTools
         {
             RectTransform column = Column(columns, "Fight Column", new RectOffset(24, 29, 20, 29), out CanvasGroup group);
             Ref(so, "fightColumn", group);
-            ColumnHead(column, swordIcon, "FightGarrison", out TMP_Text subtitle);
-            subtitle.text = English("sackTownFlavor");
+            RectTransform titles = ColumnHead(column, swordIcon, "FightGarrison");
+            // Only the sacked road shows it: TownPanel writes the garrison result and the reserves rule there.
+            TMP_Text subtitle = Text("Subtitle", titles, display, 14f, Flavour, English("townGarrisonDefeated"));
+            subtitle.fontStyle = FontStyles.Italic;
+            Wrap(subtitle);
+            subtitle.gameObject.SetActive(false);
             Ref(so, "fightSubtitle", subtitle);
 
-            Strip(column, out _, out TMP_Text[] values, out Image[] icons,
-                new[] { "townBattlefield", "townWeather", "Bounty" }, new[] { gateIcon, clearIcon, goldIcon }, new[] { Sub, Sun, Coin });
-            Ref(so, "battlefieldValue", values[0]);
-            Ref(so, "weatherValue", values[1]);
-            Ref(so, "weatherIcon", icons[1]);
-            MemoriTooltipTrigger weatherTooltip = icons[1].transform.parent.parent.gameObject.AddComponent<MemoriTooltipTrigger>();
-            Img((RectTransform)weatherTooltip.transform, null, Color.clear).raycastTarget = true;
-            Ref(so, "weatherTooltip", weatherTooltip);
-            Ref(so, "bountyValue", values[2]);
+            if (Strip(column, out _, out TMP_Text[] values, out Image[] icons,
+                    new[] { "townBattlefield", "townWeather", "Bounty" }, new[] { gateIcon, clearIcon, goldIcon }, new[] { Sub, Sun, Coin }))
+            {
+                Ref(so, "battlefieldValue", values[0]);
+                Ref(so, "weatherValue", values[1]);
+                Ref(so, "weatherIcon", icons[1]);
+                // The whole weather plaque shows the weather tooltip, so its root takes the pointer.
+                GameObject weatherPlaque = icons[1].transform.parent.gameObject;
+                Image hit = weatherPlaque.GetComponent<Image>();
+                if (hit == null)
+                {
+                    hit = weatherPlaque.AddComponent<Image>();
+                    hit.color = Color.clear;
+                }
+                hit.raycastTarget = true;
+                Ref(so, "weatherTooltip", weatherPlaque.AddComponent<MemoriTooltipTrigger>());
+                Ref(so, "bountyValue", values[2]);
+            }
 
             RectTransform lines = Rect("Body", column);
             VLayout(lines, 12f, new RectOffset());
@@ -817,19 +759,15 @@ namespace TJ.Town.EditorTools
             VLayout(garrison, 9f, new RectOffset());
             RectTransform garrisonHead = Rect("Garrison Head", garrison);
             HLayout(garrisonHead, 10f, TextAnchor.MiddleLeft, new RectOffset());
-            Localize(CapLabel(garrisonHead, "Label"), "Garrison");
-            TMP_Text count = Text("Count", garrisonHead, display, 15f, Cream, "9 squads");
-            Spacer(garrisonHead, horizontal: true);
-            TMP_Text hint = Text("Hint", garrisonHead, display, 14f, Cap, "Hint");
-            Localize(hint, "townGarrisonHint");
-            Ref(so, "garrisonCount", count);
+            Localize(SectionTitle(garrisonHead, "Label"), "Garrison");
 
             RectTransform tray = Rect("Tray", garrison);
             Img(tray, solid, Well);
             LayoutElement trayLayout = tray.gameObject.AddComponent<LayoutElement>();
             trayLayout.minHeight = trayLayout.preferredHeight = 130f * GarrisonScale + 16f;
-            Image trayEdge = Img(Stretch(Rect("Edge", tray)), squareSliced, WellEdge, Image.Type.Sliced);
+            Image trayEdge = Img(Stretch(Rect("Edge", tray)), frameEdge, WellEdge, Image.Type.Sliced);
             trayEdge.fillCenter = false;
+            trayEdge.pixelsPerUnitMultiplier = 4f;
             RectTransform grid = Rect("Grid", tray);
             Centre(grid, 572f, 130f);
             grid.localScale = new Vector3(GarrisonScale, GarrisonScale, 1f);
@@ -859,7 +797,7 @@ namespace TJ.Town.EditorTools
             VLayout(spoils, 10f, new RectOffset());
             RectTransform spoilsHead = Rect("Spoils Head", spoils);
             HLayout(spoilsHead, 10f, TextAnchor.MiddleLeft, new RectOffset());
-            Localize(CapLabel(spoilsHead, "Label"), "townSpoils");
+            Localize(SectionTitle(spoilsHead, "Label"), "townSpoils");
             Spacer(spoilsHead, horizontal: true);
             Localize(Text("Note", spoilsHead, display, 14f, Cap, "Note"), "townSpoilsNote");
             Ref(so, "goldRow", SpoilRow(spoils, "Loot Gold", goldIcon));
@@ -915,7 +853,8 @@ namespace TJ.Town.EditorTools
             return column;
         }
 
-        static void ColumnHead(RectTransform column, Sprite icon, string titleKey, out TMP_Text subtitle)
+        // Returns the title stack, so a column can add a line under its title.
+        static RectTransform ColumnHead(RectTransform column, Sprite icon, string titleKey)
         {
             RectTransform head = Rect("Head", column);
             HLayout(head, 12f, TextAnchor.MiddleLeft, new RectOffset());
@@ -925,40 +864,32 @@ namespace TJ.Town.EditorTools
             Flexible(titles.gameObject, 1f).preferredWidth = 0f;
             TMP_Text title = Text("Title", titles, displayDrop, 23f, Gold, titleKey);
             Localize(title, titleKey);
-            subtitle = Text("Subtitle", titles, display, 14f, Flavour, "Subtitle");
-            subtitle.fontStyle = FontStyles.Italic;
-            Wrap(subtitle);
+            return titles;
         }
 
-        static void Strip(RectTransform column, out TMP_Text[] labels, out TMP_Text[] values, out Image[] icons, string[] keys, Sprite[] sprites, Color[] tints)
+        // A row of shared Stat Plaques; the plaque owns its art, fonts and sizes, so only icon, label and value are set.
+        static bool Strip(RectTransform column, out TMP_Text[] labels, out TMP_Text[] values, out Image[] icons, string[] keys, Sprite[] sprites, Color[] tints)
         {
-            RectTransform strip = Rect("Strip", column);
-            Fixed(strip.gameObject, -1f, 62f);
-            Image top = Img(Rect("Top", strip), solid, A(Brass, 0.4f));
-            Anchor(top.rectTransform, new Vector2(0f, 1f), Vector2.one, new Vector2(0f, -1f), Vector2.zero);
-            Ignore(top.gameObject);
-            Image bottom = Img(Rect("Bottom", strip), solid, A(Brass, 0.4f));
-            Anchor(bottom.rectTransform, Vector2.zero, new Vector2(1f, 0f), Vector2.zero, new Vector2(0f, 1f));
-            Ignore(bottom.gameObject);
-            HorizontalLayoutGroup row = HLayout(strip, 0f, TextAnchor.MiddleLeft, new RectOffset());
-            row.childForceExpandWidth = true;
-            row.childForceExpandHeight = true;
             labels = new TMP_Text[keys.Length];
             values = new TMP_Text[keys.Length];
             icons = new Image[keys.Length];
+            if (statPlaque == null) return false;
+            // Stacked like the recruit card's stat rows: three across left no room between label and value.
+            RectTransform strip = Rect("Stats", column);
+            VLayout(strip, 6f, new RectOffset());
             for (int i = 0; i < keys.Length; i++)
             {
-                GameObject cell = Instance(statCellPart, strip, "Cell " + (i + 1));
-                if (i == 0) cell.transform.Find("Divider").gameObject.SetActive(false);
-                labels[i] = Child<TMP_Text>(cell.transform, "Label");
-                values[i] = Child<TMP_Text>(cell.transform, "Value Row/Value");
-                icons[i] = Child<Image>(cell.transform, "Value Row/Icon");
+                GameObject plaque = Instance(statPlaque, strip, "Stat Plaque " + (i + 1));
+                labels[i] = Child<TMP_Text>(plaque.transform, "Label");
+                values[i] = Child<TMP_Text>(plaque.transform, "Value");
+                icons[i] = Child<Image>(plaque.transform, "Icon");
                 Localize(labels[i], keys[i]);
                 icons[i].sprite = sprites[i];
                 icons[i].color = tints[i];
-                // Gold values carry the coin sprite in their text, as everywhere else in the game.
-                if (sprites[i] == goldIcon) icons[i].gameObject.SetActive(false);
+                // Gold values carry the coin sprite in their text; the icon slot stays, clear, so the labels line up.
+                if (sprites[i] == goldIcon) icons[i].color = Color.clear;
             }
+            return true;
         }
 
         static TMP_Text Line(RectTransform parent, string name, Sprite icon, Color iconTint, Color textColour, float size)
@@ -990,12 +921,12 @@ namespace TJ.Town.EditorTools
             return spoil;
         }
 
-        static TMP_Text CapLabel(RectTransform parent, string name)
+        static TMP_Text SectionTitle(RectTransform parent, string name)
         {
-            TMP_Text label = Text(name, parent, display, 12f, Cap, name);
-            label.fontStyle = FontStyles.UpperCase;
-            label.characterSpacing = 10f;
-            return label;
+            TMP_Text title = Text(name, parent, displayDrop, 18f, Gold, name);
+            title.fontStyle = FontStyles.Normal;
+            title.characterSpacing = 0f;
+            return title;
         }
 
         static RectTransform Action(RectTransform column)
@@ -1041,15 +972,18 @@ namespace TJ.Town.EditorTools
             if (image != null) image.color = new Color(colour.r, colour.g, colour.b, image.color.a);
         }
 
-        static GameObject Pill(RectTransform parent, string name, string key, Color colour)
+        // The chosen road as a coloured word in the header's status slot; it shrinks rather than wraps in long locales.
+        static GameObject RoadMark(RectTransform parent, string name, string key, Color colour)
         {
-            GameObject pill = Instance(chip, parent, name);
-            pill.GetComponent<CollectionChip>().Set(English(key), colour);
-            TMP_Text label = Child<TMP_Text>(pill.transform, "Label");
-            label.font = display;
-            Localize(label, key);
-            pill.SetActive(false);
-            return pill;
+            TMP_Text mark = Text(name, parent, displayDrop, 16f, colour, name);
+            mark.alignment = TextAlignmentOptions.MidlineRight;
+            mark.enableAutoSizing = true;
+            mark.fontSizeMin = 13f;
+            mark.fontSizeMax = 16f;
+            Flexible(mark.gameObject, 1f).preferredWidth = 0f;
+            Localize(mark, key);
+            mark.gameObject.SetActive(false);
+            return mark.gameObject;
         }
 
         static void Mount(RectTransform parent, string name, float size, Sprite icon, float iconSize)
@@ -1062,18 +996,6 @@ namespace TJ.Town.EditorTools
             Image image = Img(Rect("Icon", cell), icon, Gold);
             image.preserveAspect = true;
             Centre(image.rectTransform, iconSize, iconSize);
-        }
-
-        static Image Diamond(RectTransform parent, string name, float size, Color colour)
-        {
-            Image image = Img(Rect(name, parent), null, colour);
-            RectTransform rect = image.rectTransform;
-            rect.anchorMin = rect.anchorMax = new Vector2(0.5f, 1f);
-            rect.pivot = new Vector2(0.5f, 0.5f);
-            rect.sizeDelta = new Vector2(size, size);
-            rect.anchoredPosition = new Vector2(0f, -6f);
-            rect.localEulerAngles = new Vector3(0f, 0f, 45f);
-            return image;
         }
 
         static GameObject Instance(GameObject prefab, Transform parent, string name)

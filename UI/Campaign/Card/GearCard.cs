@@ -45,7 +45,7 @@ public class GearCard : MonoBehaviour, IPointerEnterHandler, IPointerExitHandler
         isShop = false;
         cardPanel = _cardPanel;
         memoriButton = GetComponent<MemoriButtonV2>();
-        memoriButton.Button.onClick.RemoveAllListeners();
+        memoriButton.Button.ClearClickListeners();
         memoriButton.Button.onClick.AddListener(SelectGearCard);
     }
     public void LoadGearCardShop(GearID _gear, RecruitPanel _recruitPanel)
@@ -54,7 +54,7 @@ public class GearCard : MonoBehaviour, IPointerEnterHandler, IPointerExitHandler
         LoadGearCard(_gear);
 
         isShop = true;
-        memoriButton.Button.onClick.RemoveAllListeners();
+        memoriButton.Button.ClearClickListeners();
         memoriButton.Button.onClick.AddListener(SelectGearCard);
     }
     public void LoadGearCard(GearID _gear)

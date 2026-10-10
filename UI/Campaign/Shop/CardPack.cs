@@ -22,6 +22,9 @@ namespace TJ.Shop
         [SerializeField] private GameObject highlightGO;
         [SerializeField] private Image cardImage;
         [SerializeField] private QuickOutline.Outline outline;
+        [Tooltip("The pack's model, shaken on a refused purchase; the hover feedbacks move the root.")]
+        [SerializeField] private Transform packModel;
+        Coroutine refuseShake;
 
         ShopPanel shopPanel;
         int cost, _discount;
@@ -29,9 +32,9 @@ namespace TJ.Shop
         public int PackId => cardPackData.packID;
         public int Cost => cost;
         public bool SoldOut => soldOut;
-        public void SetUp(CardPackData _cardPackData, ShopPanel _shopPanel, int discount)
+        public void SetUp(CardPackData _cardPackData, ShopPanel _shopPanel, int discount, bool playSound = true)
         {
-            IAudioRequester.Instance.PlaySFX(SFXData.ShopItem);
+            if (playSound) IAudioRequester.Instance.PlaySFX(SFXData.ShopItem);
             shopPanel = _shopPanel;
             soldOut = false;
             shopPriceCanvas.SetSoldOut(false);
@@ -108,15 +111,25 @@ namespace TJ.Shop
             cardImage.color *= new Color(0.5f, 0.5f, 0.5f, 1f);
             shopItemInfoCanvas.AppendLine($"<color={ColorData.Error}>{LocalizationManager.Instance.GetText("OrdealSoldOut")}</color>");
         }
+        private void ShakeRefused()
+        {
+            if (refuseShake != null || !isActiveAndEnabled) return;
+            refuseShake = StartCoroutine(Shake());
+            IEnumerator Shake() { yield return ShopRefusal.ShakeModel(packModel); refuseShake = null; }
+        }
         public void AttemptPurchase()
         {
             if (soldOut) {
                 NotificationManager.Instance.ErrorNotification(LocalizationManager.Instance.GetText("OrdealSoldOutNotice"));
+                shopPriceCanvas.Refuse();
+                ShakeRefused();
                 shopPanel.RenableShopPanel();
                 return;
             }
             if(!CampaignManager.Instance.GoldManager.CheckIfCanAfford(cost)) {
                 NotificationManager.Instance.ErrorNotification(LocalizationManager.Instance.GetText("notEnoughGold"));
+                shopPriceCanvas.Refuse();
+                ShakeRefused();
                 shopPanel.RenableShopPanel();
                 return;
             }

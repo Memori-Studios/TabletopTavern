@@ -97,9 +97,8 @@ namespace TJ.MainMenu
             hintText.text = T("WarbandGearHint");
             budgetLabelText.text = T("WarbandGearBudget");
             budgetValueText.text = $"{budget} <sprite name=GoldSprite>";
-            budgetNoteText.text = equipped == GearID.None
-                ? string.Empty
-                : string.Format(T("WarbandGearBudgetNote"), manager.remainingTreasury.Value, manager.GearCost(equipped), T(equipped + "Name"));
+            // No refund line under the budget; the tile tooltip already says what a swap replaces and costs.
+            budgetNoteText.text = string.Empty;
         }
 
         private void OnTileClicked(GearID gearID)

@@ -621,6 +621,7 @@ namespace TJ.Engagement
         public void StartBattleButtonClicked()
         {
             if (campaignSaveManager.SaveData.battleCompleted) return;
+            if (marchOut != null) return;
 
             TutorialManager.Instance.CompleteStepCheck(TutorialStepEnum.Autoresolve);
 
@@ -629,8 +630,25 @@ namespace TJ.Engagement
             //need to override the selected node here
             CampaignManager.Instance.MapSceneUIManager.MapSceneManager.OverrideSelectedNodeBeforeBattle();
             campaignSaveManager.SaveCampaign();
+            marchOut = StartCoroutine(MarchOut());
+        }
+        #region March out
+        // The send-off's shape (run setup): the commit on the click, a short hold, the card leaves, then the door.
+        private const float MarchOutHold = 0.2f;
+        private Coroutine marchOut;
+
+        private IEnumerator MarchOut()
+        {
+            view.SetBattleButtonsInteractable(false);
+            IAudioRequester.Instance.PlaySFX(SFXData.BattleHorn);
+            Button fight = view.FightButton;
+            StartCoroutine(UIJuice.Punch(fight.transform));
+            yield return new WaitForSecondsRealtime(MarchOutHold);
+            view.PlayClose();
+            yield return new WaitForSecondsRealtime(view.CloseSeconds);
             mapSceneUIManager.StartBattleButtonClicked();
         }
+        #endregion
         public void ShowAutoResolvePrediction()
         {
             if (BlindToEnemy) return;
@@ -870,13 +888,13 @@ namespace TJ.Engagement
             // The card keeps the battle it came from, greyed under the end-of-battle banner; the result replaces it once the banner has gone.
             view.PlayResultPopup(title, outcome, () =>
             {
-                if (runId == _engagementRunId) RevealResult(battleWon, withRewards, title, subtitle, colour);
+                if (runId == _engagementRunId) RevealResult(battleWon, withRewards, title, colour);
             });
         }
-        private void RevealResult(bool battleWon, bool withRewards, string title, string subtitle, Color colour)
+        private void RevealResult(bool battleWon, bool withRewards, string title, Color colour)
         {
-            view.SetHeader(battleWon ? EngagementPanelView.HeaderKind.Victory : EngagementPanelView.HeaderKind.Defeat, title, subtitle, colour);
-            view.SetPill(battleWon ? title : Text("engagementRunOver"), colour);
+            view.SetHeader(battleWon ? EngagementPanelView.HeaderKind.Victory : EngagementPanelView.HeaderKind.Defeat, title, null, colour);
+            view.SetPill(battleWon ? null : Text("engagementRunOver"), colour);
             if (!battleWon)
             {
                 view.ShowResult(false, Text("engagementDefeatLine"), enemySquadsCards.Count);

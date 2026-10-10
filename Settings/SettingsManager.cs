@@ -131,13 +131,13 @@ namespace TJ
                 if (entry.page.gameObject.activeSelf)
                     Debug.LogError($"SettingsManager: the Settings page '{entry.page.name}' is switched on in the scene. Switch it off; player builds fail to load localization when every page starts at boot.");
 
-            infoButton.onClick.RemoveAllListeners();
-            gameSettingsButton.onClick.RemoveAllListeners();
-            audioSettingsButton.onClick.RemoveAllListeners();
-            graphicsSettingsButton.onClick.RemoveAllListeners();
-            controlsSettingsButton.onClick.RemoveAllListeners();
-            creditsButton.onClick.RemoveAllListeners();
-            resetTutorialButton.Button.onClick.RemoveAllListeners();
+            infoButton.ClearClickListeners();
+            gameSettingsButton.ClearClickListeners();
+            audioSettingsButton.ClearClickListeners();
+            graphicsSettingsButton.ClearClickListeners();
+            controlsSettingsButton.ClearClickListeners();
+            creditsButton.ClearClickListeners();
+            resetTutorialButton.Button.ClearClickListeners();
             
             infoButton.onClick.AddListener(() => SwitchSettingsFocus(infoCanvasGroup));
             gameSettingsButton.onClick.AddListener(() => SwitchSettingsFocus(gameSettingsCanvasGroup));
@@ -147,7 +147,7 @@ namespace TJ
             creditsButton.onClick.AddListener(() => SwitchSettingsFocus(creditsCanvasGroup));
             resetTutorialButton.Button.onClick.AddListener(() => ResetTutorial());
 
-            devToolsButton.onClick.RemoveAllListeners();
+            devToolsButton.ClearClickListeners();
             devToolsButton.onClick.AddListener(() => SwitchSettingsFocus(devToolsCanvasGroup));
             devToolsButton.gameObject.SetActive(SaveDataHandler.IsDevToolUser());
             // Here, not in CollectionRailRow: CollectionPanel already clicks for the Collection's own rail.
@@ -325,7 +325,7 @@ namespace TJ
         }
         public void AbandonRunConfirmationPopUp()
         {
-            abandonRunConfirmationCanvasGroup.CGEnable();
+            OpenPopup(abandonRunConfirmationCanvasGroup);
         }
         public void AbandonRun()
         {
@@ -334,11 +334,11 @@ namespace TJ
         }
         public void CancelAbandonRun()
         {
-            abandonRunConfirmationCanvasGroup.CGDisable();
+            ClosePopup(abandonRunConfirmationCanvasGroup);
         }
         public void QuickRestartConfirmationPopUp()
         {
-            quickRestartConfirmationCanvasGroup.CGEnable();
+            OpenPopup(quickRestartConfirmationCanvasGroup);
         }
         public void QuickRestart()
         {
@@ -361,7 +361,7 @@ namespace TJ
         }
         public void CancelQuickRestart()
         {
-            quickRestartConfirmationCanvasGroup.CGDisable();
+            ClosePopup(quickRestartConfirmationCanvasGroup);
         }
         public void ExitToMenu()
         {
@@ -370,7 +370,7 @@ namespace TJ
         }
         public void ConcedeDefeatConfirmationPopUp()
         {
-            concedeDefeatConfirmationCanvasGroup.CGEnable();
+            OpenPopup(concedeDefeatConfirmationCanvasGroup);
         }
         public void ConcedeDefeat()
         {
@@ -380,7 +380,7 @@ namespace TJ
         }
         public void CancelConcedeDefeat()
         {
-            concedeDefeatConfirmationCanvasGroup.CGDisable();
+            ClosePopup(concedeDefeatConfirmationCanvasGroup);
         }
         public void ExitToDesktop()
         {
@@ -476,7 +476,26 @@ namespace TJ
         #endregion
 
         #region Settings fades
-        private Coroutine settingsFade, pageFade;
+        private Coroutine settingsFade, pageFade, popupFade;
+
+        // The run pop-ups fade and rise in like the map's; a confirm still hides at once, because the screen changes.
+        private void OpenPopup(MemoriCanvasGroup popup)
+        {
+            popup.CGEnable();
+            if (popupFade != null) StopCoroutine(popupFade);
+            popupFade = StartCoroutine(UIJuice.Open(popup.GetComponent<CanvasGroup>(), popup.transform as RectTransform));
+            IAudioRequester.Instance.PlaySFX(SFXData.OpenUI);
+        }
+
+        private void ClosePopup(MemoriCanvasGroup popup)
+        {
+            CanvasGroup group = popup.GetComponent<CanvasGroup>();
+            group.interactable = false;
+            group.blocksRaycasts = false;
+            if (popupFade != null) StopCoroutine(popupFade);
+            popupFade = StartCoroutine(CloseThen(group, popup.CGDisable));
+            IAudioRequester.Instance.PlaySFX(SFXData.ClosePopUp);
+        }
 
         private void FadeSettings(IEnumerator routine)
         {

@@ -870,7 +870,7 @@ namespace TJ.Choice.EditorTools
             name.alignment = TextAlignmentOptions.Center;
             Wrap(name);
             Gap(content, 16f);
-            Rule(content, 150f, Slate);
+            Rule(content, 150f);
             Gap(content, 18f);
             TMP_Text description = Text("Description", content, display, 18f, Cream, "Description");
             description.alignment = TextAlignmentOptions.Top;
@@ -1278,7 +1278,7 @@ namespace TJ.Choice.EditorTools
             subtitle.fontSizeMax = 18f;
             Fixed(subtitle.gameObject, TitleWidth, 26f);
 
-            Rule(content, 520f, Hex("0F1618"));
+            Rule(content, 520f);
 
             Ref(so, "titleBlock", content);
             Ref(so, "titleGroup", group);
@@ -1319,14 +1319,25 @@ namespace TJ.Choice.EditorTools
             return image;
         }
 
-        // A brass line with a diamond at its middle, as under the panel headers.
-        static void Rule(RectTransform parent, float width, Color diamondFill)
+        const string FleurPath = "Assets/ImportedPackages/InterfaceFantasyWarriorHUD/Sprites/HUD/SPR_HUD_FantasyWarrior_Symbol_FleurDeLis01.png";
+        const float FleurSize = 16f;
+
+        // A brass line broken at its middle by the Synty fleur-de-lis (TJ, 2026-10-09; it was a drawn diamond).
+        static void Rule(RectTransform parent, float width)
         {
             RectTransform rule = Rect("Rule", parent);
-            Fixed(rule.gameObject, width, 9f);
-            Image line = Img(Rect("Line", rule), solid, A(Brass, 0.6f));
-            Centre(line.rectTransform, width, 1f);
-            Diamond(rule, "Diamond", 9f, Brass, diamondFill).GetComponent<LayoutElement>().ignoreLayout = true;
+            Fixed(rule.gameObject, width, FleurSize);
+            // Both halves hang off the centre at the rule's own width, since a layout can stretch the rule across the
+            // card. The fleur's ink is about 64% of its square, so a gap of 30% of it puts each end just inside the ink.
+            float gap = FleurSize * 0.3f, half = width / 2f;
+            Vector2 centre = new Vector2(0.5f, 0.5f);
+            Image left = Img(Rect("Line Left", rule), solid, A(Brass, 0.6f));
+            Anchor(left.rectTransform, centre, centre, new Vector2(-half, -0.5f), new Vector2(-gap, 0.5f));
+            Image right = Img(Rect("Line Right", rule), solid, A(Brass, 0.6f));
+            Anchor(right.rectTransform, centre, centre, new Vector2(gap, -0.5f), new Vector2(half, 0.5f));
+            Image fleur = Img(Rect("Fleur", rule), Load<Sprite>(FleurPath), Brass);
+            fleur.preserveAspect = true;
+            Centre(fleur.rectTransform, FleurSize, FleurSize);
         }
 
         static RectTransform Diamond(RectTransform parent, string name, float size, Color edge, Color fill)

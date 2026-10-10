@@ -57,7 +57,7 @@ namespace TJ.Campfire
             if (!trainable) priceText.color = maxColour;
             hoverRing.enabled = false;
 
-            button.onClick.RemoveAllListeners();
+            button.ClearClickListeners();
             if (trainable) button.onClick.AddListener(() => onPicked?.Invoke(squad));
             if (trainable) UIHoverBloom.Attach(gameObject, null, 1.04f, false);
         }

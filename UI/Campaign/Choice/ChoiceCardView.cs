@@ -257,6 +257,8 @@ namespace TJ
             nameText.color = namePickedColour;
             footer.gameObject.SetActive(false);
             done.SetActive(true);
+            // The pick punches in place, on the click; nothing flies.
+            if (isActiveAndEnabled) StartCoroutine(UIJuice.Punch(pop, 1.06f));
         }
 
         /// <summary>Punches, then shrinks and fades out. The root keeps its layout slot, so the picked card never moves.</summary>

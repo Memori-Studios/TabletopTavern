@@ -61,7 +61,7 @@ namespace TJ.MainMenu
 
             ApplyRaceTint();
 
-            rowButton.onClick.RemoveAllListeners();
+            rowButton.ClearClickListeners();
             rowButton.onClick.AddListener(() => onPicked?.Invoke(spellData));
             rowButton.interactable = isUnlocked;
         }

@@ -102,7 +102,7 @@ namespace TJ.MainMenu
             heroFactionPip.color = raceColour;
             heroFactionText.text = T(hero.Race.ToString());
             heroFactionText.color = raceColour;
-            heroRegionText.text = "· " + T(hero.Race + "MapRegion");
+            heroRegionText.text = T(hero.Race + "MapRegion");
             loreText.text = LocalizationManager.Instance.GetLoreString(hero.HeroPrefabName) ?? string.Empty;
             // Each hero's story starts at the top, not where the previous one was scrolled to.
             loreScroll.StopMovement();
@@ -153,7 +153,7 @@ namespace TJ.MainMenu
 
         private string TreasuryText(int total)
         {
-            string label = $"<color={ColorData.Secondary}><size=75%><uppercase>{T("Treasury")}</uppercase></size></color>  ";
+            string label = $"<color={ColorData.Secondary}><size=75%>{T("Treasury")}</size></color>  ";
             string amount = $"<b><color={ColorData.Gold}><size=125%>{total}</size></color></b> <sprite name=GoldSprite>";
             string breakdown = shownRenown > 0
                 ? $"\n<color={ColorData.Secondary}><size=80%>{string.Format(T("heroTreasuryBreakdown"), shownBase, $"<color={ColorData.Green}>+{shownRenown}</color>")}</size></color>"

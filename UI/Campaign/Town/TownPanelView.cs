@@ -1,5 +1,6 @@
 using System.Collections;
 using Memori.Tooltip;
+using Memori.UI;
 using TMPro;
 using UnityEngine;
 using UnityEngine.UI;
@@ -19,23 +20,10 @@ namespace TJ.Town
         [SerializeField] private Image factionBand;
         // The project renders in linear colour, so this reads about twice as strong as its value on screen.
         [SerializeField, Range(0f, 1f)] private float factionBandAlpha = 0.12f;
-        [SerializeField] private Image[] sizeFills;
-        [SerializeField] private Image[] sizeBorders;
-        [SerializeField] private Image[] sizeGlows;
-        [SerializeField] private TMP_Text[] sizeLabels;
-        [SerializeField] private Image[] sizeLinks;
-        [SerializeField] private Color sizeReached = new(0.914f, 0.753f, 0.416f, 1f);
-        [SerializeField] private Color sizeReachedBorder = new(0.69f, 0.541f, 0.243f, 1f);
-        [SerializeField] private Color sizeEmpty = new(0.086f, 0.125f, 0.137f, 1f);
-        [SerializeField] private Color sizeEmptyBorder = new(0.337f, 0.376f, 0.373f, 1f);
-        [SerializeField] private Color sizeLabelCurrent = new(0.914f, 0.753f, 0.416f, 1f);
-        [SerializeField] private Color sizeLabelReached = new(0.706f, 0.667f, 0.58f, 1f);
-        [SerializeField] private Color sizeLabelEmpty = new(0.424f, 0.467f, 0.482f, 1f);
         [SerializeField] private GameObject townInfoButton;
         [SerializeField] private MemoriTooltipTrigger townInfoTooltip;
-        [SerializeField] private GameObject enteredPill;
-        [SerializeField] private GameObject sackedPill;
-        [SerializeField] private GameObject orMark;
+        [SerializeField] private GameObject enteredMark;
+        [SerializeField] private GameObject sackedMark;
         #endregion
 
         #region Enter Town
@@ -57,6 +45,7 @@ namespace TJ.Town
 
         #region Fight Garrison
         [SerializeField] private CanvasGroup fightColumn;
+        // Shown on the sacked road only, where it carries the garrison result.
         [SerializeField] private TMP_Text fightSubtitle;
         [SerializeField] private TMP_Text battlefieldValue;
         [SerializeField] private Image weatherIcon;
@@ -65,7 +54,6 @@ namespace TJ.Town
         [SerializeField] private Sprite[] weatherIcons;
         [SerializeField] private TMP_Text bountyValue;
         [SerializeField] private GameObject garrisonBlock;
-        [SerializeField] private TMP_Text garrisonCount;
         [SerializeField] private LayoutElement garrisonTray;
         [SerializeField] private RectTransform garrisonGrid;
         [SerializeField] private GridLayoutGroup garrisonGridLayout;
@@ -100,23 +88,12 @@ namespace TJ.Town
         public RectTransform GarrisonGrid => garrisonGrid;
 
         #region Header
+        // The subtitle already names the size; the size argument is unused until TownPanel stops passing it.
         public void SetHeader(string name, string subtitle, Color faction, TownSize size)
         {
             townName.text = name;
             townSubtitle.text = subtitle;
             factionBand.color = new Color(faction.r, faction.g, faction.b, factionBandAlpha);
-
-            int current = (int)size;
-            for (int i = 0; i < sizeFills.Length; i++)
-            {
-                bool reached = i <= current;
-                sizeFills[i].color = reached ? sizeReached : sizeEmpty;
-                sizeBorders[i].color = reached ? sizeReachedBorder : sizeEmptyBorder;
-                sizeGlows[i].enabled = i == current;
-                sizeLabels[i].color = i == current ? sizeLabelCurrent : reached ? sizeLabelReached : sizeLabelEmpty;
-            }
-            for (int i = 0; i < sizeLinks.Length; i++)
-                sizeLinks[i].color = i < current ? sizeReachedBorder : sizeEmptyBorder;
         }
 
         public void SetTownInfo(TooltipContent content) => townInfoTooltip.SetUpToolTip(content);
@@ -181,9 +158,8 @@ namespace TJ.Town
         public void SetPrediction(string text) => fightPrediction.text = text;
 
         // One row up to garrisonSingleRowMax squads, two above that. The grid is scaled, so the tray height is set here.
-        public void SetGarrisonCount(int count, string countText)
+        public void SetGarrisonCount(int count)
         {
-            garrisonCount.text = countText;
             bool oneRow = count <= garrisonSingleRowMax;
             int columns = oneRow ? Mathf.Max(count, 1) : Mathf.CeilToInt(count / 2f);
             int rows = oneRow ? 1 : 2;
@@ -213,9 +189,8 @@ namespace TJ.Town
             bool sacked = road == Road.Sacked;
 
             townInfoButton.SetActive(undecided);
-            enteredPill.SetActive(entered);
-            sackedPill.SetActive(sacked);
-            orMark.SetActive(undecided);
+            enteredMark.SetActive(entered);
+            sackedMark.SetActive(sacked);
 
             enterButton.gameObject.SetActive(undecided);
             enterNotTaken.SetActive(sacked);
@@ -223,6 +198,7 @@ namespace TJ.Town
 
             fightButton.gameObject.SetActive(undecided);
             fightNotTaken.SetActive(entered);
+            fightSubtitle.gameObject.SetActive(sacked);
             garrisonBlock.SetActive(!sacked);
             fightLines.SetActive(!sacked);
             spoilsBlock.SetActive(sacked);
@@ -255,7 +231,7 @@ namespace TJ.Town
             float fightStart = fightColumn.alpha;
             for (float t = 0f; t < roadFadeSeconds; t += Time.unscaledDeltaTime)
             {
-                float k = t / roadFadeSeconds;
+                float k = UIJuice.EaseOutCubic(t / roadFadeSeconds);
                 enterColumn.alpha = Mathf.Lerp(enterStart, enterTarget, k);
                 fightColumn.alpha = Mathf.Lerp(fightStart, fightTarget, k);
                 yield return null;
@@ -263,6 +239,25 @@ namespace TJ.Town
             enterColumn.alpha = enterTarget;
             fightColumn.alpha = fightTarget;
             roadFade = null;
+        }
+        #endregion
+
+        #region Moments
+        // Entering: the Entered mark punches and the recruit row deals in.
+        public void PlayEntered()
+        {
+            if (!isActiveAndEnabled) return;
+            StartCoroutine(UIJuice.Punch(enteredMark.transform, 1.08f));
+            StartCoroutine(UIJuice.Reveal(new[] { (RectTransform)recruitRow.transform }, new[] { 0.1f }, 0.3f));
+        }
+
+        // Sacking: the Sacked mark punches and the three spoils deal in one after another.
+        public void PlaySacked()
+        {
+            if (!isActiveAndEnabled) return;
+            StartCoroutine(UIJuice.Punch(sackedMark.transform, 1.08f));
+            var rows = new[] { (RectTransform)goldRow.transform, (RectTransform)gearRow.transform, (RectTransform)conscriptRow.transform };
+            StartCoroutine(UIJuice.Reveal(rows, new[] { 0.1f, 0.2f, 0.3f }, 0.3f));
         }
         #endregion
     }

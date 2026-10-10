@@ -1,4 +1,5 @@
 using System;
+using Memori.UI;
 using System.Collections;
 using TMPro;
 using UnityEngine;
@@ -90,7 +91,7 @@ namespace TJ.Spells
 
             spellIcon.sprite = _spellData.SpellSprite;
 
-            selectButton.onClick.RemoveAllListeners();
+            selectButton.ClearClickListeners();
             selectButton.onClick.AddListener(OnClicked);
 
             SetState(SpellBrowseState.Available);

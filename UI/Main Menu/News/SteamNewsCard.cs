@@ -3,6 +3,7 @@ using System.Collections;
 using System.Globalization;
 using Memori.Audio;
 using Memori.Localization;
+using Memori.Scenes;
 using Memori.Steamworks;
 using Memori.UI;
 using TMPro;
@@ -84,12 +85,28 @@ namespace TJ.MainMenu
         }
 
         #region Reveal
+        // The menu column's door reading (MainMenu.SceneDoorDealAt), so the card arrives with it.
+        private const float DoorOpenAt = 0.4f;
+        private const float DoorWaitLimit = 1.5f;
+
         // Waits for the menu panel to be visible, so the card's own rise is seen rather than played behind a fade.
         private IEnumerator Reveal()
         {
             CanvasGroup panel = transform.parent != null ? transform.parent.GetComponentInParent<CanvasGroup>() : null;
             while (panel != null && panel.alpha < 0.99f)
                 yield return null;
+
+            // The menu is set up under the closed door, so the rise waits for the door to open.
+            SceneHandler handler = SceneHandler.InstanceIfExists;
+            while (handler != null && !handler.SceneSetUpComplete)
+                yield return null;
+            yield return null;
+            float waited = 0f;
+            while (handler != null && handler.DoorOpenProgress < DoorOpenAt && waited < DoorWaitLimit)
+            {
+                waited += Time.unscaledDeltaTime;
+                yield return null;
+            }
 
             SetShown(true);
             yield return UIJuice.Open(group, pop);

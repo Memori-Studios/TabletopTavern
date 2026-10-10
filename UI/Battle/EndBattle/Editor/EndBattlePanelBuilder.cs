@@ -24,7 +24,7 @@ namespace TJ.EndBattle.EditorTools
         public const string PartFolder = "Assets/Data/Prefabs/UI/Battle/End Battle";
         public const string PanelPath = PartFolder + "/End Battle Panel UI.prefab";
         const string BadgePath = PartFolder + "/End Battle Squad Badge.prefab";
-        const string StatCellPath = "Assets/Data/Prefabs/UI/Map/Town/Town Stat Cell.prefab";
+        const string StatPlaquePath = "Assets/Data/Prefabs/UI/Reuseable/Ornaments/Stat Plaque.prefab";
         const string ScenePath = "Assets/Scenes/TavernBattle.unity";
         const string OldPanelName = "End Battle Panel";
         const string ButtonFolder = "Assets/Data/Prefabs/UI/Reuseable/Buttons";
@@ -53,12 +53,10 @@ namespace TJ.EndBattle.EditorTools
         const float TabLift = 4f;
 
         #region Style
-        static readonly Color Brass = Hex("B08A3E");
         static readonly Color Well = Hex("162023");
         static readonly Color Gold = Hex("E9C06A");
         static readonly Color Cream = Hex("ECE6D8");
         static readonly Color Sub = Hex("B4AA94");
-        static readonly Color Cap = Hex("8C9AA2");
         static readonly Color Blue = Hex("9ED8FF");
         static readonly Color DefeatLine = Hex("E8B0A8");
         static readonly Color LossFill = Hex("4A1F22");
@@ -68,9 +66,9 @@ namespace TJ.EndBattle.EditorTools
         #endregion
 
         static TMP_FontAsset displayDrop, display;
-        static Sprite mount, solid, squareSliced, edgeFade;
-        static Sprite swordsIcon, skullIcon, scrollIcon;
-        static GameObject standardButton, primaryButton, backButton, basicBackground, statCellPart;
+        static Sprite mount, solid, frameEdge, bandGradient;
+        static Sprite swordsIcon, skullIcon, heartIcon, scrollIcon;
+        static GameObject standardButton, primaryButton, backButton, basicBackground, statPlaque, haloFlare;
 
         static void LoadAssets()
         {
@@ -82,16 +80,18 @@ namespace TJ.EndBattle.EditorTools
             sheet.TryGetValue("TooltipMount", out mount);
             sheet.TryGetValue("TooltipSolid", out solid);
             if (mount == null || solid == null) Debug.LogError("EndBattlePanelBuilder: tooltip sheet sprites missing.");
-            squareSliced = Load<Sprite>("Assets/Art/Icons/UI/SquareSliced.png");
-            edgeFade = Load<Sprite>("Assets/ImportedPackages/ModernUIPack/Textures/Shadow/Vertical Shadow.png");
+            frameEdge = Load<Sprite>("Assets/ImportedPackages/InterfaceFantasyWarriorHUD/Sprites/HUD/SPR_HUD_FantasyWarrior_Frame_Box_Small01.png");
+            bandGradient = Load<Sprite>(Hud + "HUD/SPR_HUD_FantasyWarrior_Gradient_Vertical_Smooth01.png");
             swordsIcon = Load<Sprite>(Hud + "Icons_Status/ICON_FantasyWarrior_Status_Attack02_Clean.png");
             skullIcon = Load<Sprite>(Hud + "Icons_Map/ICON_FantasyWarrior_Map_Skull01_Clean.png");
+            heartIcon = Load<Sprite>("Assets/Art/Icons/Stats/Health.png");
             scrollIcon = Load<Sprite>("Assets/Art/Icons/Achievements/Baked/Scroll.png");
             standardButton = Load<GameObject>(ButtonFolder + "/Button - Standard.prefab");
             primaryButton = Load<GameObject>(ButtonFolder + "/Button - Primary.prefab");
             backButton = Load<GameObject>(ButtonFolder + "/Button - Back.prefab");
             basicBackground = Load<GameObject>(BasicBackgroundPath);
-            statCellPart = Load<GameObject>(StatCellPath);
+            statPlaque = Load<GameObject>(StatPlaquePath);
+            haloFlare = Load<GameObject>("Assets/Data/Prefabs/UI/Reuseable/Ornaments/Halo Flare.prefab");
         }
 
         static T Load<T>(string path) where T : Object
@@ -443,8 +443,9 @@ namespace TJ.EndBattle.EditorTools
             EndBattleSquadBadge badge = go.AddComponent<EndBattleSquadBadge>();
             var so = new SerializedObject(badge);
 
-            Image frame = Img(Stretch(Rect("Most Slain Frame", root), -4f, -4f, -4f, -4f), squareSliced, Gold, Image.Type.Sliced);
+            Image frame = Img(Stretch(Rect("Most Slain Frame", root), -4f, -4f, -4f, -4f), frameEdge, Gold, Image.Type.Sliced);
             frame.fillCenter = false;
+            frame.pixelsPerUnitMultiplier = 4f;
             frame.gameObject.SetActive(false);
             Ref(so, "mostSlainFrame", frame.gameObject);
 
@@ -467,8 +468,7 @@ namespace TJ.EndBattle.EditorTools
             Ref(so, "lostTab", lost.gameObject);
             Ref(so, "lostText", lostText);
 
-            TMP_Text caption = CapLabel(root, "Most Slain Caption");
-            caption.color = Gold;
+            TMP_Text caption = Text("Most Slain Caption", root, displayDrop, 14f, Gold, "Most slain");
             caption.alignment = TextAlignmentOptions.Center;
             RectTransform captionRect = caption.rectTransform;
             captionRect.anchorMin = captionRect.anchorMax = new Vector2(0.5f, 1f);
@@ -491,8 +491,9 @@ namespace TJ.EndBattle.EditorTools
             tab.sizeDelta = new Vector2(TabWidth, TabHeight);
             tab.anchoredPosition = new Vector2(0f, lift);
             Img(tab, solid, fill);
-            edge = Img(Stretch(Rect("Edge", tab)), squareSliced, edgeColour, Image.Type.Sliced);
+            edge = Img(Stretch(Rect("Edge", tab)), frameEdge, edgeColour, Image.Type.Sliced);
             edge.fillCenter = false;
+            edge.pixelsPerUnitMultiplier = 4f;
             Ignore(edge.gameObject);
             return tab;
         }
@@ -537,8 +538,8 @@ namespace TJ.EndBattle.EditorTools
                 if (textureImage != null) textureImage.pixelsPerUnitMultiplier = TexturePixelsPerUnit;
             }
 
-            // A wash inside the background, under its frame and corner ornaments, from the top edge to the header rule.
-            Image band = Img(Rect("Band", background.transform), edgeFade, A(Gold, BandAlpha));
+            // A wash inside the background, under its frame and corner ornaments, falling from the top edge to the header's foot.
+            Image band = Img(Rect("Band", background.transform), bandGradient, A(Gold, BandAlpha));
             RectTransform bandRect = band.rectTransform;
             bandRect.anchorMin = new Vector2(0f, 1f);
             bandRect.anchorMax = Vector2.one;
@@ -564,31 +565,35 @@ namespace TJ.EndBattle.EditorTools
             RectTransform header = Rect("Header", root);
             Fixed(header.gameObject, -1f, HeaderHeight);
             HLayout(header, 16f, TextAnchor.MiddleLeft, new RectOffset(22, 24, 0, 0));
-            Image rule = Img(Rect("Band Rule", header), solid, A(Brass, 0.45f));
-            Anchor(rule.rectTransform, Vector2.zero, new Vector2(1f, 0f), Vector2.zero, new Vector2(0f, 1f));
-            Ignore(rule.gameObject);
 
             RectTransform mountCell = Mount(header, "Mount", 64f, swordsIcon, 30f);
             Ref(so, "headerIcon", Child<Image>(mountCell, "Icon"));
+            // A round glow under the crest's diamond, so a victory blooms behind it (RunSetupBuilder.AddHalo).
+            GameObject halo = Instance(haloFlare, mountCell, "Halo Flare");
+            halo.transform.SetAsFirstSibling();
+            RectTransform haloRect = (RectTransform)halo.transform;
+            haloRect.anchorMin = haloRect.anchorMax = new Vector2(0.5f, 0.5f);
+            haloRect.anchoredPosition = Vector2.zero;
+            haloRect.sizeDelta = new Vector2(76f, 76f);
+            Ignore(halo);
+            // By name: this assembly does not reference Memori.UI.
+            Ref(so, "victoryHalo", halo.GetComponent("UIFlare"));
             RectTransform names = Rect("Names", header);
             VLayout(names, 2f, new RectOffset());
             Flexible(names.gameObject, 1f).preferredWidth = 0f;
             TMP_Text title = Text("Title", names, displayDrop, 36f, Gold, "Victory");
             Unlocalize(title, "Victory");
             Shrink(title, 24f);
-            TMP_Text subtitle = Text("Subtitle", names, display, 17f, Sub, "Enemy Host Defeated");
-            Unlocalize(subtitle, "Enemy Host Defeated");
-            Shrink(subtitle, 12f);
             Ref(so, "title", title);
-            Ref(so, "subtitle", subtitle);
 
             RectTransform context = Rect("Context", header);
             VerticalLayoutGroup contextLayout = VLayout(context, 4f, new RectOffset());
             contextLayout.childAlignment = TextAnchor.MiddleRight;
             Fixed(context.gameObject, 260f, -1f);
-            TMP_Text caption = CapLabel(context, "Caption");
+            TMP_Text caption = Text("Caption", context, display, 15f, Sub, "Act III");
             caption.alignment = TextAlignmentOptions.MidlineRight;
             Unlocalize(caption, "Act III");
+            Shrink(caption, 12f);
             TMP_Text value = Text("Value", context, displayDrop, 17f, Cream, "Taelindor Forest");
             value.alignment = TextAlignmentOptions.MidlineRight;
             Unlocalize(value, "Taelindor Forest");
@@ -604,11 +609,13 @@ namespace TJ.EndBattle.EditorTools
 
             RectTransform strip = Rect("Strip", body);
             Fixed(strip.gameObject, -1f, 62f);
-            StripRules(strip);
-            HorizontalLayoutGroup row = HLayout(strip, 0f, TextAnchor.MiddleLeft, new RectOffset());
-            row.childForceExpandHeight = true;
-            Ref(so, "slainValue", StatCell(strip, "Slain", "engagementCellSlain", false));
-            Ref(so, "lossesValue", StatCell(strip, "Losses", "engagementCellLosses", true));
+            HLayout(strip, 10f, TextAnchor.MiddleLeft, new RectOffset());
+            // Load has already logged a missing plaque with its path; the strip then holds only Detailed stats.
+            if (statPlaque != null)
+            {
+                Ref(so, "slainValue", StatPlaque(strip, "Slain", "engagementCellSlain", skullIcon));
+                Ref(so, "lossesValue", StatPlaque(strip, "Losses", "engagementCellLosses", heartIcon));
+            }
 
             RectTransform slot = Rect("Detailed Stats Slot", strip);
             HLayout(slot, 0f, TextAnchor.MiddleCenter, new RectOffset(12, 0, 0, 0));
@@ -638,8 +645,9 @@ namespace TJ.EndBattle.EditorTools
                 iconRect.anchoredPosition = new Vector2(26f, 0f);
             }
             // A blue ring round the button while its panel is open.
-            Image ring = Img(Stretch(Rect("Open Ring", stats.transform), -3f, -3f, -3f, -3f), squareSliced, Blue, Image.Type.Sliced);
+            Image ring = Img(Stretch(Rect("Open Ring", stats.transform), -3f, -3f, -3f, -3f), frameEdge, Blue, Image.Type.Sliced);
             ring.fillCenter = false;
+            ring.pixelsPerUnitMultiplier = 4f;
             Ignore(ring.gameObject);
             ring.gameObject.SetActive(false);
             Ref(so, "detailedStatsButton", stats.GetComponent<Button>());
@@ -671,15 +679,15 @@ namespace TJ.EndBattle.EditorTools
             Ref(so, "rematchButton", rematch.GetComponent<Button>());
         }
 
-        // One Town Stat Cell with its caption; the value is filled at runtime.
-        static TMP_Text StatCell(RectTransform strip, string name, string captionKey, bool divider)
+        // One shared Stat Plaque; its art, fonts and sizes stay the prefab's. The value is filled at runtime.
+        static TMP_Text StatPlaque(RectTransform strip, string name, string labelKey, Sprite icon)
         {
-            GameObject cell = Instance(statCellPart, strip, name);
-            Flexible(cell, 1f).preferredWidth = 0f;
-            cell.transform.Find("Divider").gameObject.SetActive(divider);
-            Localize(Child<TMP_Text>(cell.transform, "Label"), captionKey);
-            Child<Image>(cell.transform, "Value Row/Icon").gameObject.SetActive(false);
-            TMP_Text value = Child<TMP_Text>(cell.transform, "Value Row/Value");
+            GameObject plaque = Instance(statPlaque, strip, name);
+            Image image = Child<Image>(plaque.transform, "Icon");
+            image.sprite = icon;
+            image.color = Sub;
+            Localize(Child<TMP_Text>(plaque.transform, "Label"), labelKey);
+            TMP_Text value = Child<TMP_Text>(plaque.transform, "Value");
             Unlocalize(value, "0");
             value.richText = true;
             return value;
@@ -687,24 +695,6 @@ namespace TJ.EndBattle.EditorTools
         #endregion
 
         #region Widgets
-        static void StripRules(RectTransform strip)
-        {
-            Image top = Img(Rect("Top", strip), solid, A(Brass, 0.4f));
-            Anchor(top.rectTransform, new Vector2(0f, 1f), Vector2.one, new Vector2(0f, -1f), Vector2.zero);
-            Ignore(top.gameObject);
-            Image bottom = Img(Rect("Bottom", strip), solid, A(Brass, 0.4f));
-            Anchor(bottom.rectTransform, Vector2.zero, new Vector2(1f, 0f), Vector2.zero, new Vector2(0f, 1f));
-            Ignore(bottom.gameObject);
-        }
-
-        static TMP_Text CapLabel(RectTransform parent, string name)
-        {
-            TMP_Text label = Text(name, parent, display, 12f, Cap, name);
-            label.fontStyle = FontStyles.UpperCase | FontStyles.Bold;
-            label.characterSpacing = 10f;
-            return label;
-        }
-
         // Text shrinks to fit its line in every locale.
         static void Shrink(TMP_Text label, float min)
         {
@@ -769,14 +759,6 @@ namespace TJ.EndBattle.EditorTools
             rect.offsetMin = new Vector2(left, bottom);
             rect.offsetMax = new Vector2(-right, -top);
             return rect;
-        }
-
-        static void Anchor(RectTransform rect, Vector2 min, Vector2 max, Vector2 offsetMin, Vector2 offsetMax)
-        {
-            rect.anchorMin = min;
-            rect.anchorMax = max;
-            rect.offsetMin = offsetMin;
-            rect.offsetMax = offsetMax;
         }
 
         static void Centre(RectTransform rect, float width, float height)

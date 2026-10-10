@@ -716,8 +716,21 @@ namespace TJ.Map
 
             TutorialManager.Instance.CompleteStepCheck(TutorialStepEnum.SelectNode);
 
+            PlayNodePicked(selectedNode);
             StartCoroutine(MoveTokenToNode(selectedNode));
         }
+        #region Node pick
+        // The commit fires on the click: the picked node punches and the layer's other choices stop pulsing.
+        private void PlayNodePicked(MapNode _node)
+        {
+            _node.PlayPicked();
+            if (activeChapterIndex + 1 < mapLayers.Count)
+            {
+                foreach (var layerNode in mapLayers[activeChapterIndex + 1].LayerNodes)
+                    if (layerNode.mapNodeGameObject != _node) layerNode.mapNodeGameObject.DeselectNodeLayer();
+            }
+        }
+        #endregion
         public IEnumerator MoveTokenToNode(MapNode _node)
         {
             //move player token to node position at a constant speed

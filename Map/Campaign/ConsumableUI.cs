@@ -79,11 +79,12 @@ namespace TJ.Map
             string sellLocalizedText = LocalizationManager.Instance.GetText("Sell");
             sellText.text = $"{sellLocalizedText}     {sellValue} <sprite name=GoldSprite>";
 
+            // Not ClearClickListeners: OnConsumableUISelected plays the click itself.
             Button.onClick.RemoveAllListeners();
             Button.onClick.AddListener(OnConsumableUISelected);
-            sellButton.onClick.RemoveAllListeners();
+            sellButton.ClearClickListeners();
             sellButton.onClick.AddListener(SellConsumable);
-            drinkButton.onClick.RemoveAllListeners();
+            drinkButton.ClearClickListeners();
             drinkButton.onClick.AddListener(AttemptToDrink);
         }
         public void UnloadConsumableUI()
@@ -218,7 +219,7 @@ namespace TJ.Map
                 return;
             }
 
-            drinkButton.onClick.RemoveAllListeners();
+            drinkButton.ClearClickListeners();
             IAudioRequester.Instance.PlaySFX(SFXData.Drink);
             TooltipManager.Instance.HideTooltip();
 
@@ -252,7 +253,7 @@ namespace TJ.Map
         public void SellConsumable()
         {
             TooltipManager.Instance.HideTooltip();
-            sellButton.onClick.RemoveAllListeners();
+            sellButton.ClearClickListeners();
 
             if (consumable.ConsumableEnum == ConsumableEnum.Alchemist)
             {

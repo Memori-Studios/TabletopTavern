@@ -1,4 +1,5 @@
 using TJ.Map;
+using Memori.UI;
 using UnityEngine;
 using Memori.Utilities;
 using System.Collections.Generic;
@@ -62,7 +63,7 @@ namespace TJ.Shop
         private void Awake()
         {
             shopCanvasGroup = GetComponent<MemoriCanvasGroup>();
-            closeButton.onClick.RemoveAllListeners();
+            closeButton.ClearClickListeners();
             closeButton.onClick.AddListener(CompleteShopInteraction);
             outlines = GetComponentsInChildren<Outline>();
         }
@@ -125,7 +126,7 @@ namespace TJ.Shop
                     pack1Discount  = _pack1CostMetaprogressionModel.NodeValue;
                 }
                 cardPack1.gameObject.SetActive(true);
-                cardPack1.SetUp(CardPackDataInfo.CardPack1, this, pack1Discount);
+                cardPack1.SetUp(CardPackDataInfo.CardPack1, this, pack1Discount, false);
                 await Task.Delay(100);
 
                 int pack2Discount = 0;
@@ -134,7 +135,7 @@ namespace TJ.Shop
                     pack2Discount  = _pack2CostMetaprogressionModel.NodeValue;
                 }
                 cardPack2.gameObject.SetActive(true);
-                cardPack2.SetUp(CardPackDataInfo.CardPack2, this, pack2Discount);
+                cardPack2.SetUp(CardPackDataInfo.CardPack2, this, pack2Discount, false);
                 await Task.Delay(100);
 
                 int pack3Discount = 0;
@@ -143,12 +144,12 @@ namespace TJ.Shop
                     pack3Discount  = _pack3CostMetaprogressionModel.NodeValue;
                 }
                 cardPack3.gameObject.SetActive(true);
-                cardPack3.SetUp(CardPackDataInfo.CardPack3, this, pack3Discount);
+                cardPack3.SetUp(CardPackDataInfo.CardPack3, this, pack3Discount, false);
                 await Task.Delay(100);
 
                 int pack4Discount = 0;
                 cardPack4.gameObject.SetActive(true);
-                cardPack4.SetUp(CardPackDataInfo.CardPack4, this, pack4Discount);
+                cardPack4.SetUp(CardPackDataInfo.CardPack4, this, pack4Discount, false);
                 await Task.Delay(100);
 
                 int consumableDiscount = 0;
@@ -173,7 +174,7 @@ namespace TJ.Shop
 
                     ShopConsumable consumableUI = Instantiate(consumablePrefab, i == 0 ? consumableTransform1 : consumableTransform2);
                     Consumable consumableData = ConsumableData.GetConsumable(consumable);
-                    consumableUI.SetUp(consumable, ConsumableData.ConsumableCost(consumableData.ConsumableRarity) - consumableDiscount, this);
+                    consumableUI.SetUp(consumable, ConsumableData.ConsumableCost(consumableData.ConsumableRarity) - consumableDiscount, this, i == 0);
                     shopConsumables.Add(consumableUI);
                     await Task.Delay(100);
                 }

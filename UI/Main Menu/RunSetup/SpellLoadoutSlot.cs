@@ -89,7 +89,7 @@ namespace TJ.MainMenu
             ApplyFactionColour(isEmpty);
             ApplyManaCost(isEmpty);
 
-            slotButton.onClick.RemoveAllListeners();
+            slotButton.ClearClickListeners();
             slotButton.onClick.AddListener(() => onSlotClicked?.Invoke(slotIndex));
             // The signature slot still reads as a slot but cannot be focused for swapping.
             slotButton.interactable = !IsPinned && !cachedLocked;

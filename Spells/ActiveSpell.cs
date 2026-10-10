@@ -98,6 +98,9 @@ public class ActiveSpell : MonoBehaviour
         warned = _warned;
         followsTarget = spellData.SpellTargetingType == SpellTargetingType.Squad
             && (spellData.MarksTarget || spellData.BracesTarget || spellData.GrantsBattlefieldBonus || spellData.HitsSingleUnit);
+#if FACTIONUPDATE
+        followsTarget |= spellData.SpellTargetingType == SpellTargetingType.Squad && spellData.ChainsToSquads;
+#endif
         // A mage's auto-cast always names the squad it aimed at; a ground spell stays where it landed instead of following it.
         targetSquadEntity = spellData.SpellTargetingType == SpellTargetingType.World ? Entity.Null : _targetSquadEntity;
         sourceTeam = _sourceTeam;
@@ -464,6 +467,10 @@ public class ActiveSpell : MonoBehaviour
             bool throwsPerShell = shells != null && shells.Count > 0;
             if (throwsPerShell) StartCoroutine(ShellThrows(shells, damageBufferElement));
             CreateSpellEntity(entityManager, ecb, damageBufferElement, statusSpellId, throwsPerShell ? 0f : spellData.SpellForce);
+#if FACTIONUPDATE
+            if (spellData.ChainsToSquads && followsTarget && targetSquadEntity != Entity.Null)
+                StartCoroutine(ChainStrikes(damageBufferElement));
+#endif
         }
 
         cleanUpCoroutine = StartCoroutine(CleanUpSpell(spellData.SpellDuration));
@@ -484,9 +491,77 @@ public class ActiveSpell : MonoBehaviour
             TickTimer = 0f, // first tick fires immediately, then every TickInterval seconds
             HitsSingleUnit = spellData.HitsSingleUnit,
             MonstrousPercentOfMaxHealth = spellData.ScaledMonstrousPercent(potency),
-            StatusSpellId = statusSpellId
+            StatusSpellId = statusSpellId,
+#if FACTIONUPDATE
+            HitsWholeSquad = spellData.ChainsToSquads && followsTarget,
+#endif
         });
     }
+#if FACTIONUPDATE
+    // Judgement of Zeus. SpellDuration must outlast ChainCount x ChainInterval, or CleanUpSpell destroys this mid-chain.
+    private IEnumerator ChainStrikes(DamageBufferElement firstStrike)
+    {
+        var struck = new List<Entity> { targetSquadEntity };
+        Entity from = targetSquadEntity;
+        DamageBufferElement leap = firstStrike;
+        leap.AttackStrength = Mathf.RoundToInt(firstStrike.AttackStrength * spellData.ChainFalloff);
+        for (int i = 0; i < spellData.ChainCount; i++)
+        {
+            yield return new WaitForSeconds(spellData.ChainInterval);
+            World world = World.DefaultGameObjectInjectionWorld;
+            if (world == null || !world.IsCreated) yield break;
+            EntityManager entityManager = world.EntityManager;
+            if (!entityManager.Exists(from) || !entityManager.HasComponent<SquadMovementComponent>(from)) yield break;
+            Entity next = NearestUnstruckEnemySquad(entityManager, entityManager.GetComponentData<SquadMovementComponent>(from).SquadCenter, struck);
+            if (next == Entity.Null) yield break;
+            struck.Add(next);
+            from = next;
+
+            float3 strikePoint = entityManager.GetComponentData<SquadMovementComponent>(next).SquadCenter;
+            var ecb = world.GetOrCreateSystemManaged<EndSimulationEntityCommandBufferSystem>().CreateCommandBuffer();
+            Entity spellEntity = entityManager.CreateEntity();
+            ecb.AddComponent(spellEntity, new SpellEntity {
+                Entity = spellEntity,
+                DamageBufferElement = leap,
+                SpellPosition = strikePoint,
+                SpellRadius = Radius,
+                IsOneOff = true,
+                SpellForce = spellData.SpellForce,
+                RemainingDuration = spellData.SpellDuration,
+                TargetSquadEntity = next,
+                HitsWholeSquad = true,
+            });
+            EntityQuery visualQuery = entityManager.CreateEntityQuery(ComponentType.ReadWrite<OlympianVisualRequest>());
+            if (visualQuery.TryGetSingletonBuffer(out DynamicBuffer<OlympianVisualRequest> visuals))
+                visuals.Add(new OlympianVisualRequest { Position = strikePoint, Kind = OlympianVisual.Lightning });
+            visualQuery.Dispose();
+        }
+    }
+
+    // Standing enemy squads only: broken, empty and gate squads are not worth a leap.
+    private Entity NearestUnstruckEnemySquad(EntityManager entityManager, float3 origin, List<Entity> struck)
+    {
+        EntityQuery squadQuery = entityManager.CreateEntityQuery(ComponentType.ReadOnly<SquadEntity>(), ComponentType.ReadOnly<SquadMovementComponent>());
+        Unity.Collections.NativeArray<Entity> squads = squadQuery.ToEntityArray(Unity.Collections.Allocator.Temp);
+        Entity best = Entity.Null;
+        float bestDistanceSq = spellData.ChainRange * spellData.ChainRange;
+        foreach (Entity squad in squads)
+        {
+            if (struck.Contains(squad)) continue;
+            Team team = entityManager.GetComponentData<SquadEntity>(squad).Team;
+            if (team == sourceTeam || team == Team.Neutral) continue;
+            if (entityManager.HasComponent<BrokenSquadTag>(squad) || entityManager.HasComponent<GarrisonGateSquadTag>(squad)) continue;
+            if (!entityManager.HasBuffer<EntityReferenceBufferElement>(squad) || entityManager.GetBuffer<EntityReferenceBufferElement>(squad).Length == 0) continue;
+            float distanceSq = math.distancesq(origin, entityManager.GetComponentData<SquadMovementComponent>(squad).SquadCenter);
+            if (distanceSq > bestDistanceSq) continue;
+            bestDistanceSq = distanceSq;
+            best = squad;
+        }
+        squads.Dispose();
+        squadQuery.Dispose();
+        return best;
+    }
+#endif
     // Paced like RepeatHitSound. Later shells hit the units the first one struck, even after its knockback threw them clear.
     private IEnumerator DamagePulses(DamageBufferElement pulse)
     {

@@ -38,6 +38,7 @@ public class GroupUI : MonoBehaviour, IPointerEnterHandler, IPointerExitHandler,
             lockTooltip.SetUpToolTip(LocalizationManager.Instance.GetText("LockFormation"), LocalizationManager.Instance.GetText("LockFormationDescription"));
         if (lockButton == null) return;
 
+        // Not ClearClickListeners: the listener below plays the click itself.
         lockButton.Button.onClick.RemoveAllListeners();
         lockButton.Button.onClick.AddListener(() =>
         {

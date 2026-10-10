@@ -71,6 +71,13 @@ public static class RacePassiveInfo
                 var c = RaceBonusRuleData.ApexHunters;
                 return new object[] { c.WeaponStrengthPerStack, c.MaxStacks * c.WeaponStrengthPerStack };
             }
+#if FACTIONUPDATE
+            case Race.OlympianLeague:
+            {
+                var c = RaceBonusRuleData.AnsweredPrayers;
+                return new object[] { Fmt(c.StrikeRadius), c.StrikeDamage };
+            }
+#endif
 
             default:
                 return Array.Empty<object>();

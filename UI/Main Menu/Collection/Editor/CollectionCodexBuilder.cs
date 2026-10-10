@@ -1304,6 +1304,7 @@ namespace TJ.MainMenu.EditorTools
             Stretch(bodyArea, 0f, 0f, 84f, 0f);
 
             CollectionDetailPanel detail = DetailPanel(bodyArea);
+            SquadBattleInfo unitInfo = UnitInfoPanel(bodyArea);
 
             RectTransform main = Rect("Main", bodyArea);
             Stretch(main, 0f, 472f, 0f, 0f);
@@ -1438,12 +1439,32 @@ namespace TJ.MainMenu.EditorTools
             Ref(so, "loreScroll", loreScroll);
             Ref(so, "loreText", lore);
             Ref(so, "detail", detail);
+            Ref(so, "unitInfo", unitInfo);
             Ref(so, "contentGroup", contentGroup);
             so.ApplyModifiedPropertiesWithoutUndo();
         }
         #endregion
 
         #region Detail panel
+        const string SquadBattleInfoPath = "Assets/Data/Prefabs/UI/Squad Display Cards/Squad Battle Info.prefab";
+        // The game's squad panel at 120%, centred over the detail slot's top; it stands in for the detail panel on units.
+        const float UnitInfoScale = 1.2f;
+
+        static SquadBattleInfo UnitInfoPanel(RectTransform parent)
+        {
+            GameObject prefab = AssetDatabase.LoadAssetAtPath<GameObject>(SquadBattleInfoPath);
+            if (prefab == null) { Debug.LogError("CollectionCodexBuilder: missing " + SquadBattleInfoPath); return null; }
+            var instance = (GameObject)PrefabUtility.InstantiatePrefab(prefab, parent);
+            instance.name = "Unit Info";
+            var rect = (RectTransform)instance.transform;
+            rect.anchorMin = rect.anchorMax = Vector2.one;
+            rect.pivot = new Vector2(0.5f, 1f);
+            rect.anchoredPosition = new Vector2(-220f, 0f);
+            rect.localScale = new Vector3(UnitInfoScale, UnitInfoScale, 1f);
+            instance.SetActive(false);
+            return instance.GetComponent<SquadBattleInfo>();
+        }
+
         static CollectionDetailPanel DetailPanel(RectTransform parent)
         {
             RectTransform frame = Rect("Detail", parent);

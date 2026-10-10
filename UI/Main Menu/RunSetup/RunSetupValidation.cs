@@ -128,7 +128,8 @@ namespace TJ.MainMenu
                 string joined = "";
                 for (int i = 0; i < blockers.Count; i++)
                 {
-                    joined += (i > 0 ? "   " : "") + "<color=" + ColorData.Error + ">✕</color> " + blockers[i];
+                    // Texturina has no cross glyph (it drew an empty box), so blockers are split by a middle dot.
+                    joined += (i > 0 ? "  <color=" + ColorData.Error + ">·</color>  " : "") + blockers[i];
                 }
                 blockedText.text = joined;
                 return;

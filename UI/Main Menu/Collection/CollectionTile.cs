@@ -28,6 +28,8 @@ namespace TJ.MainMenu
         [SerializeField] private Color lockedIcon = new(0f, 0f, 0f, 0.55f);
         [SerializeField] private Color lockedPortrait = new(0.07f, 0.08f, 0.08f, 1f);
         [SerializeField] private float hoverScale = 1.04f;
+        // Hover shows the gold shadow and keeps the rarity frame instead of recolouring it.
+        [SerializeField] private bool hoverGlowOnly;
         [SerializeField, Range(0f, 1f)] private float restFrameAlpha = 0.55f;
         [SerializeField, Range(0f, 1f)] private float washAlpha = 0.07f;
         [SerializeField] private Color dimmedIcon = new(0.6f, 0.6f, 0.6f, 0.7f);
@@ -93,11 +95,17 @@ namespace TJ.MainMenu
             Refresh();
         }
 
+        // A click keeps the entry: the icon punches, because the tile's own scale belongs to the hover.
+        public void PlayPicked()
+        {
+            if (isActiveAndEnabled) StartCoroutine(Memori.UI.UIJuice.Punch(icon.transform, 1.12f));
+        }
+
         private void Refresh()
         {
             Color rest = _dimmed && Found ? new Color(_restFrame.r, _restFrame.g, _restFrame.b, dimmedFrameAlpha) : _restFrame;
-            frame.color = _selected ? selectedFrame : _hovered ? hoverFrame : rest;
-            selectedGlow.SetActive(_selected);
+            frame.color = _selected ? selectedFrame : _hovered && !hoverGlowOnly ? hoverFrame : rest;
+            selectedGlow.SetActive(_selected || (_hovered && hoverGlowOnly));
             transform.localScale = _hovered && !_selected ? Vector3.one * hoverScale : Vector3.one;
         }
 

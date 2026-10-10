@@ -1,4 +1,6 @@
+using System.Collections;
 using System.Threading.Tasks;
+using Memori.UI;
 using Memori.Audio;
 using Memori.Localization;
 using Memori.SaveData;
@@ -66,7 +68,7 @@ namespace TJ
                 return await AutoRoll();
 
             StartBattleRequested = false;
-            _panelGroup.CGEnable();
+            OpenPanel();
             if (_dieObject   != null) _dieObject.SetActive(true);
             _dice.StartPrespin();
             if (_winText     != null) _winText.color     = _dimColor;
@@ -85,11 +87,11 @@ namespace TJ
             if (_useFateshineElixirButton != null)
                 _useFateshineElixirButton.onClick.AddListener(() => { useElixir = true; rollTCS.TrySetResult(true); });
             await rollTCS.Task;
-            _rollButton.onClick.RemoveAllListeners();
+            _rollButton.ClearClickListeners();
             _rollButton.gameObject.SetActive(false);
             if (_useFateshineElixirButton != null)
             {
-                _useFateshineElixirButton.onClick.RemoveAllListeners();
+                _useFateshineElixirButton.ClearClickListeners();
                 _useFateshineElixirButton.gameObject.SetActive(false);
             }
             _dice.StopPrespin();
@@ -146,11 +148,11 @@ namespace TJ
                 _rerollButton.onClick.AddListener(() => choiceTCS.TrySetResult(false));
 #endif
                 reroll = !await choiceTCS.Task;
-                _continueButton.onClick.RemoveAllListeners();
+                _continueButton.ClearClickListeners();
                 _continueButton.gameObject.SetActive(false);
                 if (_useRewindButton != null)
                 {
-                    _useRewindButton.onClick.RemoveAllListeners();
+                    _useRewindButton.ClearClickListeners();
                     _useRewindButton.gameObject.SetActive(false);
                 }
 
@@ -163,8 +165,7 @@ namespace TJ
                 BattleManager.Instance.SetGamePhase(GamePhase.Deployment);
                 BattleManager.Instance.UIManager.ShowStartBattleButton();
             }
-            _panelGroup.FadeOutAsync();
-            if (_dieObject != null) _dieObject.SetActive(false);
+            ClosePanel();
             return result;
         }
 
@@ -179,17 +180,68 @@ namespace TJ
         private void ShowResult(int result)
         {
             Debug.Log($"[BattleDiceRollPanel] Player rolled a {result}.");
-            bool playerSecond = result >= 4;
-            if (_winText     != null) _winText.color     = playerSecond ? _winColor  : _dimColor;
-            if (_winSubText  != null) _winSubText.color  = playerSecond ? _winColor  : _dimColor;
-            if (_loseText    != null) _loseText.color    = playerSecond ? _dimColor  : _loseColor;
-            if (_loseSubText != null) _loseSubText.color = playerSecond ? _dimColor  : _loseColor;
+            if (_resultRoutine != null) StopCoroutine(_resultRoutine);
+            _resultRoutine = StartCoroutine(RevealResult(result >= 4));
         }
+
+        #region Juice
+        private const float ResultEaseTime = 0.2f;
+        private const float ResultPunch = 1.08f;
+        private const float DieShrinkTime = 0.18f;
+        private Coroutine _resultRoutine;
+
+        // The roll fades and rises in instead of appearing in one frame.
+        private void OpenPanel()
+        {
+            _panelGroup.CGEnable();
+            StartCoroutine(UIJuice.Open(_panelGroup.GetComponent<CanvasGroup>(), _panelGroup.transform as RectTransform));
+        }
+
+        // Leaving is quicker than arriving, and the die shrinks away rather than vanishing.
+        private void ClosePanel()
+        {
+            _panelGroup.FadeOutAsync(UIJuice.CloseTime);
+            if (_dieObject != null && _dieObject.activeInHierarchy) StartCoroutine(ShrinkDie());
+            else if (_dieObject != null) _dieObject.SetActive(false);
+        }
+
+        private IEnumerator ShrinkDie()
+        {
+            Transform die = _dieObject.transform;
+            Vector3 rest = die.localScale;
+            for (float t = 0f; t < 1f; t += Mathf.Min(Time.unscaledDeltaTime, UIJuice.MaxStep) / DieShrinkTime)
+            {
+                die.localScale = rest * (1f - t * t);
+                yield return null;
+            }
+            _dieObject.SetActive(false);
+            die.localScale = rest;
+        }
+
+        // The colours ease in and the line that came true punches as it lights.
+        private IEnumerator RevealResult(bool playerSecond)
+        {
+            TMP_Text[] lines = { _winText, _winSubText, _loseText, _loseSubText };
+            Color[] targets = { playerSecond ? _winColor : _dimColor, playerSecond ? _winColor : _dimColor,
+                                playerSecond ? _dimColor : _loseColor, playerSecond ? _dimColor : _loseColor };
+            Color[] starts = new Color[lines.Length];
+            for (int i = 0; i < lines.Length; i++) if (lines[i] != null) starts[i] = lines[i].color;
+            TMP_Text lit = playerSecond ? _winText : _loseText;
+            if (lit != null) StartCoroutine(UIJuice.Punch(lit.transform, ResultPunch));
+            for (float t = 0f; t < 1f; t += Mathf.Min(Time.unscaledDeltaTime, UIJuice.MaxStep) / ResultEaseTime)
+            {
+                for (int i = 0; i < lines.Length; i++) if (lines[i] != null) lines[i].color = Color.Lerp(starts[i], targets[i], t);
+                yield return null;
+            }
+            for (int i = 0; i < lines.Length; i++) if (lines[i] != null) lines[i].color = targets[i];
+            _resultRoutine = null;
+        }
+        #endregion
 
         private async Task<int> AutoRoll(int forcedResult = 0)
         {
             StartBattleRequested = false;
-            _panelGroup.CGEnable();
+            OpenPanel();
             if (_dieObject != null) _dieObject.SetActive(true);
             _rollButton.gameObject.SetActive(false);
             _continueButton.gameObject.SetActive(false);
@@ -217,8 +269,7 @@ namespace TJ
 
             BattleManager.Instance.SetGamePhase(GamePhase.Deployment);
             BattleManager.Instance.UIManager.ShowStartBattleButton();
-            _panelGroup.FadeOutAsync();
-            if (_dieObject != null) _dieObject.SetActive(false);
+            ClosePanel();
             return result;
         }
     }

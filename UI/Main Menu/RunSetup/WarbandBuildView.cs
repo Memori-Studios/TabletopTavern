@@ -14,6 +14,10 @@ namespace TJ.MainMenu
         private static readonly string[] Blocks = { "Build Panel/Army", "Build Panel/Gear And Spells", "Build Panel/Difficulty" };
         private Coroutine arrival;
 
+        // Shared with the recruit list, so both columns deal in their three blocks at the same pace.
+        public const float ArrivalStep = 0.1f;
+        public const float ArrivalTime = 0.3f;
+
         // The build blocks follow the screen in, one after another.
         public void PlayArrival()
         {
@@ -24,11 +28,11 @@ namespace TJ.MainMenu
             {
                 Transform block = transform.Find(path);
                 if (block == null) { Debug.LogError($"[WarbandBuildView] No '{path}' to reveal."); continue; }
-                delays.Add(0.05f + items.Count * 0.05f);
+                delays.Add(0.05f + items.Count * ArrivalStep);
                 items.Add((RectTransform)block);
             }
             if (arrival != null) StopCoroutine(arrival);
-            arrival = StartCoroutine(UIJuice.Reveal(items, delays, 0.2f));
+            arrival = StartCoroutine(UIJuice.Reveal(items, delays, ArrivalTime));
         }
 
         public void ShowRecord(int heroID)

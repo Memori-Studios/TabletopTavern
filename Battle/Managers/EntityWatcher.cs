@@ -33,6 +33,10 @@ namespace TJ
         private EntityQuery _bloodQuery;
         private BloodColors _bloodColors;
         private ClashFeedback _clashFeedback;
+#if FACTIONUPDATE
+        private EntityQuery _olympianVisualQuery;
+        private OlympianLeagueVisuals _olympianVisuals;
+#endif
         private readonly HashSet<int> _sprintingSquadIds = new();
         private readonly List<int> _sprintEnded = new();
         // Recent impact sounds as (x, z, unscaled time), so a wide front does not stack into noise.
@@ -96,6 +100,11 @@ namespace TJ
             _dustCloudQuery = _entityManager.CreateEntityQuery(ComponentType.ReadOnly<DustCloudBufferElement>());
             _battlefieldBonusAppliedQuery = _entityManager.CreateEntityQuery(ComponentType.ReadOnly<BattlefieldBonusAppliedBufferElement>());
             _mageCastRequestQuery = _entityManager.CreateEntityQuery(ComponentType.ReadOnly<MageCastRequestBufferElement>());
+#if FACTIONUPDATE
+            _olympianVisualQuery = _entityManager.CreateEntityQuery(ComponentType.ReadOnly<OlympianVisualRequest>());
+            _olympianVisuals = Resources.Load<OlympianLeagueVisuals>("OlympianLeagueVisuals");
+            if (_olympianVisuals == null) Debug.LogError("EntityWatcher: Resources/OlympianLeagueVisuals is missing; blessings fire with no effect or sound.");
+#endif
             _archerRangeUpdatedQuery = _entityManager.CreateEntityQuery(ComponentType.ReadOnly<ArcherRangeUpdated>());
             _queryOnFormationsCollide = _entityManager.CreateEntityQuery(ComponentType.ReadOnly<OnFormationsCollide>());
             _queryOnExplosionShake = _entityManager.CreateEntityQuery(ComponentType.ReadOnly<OnExplosionShake>());
@@ -141,6 +150,9 @@ namespace TJ
             _querySquadCommandChanged.Dispose();
             _querySetUpGarrisonGateSquad.Dispose();
             _queryBattlePhase.Dispose();
+#if FACTIONUPDATE
+            _olympianVisualQuery.Dispose();
+#endif
             BattleManager.Instance.OnGateDestroyed -= OnGateDestroyed;
             _squadSFXManagers.Clear();
             _sprintingSquadIds.Clear();
@@ -767,6 +779,19 @@ namespace TJ
             }
             #endregion
 
+#if FACTIONUPDATE
+            #region Olympian League blessings
+            _entityManager.CompleteAllTrackedJobs();
+            if (!_olympianVisualQuery.IsEmptyIgnoreFilter)
+            {
+                DynamicBuffer<OlympianVisualRequest> olympianBuffer = _olympianVisualQuery.GetSingletonBuffer<OlympianVisualRequest>();
+                for (int i = 0; i < olympianBuffer.Length; i++)
+                    PlayOlympianMoment(olympianBuffer[i]);
+                olympianBuffer.Clear();
+            }
+            #endregion
+#endif
+
             #region ArcherRangeUpdated
             _entityManager.CompleteAllTrackedJobs();
             NativeArray<Entity> ArcherRangeUpdatedEntities = _archerRangeUpdatedQuery.ToEntityArray(Allocator.Temp);
@@ -1112,5 +1137,24 @@ namespace TJ
             ArtilleryCrewPrefabGO artilleryCrewGO = Instantiate(prefab).GetComponent<ArtilleryCrewPrefabGO>();
             artilleryCrewGO.SetArtilleryEntity(grandparentEntity, parentEntity, squadId, this);
         }
+
+#if FACTIONUPDATE
+        private void PlayOlympianMoment(OlympianVisualRequest request)
+        {
+            if (_olympianVisuals == null || !_olympianVisuals.TryGet(request.Kind, out OlympianLeagueVisuals.Moment moment)) return;
+            Vector3 position = new Vector3(request.Position.x, request.Position.y, request.Position.z);
+            if (moment.prefab != null)
+            {
+                GameObject effect = Instantiate(moment.prefab, position, Quaternion.identity);
+                // Effect-pack prefabs carry raw Play On Awake sources that bypass the volume sliders; the cue is the only sound.
+                foreach (AudioSource source in effect.GetComponentsInChildren<AudioSource>(true)) { source.Stop(); source.enabled = false; }
+                if (moment.scale > 0f) effect.transform.localScale *= moment.scale;
+                BattleManager.Instance.SquadManager.stuffToDestroy.Add(effect);
+                Destroy(effect, moment.lifetime > 0f ? moment.lifetime : 4f);
+            }
+            if (moment.cue != null) IAudioRequester.Instance.Play(moment.cue, position, ignoreDucking: true);
+            if (moment.shake > 0f) BattleManager.Instance.CameraShaker.SpellImpactShake(request.Position, moment.shake);
+        }
+#endif
     }
 }
